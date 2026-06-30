@@ -1,0 +1,23 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "strict": true,
+        "exactOptionalPropertyTypes": true, // optional
+        "skipLibCheck": true,
+        "lib": ["ESNext"],
+        "types": [
+            "./worker-configuration.d.ts",
+            "node",
+            "vite/client",
+            // "typed-htmx",
+        ],
+        "jsx": "react-jsx",
+        "jsxImportSource": "hono/jsx",
+        "paths": {
+            "@/*": ["./src/*"],
+            // "@tests/*": ["./src/tests/*"]
+        },
+    },
+}

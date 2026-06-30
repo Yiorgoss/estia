@@ -1,0 +1,41 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    "name": "estia-effect",
+    // Set this to today's date
+    "compatibility_date": "2026-05-27",
+    "compatibility_flags": ["enable_request_signal"],
+    "main": "./src/index.ts",
+    "assets": { "directory": "static" },
+    "vars": {
+        "ORIGIN": "localhost:5173",
+    },
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "estia-db",
+            "database_id": "20f662db-bd64-4ac4-b2ad-e8024d30d55f",
+            "migrations_dir": "src/db/migrations",
+        },
+    ],
+    "r2_buckets": [
+        {
+            "binding": "STORAGE",
+            "bucket_name": "estia",
+        },
+    ],
+    "env": {
+        "prod": {
+            "vars": {
+                "ENV": "prod",
+            },
+            "d1_databases": [
+                {
+                    "binding": "DB",
+                    "database_name": "estia-db-prod",
+                    "database_id": "20f662db-bd64-4ac4-b2ad-e8024d30d55f",
+                    "migrations_dir": "src/db/migrations",
+                },
+            ],
+        },
+    },
+}
