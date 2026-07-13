@@ -1,4 +1,136 @@
-// src/worker.ts
+import { Etag, FileSystem, HttpLayerRouter, HttpPlatform, Path } from "@effect/platform"
+import { D1Client } from "@effect/sql-d1"
+import { Config, ConfigProvider, Effect, Layer, String } from "effect"
+import { SpanNameMW } from "./middleware/span-name"
+import { DisableTracerMW } from "./middleware/disable-tracer"
+import { PrivateApiRouter } from "./api/private"
+import { HealthRouter } from "./api/health"
+import { PublicRouter } from "./api"
+import { JWT, JWTLive } from "./services/jwt"
+
+
+export class EnvVars extends Effect.Service<EnvVars>()("EnvVars", {
+  effect: Effect.gen(function*() {
+    return {
+      ENVIRONMENT: yield* Config.literal(
+        "local",
+        "production"
+      )("ENVIRONMENT").pipe(Config.withDefault("local" as const))
+    }
+  })
+}) { }
+
+const CorsLayer = Effect.gen(function*() {
+  const envVars = yield* EnvVars
+  const allowedOrigins = envVars.ENVIRONMENT == 'production'
+    ? ['https://domain.com']
+    : ['http://localhost:5173', 'http://localhost:3000'];
+
+  return HttpLayerRouter.cors({
+    allowedOrigins,
+    allowedMethods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "traceparent"],
+    credentials: true
+  })
+}).pipe(Layer.unwrapEffect, Layer.provide(EnvVars.Default))
+
+const WorkerApp = Layer.mergeAll(
+  HealthRouter,
+  PublicRouter,
+  PrivateApiRouter
+).pipe(
+  Layer.provide(Etag.layer),
+  Layer.provide(HttpPlatform.layer),
+  Layer.provide(Path.layer),
+  Layer.provide(FileSystem.layerNoop({})),
+  Layer.provide(CorsLayer),
+  DisableTracerMW,
+  SpanNameMW
+)
+
+/*
+  CLOUDFLARE WORKER
+*/
+
+type WorkerBindings = {
+  readonly DB: D1Database
+} & {
+  readonly [key: string]: string
+}
+
+const makeConfigProvider = (bindings: Record<string, unknown>) => {
+  const map = new Map<string, string>();
+
+  if (typeof globalThis.process != 'undefined') {
+    for (const [key, value] of Object.entries(globalThis.process.env)) {
+      if (typeof value === 'string') {
+        map.set(key, value)
+      }
+    }
+  }
+  for (const [key, value] of Object.entries(bindings)) {
+    if (typeof value === 'string') {
+      map.set(key, value)
+    }
+  }
+
+  return ConfigProvider.fromMap(map)
+}
+
+let runtime: { readonly handler: (request: globalThis.Request) => Promise<Response> } | undefined
+
+const makeOrGetRuntime = (bindings: WorkerBindings) => {
+  if (runtime != undefined) return runtime
+  const configProviderLayer = Layer.setConfigProvider(makeConfigProvider(bindings));
+  runtime = HttpLayerRouter.toWebHandler(
+    WorkerApp.pipe(
+      Layer.provide(
+        D1Client.layer({
+          db: bindings.DB,
+          transformQueryNames: String.camelToSnake,
+          transformResultNames: String.snakeToCamel
+        }),
+      ),
+      Layer.provide(configProviderLayer)
+    )
+  )
+  return runtime
+}
+
+export default {
+  fetch(request: Request, env: WorkerBindings, executionContext: ExecutionContext): Promise<Response> {
+
+    void executionContext;
+    return makeOrGetRuntime(env).handler(request)
+  }
+}
+// from vid
+// const DomainRpc = RpcGroup.make()
+
+// class RpcLogger extends RpcMiddleware.Tag<RpcLogger>()("RpcLogger", {
+//   wrap: true,
+//   optional: true
+// }) { }
+// const RpcLoggerLive = Layer.succeed(
+//   RpcLogger,
+//   RpcLogger.of((opts) =>
+//     Effect.tapErrorCause(opts.next, (cause) =>
+//       Effect.annotateLogs(Effect.logError(`RPC request failed: ${opts.rpc._tag}`, cause), {
+//         "rpc.method": opts.rpc._tag,
+//         "rpc.clientId": opts.clientId
+//       })
+//     )
+//   )
+// )
+
+// const RpcRouter = RpcServer.layerHttpRouter({
+//   group: DomainRpc.middleware(RpcLogger),
+//   path: "/rpc",
+//   protocol: "http",
+//   spanPrefix: "rpc"
+// })
+
+/* // src/worker.ts
 import { Effect, Layer, ManagedRuntime, ConfigProvider } from "effect"
 import { CloudflareBindings } from "./services/cf-bindings"
 import { AppLive } from "./app"
@@ -66,4 +198,4 @@ export default {
       await runtime.dispose()
     }
   },
-}
+} */

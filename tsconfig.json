@@ -3,8 +3,8 @@
         "target": "ESNext",
         "module": "ESNext",
         "moduleResolution": "Bundler",
-        "strict": true,
-        "exactOptionalPropertyTypes": true, // optional
+        "strict": true, //needed for effect schema
+        "exactOptionalPropertyTypes": true, //needed for effect schema
         "skipLibCheck": true,
         "lib": ["ESNext"],
         "types": [
