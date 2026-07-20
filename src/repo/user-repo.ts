@@ -1,31 +1,50 @@
-import { Context, Data, Effect, Layer, Schema } from "effect"
-import type { User, UserLogin } from "@/db/schema/User"
+import { Option, Context, Effect, Layer } from "effect"
+import type { PasswordHash, User } from "@/db/schema/User"
+import { SqlClient, SqlError } from "@effect/sql";
 
-export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
-  reason: Schema.Literal("InvalidCredentials", "UserNotFound", "AccountDisabled", "Unknown"),
-  cause: Schema.Unknown
-}) { }
 
-export interface UserRepositoryI {
-  readonly findByEmail: (email: string) => Effect.Effect<User | null, Error>;
+export interface UserRepository {
+  readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
+  readonly insert: (creds: { email: string, password: typeof PasswordHash.Type }) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
+
 }
 
-export const UserRepository = Context.GenericTag<UserRepositoryI>("UserRepository");
+export const UserRepository = Context.GenericTag<UserRepository>("UserRepository");
 
-export const UserRepositoryLive = (db: D1Database): UserRepositoryI => ({
-  findByEmail: (email: string) => Effect.tryPromise({
-    try: async () => {
-      const result = await db
-        .prepare("SELECT * FROM users WHERE email = ? LIMIT 1")
-        .bind(email)
-        .first<User>();
-      return result || null;
-    },
-    catch: (error) => {
-      return new AuthError({
-        reason: "Unknown",
-        cause: error
+export const UserRepositoryLive = Layer.effect(
+  UserRepository,
+  Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+
+    return {
+      findByEmail: (email: string) =>
+        Effect.gen(function*() {
+          return yield* sql<User>`
+            SELECT *
+              FROM users
+             WHERE email=${email}
+            `
+            .pipe(
+              Effect.map(rows => rows[0]),
+              Effect.map(Option.fromNullable)
+            )
+        }),
+      insert: ({ email, password }) => Effect.gen(function*() {
+        return yield* sql<User>`
+          INSERT INTO users (email, passwordHash)
+               VALUES (${email}, ${password})
+            RETURNING *`
+          .pipe(
+            Effect.map(rows => rows[0]),
+            Effect.map(Option.fromNullable)
+          )
       })
-    }
-  })
-})
+    } satisfies UserRepository // needed otherwise email/password become untyped when using taperror
+  }).pipe(
+    Effect.tapError(error =>
+      Effect.sync(() =>
+        Effect.logError("User repository failed", { error })
+      )
+    )
+  )
+)

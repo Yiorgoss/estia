@@ -5,8 +5,8 @@ import { SpanNameMW } from "./middleware/span-name"
 import { DisableTracerMW } from "./middleware/disable-tracer"
 import { PrivateApiRouter } from "./api/private"
 import { HealthRouter } from "./api/health"
-import { PublicRouter } from "./api"
-import { JWT, JWTLive } from "./services/jwt"
+import { PublicRouterLive } from "./api"
+
 
 
 export class EnvVars extends Effect.Service<EnvVars>()("EnvVars", {
@@ -36,7 +36,7 @@ const CorsLayer = Effect.gen(function*() {
 
 const WorkerApp = Layer.mergeAll(
   HealthRouter,
-  PublicRouter,
+  PublicRouterLive,
   PrivateApiRouter
 ).pipe(
   Layer.provide(Etag.layer),

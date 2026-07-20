@@ -1,8 +1,12 @@
-import { UserLogin } from "../db/schema/User"
-import { renderPage } from "@/frontend/render-page"
-import { JWTSigningError, JWTValidateError } from "@/services/jwt"
+import { UserCredentials } from "@/db/schema/User"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpLayerRouter, HttpServerResponse } from "@effect/platform"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
+import { JWTSchema, JWTServiceLive } from "@/services/jwt"
+import { InvalidCredentialsError } from "@/services/auth"
+import { RefreshTokenValue } from "@/db/schema/RefreshToken"
+import { InternalError, UserAlreadyExistsError, UserServiceLive } from "@/services/user"
+import { loginPage } from "@/frontend/pages/login"
+import { registerPage } from "@/frontend/pages/register"
 
 
 
@@ -13,30 +17,30 @@ export const PublicApi = HttpApi.make('public')
       .add(
         HttpApiEndpoint
           .post('login', '/login')
-          // .addSuccess(User)
-          .setPayload(UserLogin)
-          .addError(JWTSigningError)
-          .addError(JWTValidateError)
-        // ).add(
-        //   HttpApiEndpoint
-        //     // delete the refresh token
-        //     .get('logout', '/logout')
-        //     .addSuccess(
-        //       Schema.Struct({
-        //         token: Schema.String,
-        //         decode: Schema.Unknown
-        //       })
-        //     )
-        // )
-        // .add(
-        //   HttpApiEndpoint
-        //     .post('refresh', '/refresh')
-        //     .addSuccess(
-        //       Schema.Struct({
-        //         token: Schema.String,
-        //         decode: Schema.Unknown
-        //       })
-        //     )
+          .addSuccess(
+            Schema.Struct({
+              accessToken: JWTSchema,
+              refreshToken: RefreshTokenValue,
+            }),
+            { status: 200 }
+          )
+          .setPayload(UserCredentials)
+          .addError(InvalidCredentialsError, { status: 401 })
+          .addError(InternalError, { status: 500 })
+      )
+      .add(
+        HttpApiEndpoint
+          .post('register', '/register')
+          .addSuccess(
+            Schema.Struct({
+              accessToken: JWTSchema,
+              refreshToken: RefreshTokenValue,
+            }),
+            { status: 200 }
+          )
+          .setPayload(UserCredentials)
+          .addError(UserAlreadyExistsError, { status: 409 })
+          .addError(InternalError, { status: 500 })
       )
   )
 
@@ -55,7 +59,12 @@ export const PublicRoutes = HttpLayerRouter.addAll([
   ),
   HttpLayerRouter.route("GET", "/login",
     Effect.succeed(
-      HttpServerResponse.html(renderPage())
+      HttpServerResponse.html(loginPage)
+    )
+  ),
+  HttpLayerRouter.route("GET", "/register",
+    Effect.succeed(
+      HttpServerResponse.html(registerPage)
     )
   )
 ])

@@ -3,8 +3,8 @@
     "name": "estia-effect",
     // Set this to today's date
     "compatibility_date": "2026-05-27",
-    "compatibility_flags": ["enable_request_signal"],
-    "main": "./src/index.ts",
+    "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
+    "main": "./src/app.ts",
     "assets": { "directory": "static" },
     "vars": {
         "ORIGIN": "localhost:5173",
@@ -12,8 +12,8 @@
     "d1_databases": [
         {
             "binding": "DB",
-            "database_name": "estia-db",
-            "database_id": "20f662db-bd64-4ac4-b2ad-e8024d30d55f",
+            "database_name": "estia-db-test",
+            "database_id": "1e3085db-a5ff-432b-b2d4-7135906f87f0",
             "migrations_dir": "src/db/migrations",
         },
     ],

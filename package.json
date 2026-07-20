@@ -8,6 +8,7 @@
         "build": "vite build",
         "preview": "pnpm run build && vite preview",
         "deploy": "pnpm run build && wrangler deploy",
+        "migrate": "wrangler d1 migrations",
         "cf-typegen": "wrangler types"
     },
     "devDependencies": {
@@ -18,10 +19,13 @@
         "wrangler": "^4.94.0"
     },
     "dependencies": {
+        "@effect/experimental": "^0.61.0",
         "@effect/platform": "^0.96.1",
         "@effect/rpc": "^0.75.1",
+        "@effect/sql": "^0.52.0",
         "@effect/sql-d1": "^0.49.0",
-        "effect": "^3.21.2",
+        "effect": "^3.22.0",
+        "hash-wasm": "^4.12.0",
         "jose": "^6.2.3"
     }
 }

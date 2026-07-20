@@ -1,7 +1,13 @@
-import { HttpApiSchema } from "@effect/platform";
-import { Config, Context, Data, Effect, Layer, Schema } from "effect";
-import { JWTPayload, jwtVerify, SignJWT } from "jose";
+import { User } from "@/db/schema/User";
+import { Config, Context, Effect, Layer, Schema } from "effect";
+import { jwtVerify, SignJWT } from "jose";
 import { JWTClaimValidationFailed, JWTExpired } from "jose/errors";
+
+export const JWTSchema = Schema.String.pipe(
+  Schema.brand("JWT")
+)
+
+export type JWT = typeof JWTSchema.Type
 
 export class JWTSigningError extends Schema.TaggedError<JWTSigningError>()(
   "JWTSigningError",
@@ -9,7 +15,6 @@ export class JWTSigningError extends Schema.TaggedError<JWTSigningError>()(
     message: Schema.String,
     cause: Schema.optional(Schema.Unknown)
   },
-  HttpApiSchema.annotations({ status: 500 })
 ) { }
 
 export class JWTValidateError extends Schema.TaggedError<JWTValidateError>()(
@@ -18,21 +23,17 @@ export class JWTValidateError extends Schema.TaggedError<JWTValidateError>()(
     reason: Schema.Literal("InvalidIssuer", "InvalidAudience", 'Expired', 'Unknown'),
     cause: Schema.optional(Schema.Unknown)
   },
-  HttpApiSchema.annotations({ status: 401 })
 ) { }
 
-export interface JWTI {
-  sign(payload: object): Effect.Effect<string, JWTSigningError>;
+export interface JWTService {
+  signUser(user: User): Effect.Effect<JWT, JWTSigningError>;
   verify(token: string): Effect.Effect<object, JWTValidateError>;
 }
 
-export class JWT extends Context.Tag("JWT")<
-  JWT,
-  JWTI
->() { }
+export const JWTService = Context.GenericTag<JWTService>("JWTService");
 
-export const JWTLive = Layer.effect(
-  JWT,
+export const JWTServiceLive = Layer.effect(
+  JWTService,
   Effect.gen(function*() {
     // const domain = yield* Config.string("DOMAIN")
     const domain = "123xxx"
@@ -40,9 +41,14 @@ export const JWTLive = Layer.effect(
     const secretU8 = new TextEncoder().encode(secret)
 
     return {
-      sign: (payload: JWTPayload) =>
+      signUser: (user: User) =>
         Effect.tryPromise({
-          try: () => new SignJWT(payload)
+          try: () => new SignJWT({
+            id: user.id,
+            email: user.email,
+            role: user.role
+          })
+            .setSubject(user.id.toString())
             .setProtectedHeader({ alg: "HS256" })
             .setIssuedAt()
             .setIssuer(`https://${domain}/login`)
@@ -50,7 +56,9 @@ export const JWTLive = Layer.effect(
             .setExpirationTime('1h')
             .sign(secretU8),
           catch: (error) => new JWTSigningError({ message: "errrrrr XD", cause: error })
-        }),
+        }).pipe(
+          Effect.map(token => Schema.decodeSync(JWTSchema)(token))
+        ),
       verify: (token: string) =>
         Effect.tryPromise({
           try: () => jwtVerify(token, secretU8, {
@@ -65,7 +73,6 @@ export const JWTLive = Layer.effect(
                   cause: error
                 })
               }
-
               if (error.claim === "aud") {
                 return new JWTValidateError({
                   reason: "InvalidAudience",
@@ -85,6 +92,6 @@ export const JWTLive = Layer.effect(
             })
           }
         })
-    } satisfies JWTI;
+    };
   })
 )

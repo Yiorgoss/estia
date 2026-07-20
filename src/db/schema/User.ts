@@ -1,24 +1,37 @@
+import { JWTSchema } from "@/services/jwt";
 import { Schema } from "effect";
 
-export const User = Schema.Struct({
+export const PasswordHash = Schema.String.pipe(Schema.brand("PasswordHash"))
+
+export const UserSchema = Schema.Struct({
   id: Schema.Number,
-  name: Schema.NonEmptyString,
-  age: Schema.Number,
   email: Schema.String,
-  created_at: Schema.DateFromString,
-  updated_at: Schema.Date
+  passwordHash: PasswordHash,
+  role: Schema.Literal("user", "owner", "admin"),
+  createdAt: Schema.DateFromString,
+  updatedAt: Schema.Date
 });
 
-export type User = Schema.Schema.Type<typeof User>
+export interface User extends Schema.Schema.Type<typeof UserSchema> { }
 
-export const UserLogin = Schema.Struct({
-  email: Schema.NonEmptyString,
-  password: Schema.NonEmptyString
+
+export const UserActive = UserSchema.omit("createdAt", "updatedAt", "passwordHash")
+
+export const UserCredentials = Schema.Struct({
+  email: Schema.String,
+  password: Schema.String
 })
 
-export type UserLogin = Schema.Schema.Type<typeof UserLogin>
+export interface UserCredentialsType extends Schema.Schema.Type<typeof UserCredentials> { }
 
-export const NewUser = User.omit("id", "created_at", "updated_at")
+export const SuccessfulLogin = Schema.Struct({
+  user: UserActive,
+  token: JWTSchema
+})
+
+// export type UserLogin = Schema.Schema.Type<typeof UserLogin>
+
+// export const NewUser = User.omit("id", "created_at", "updated_at")
 
 // export interface User extends Schema.Schema.Type<typeof User> { }
 // export interface NewUser extends Schema.Schema.Type<typeof User.omit("id", "created_at", "updated_at")> {}
