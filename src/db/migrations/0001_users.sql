@@ -2,14 +2,12 @@
 
 CREATE TABLE users (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-           email TEXT NOT NULL UNIQUE, -- doesnt need index
-            name TEXT NOT NULL,
+           email TEXT NOT NULL UNIQUE, 
             role TEXT NOT NULL CHECK (role IN ('user', 'owner', 'admin', 'moderator')) DEFAULT 'user',
    password_hash TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT ,
-      updated_at DATETIME NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER))
+      created_at DATETIME NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),
+      updated_at DATETIME NOT NULL  DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) -- easy to convert to js time
 );
-
 
  CREATE TRIGGER users_updated_at
 AFTER UPDATE ON users

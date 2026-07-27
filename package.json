@@ -14,6 +14,7 @@
     "devDependencies": {
         "@cloudflare/vite-plugin": "^1.38.0",
         "@types/node": "^25.9.1",
+        "@types/phc__format": "^1.0.1",
         "typescript": "^6.0.3",
         "vite": "^8.0.14",
         "wrangler": "^4.94.0"
@@ -24,8 +25,8 @@
         "@effect/rpc": "^0.75.1",
         "@effect/sql": "^0.52.0",
         "@effect/sql-d1": "^0.49.0",
+        "@phc/format": "^1.0.0",
         "effect": "^3.22.0",
-        "hash-wasm": "^4.12.0",
         "jose": "^6.2.3"
     }
 }

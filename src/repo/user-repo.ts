@@ -5,8 +5,8 @@ import { SqlClient, SqlError } from "@effect/sql";
 
 export interface UserRepository {
   readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
+  readonly findById: (id: number) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
   readonly insert: (creds: { email: string, password: typeof PasswordHash.Type }) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
-
 }
 
 export const UserRepository = Context.GenericTag<UserRepository>("UserRepository");
@@ -29,9 +29,21 @@ export const UserRepositoryLive = Layer.effect(
               Effect.map(Option.fromNullable)
             )
         }),
+      findById: (id: number) =>
+        Effect.gen(function*() {
+          return yield* sql<User>`
+            SELECT *
+              FROM users
+             WHERE id=${id}
+            `
+            .pipe(
+              Effect.map(rows => rows[0]),
+              Effect.map(Option.fromNullable)
+            )
+        }),
       insert: ({ email, password }) => Effect.gen(function*() {
         return yield* sql<User>`
-          INSERT INTO users (email, passwordHash)
+          INSERT INTO users (email, password_hash)
                VALUES (${email}, ${password})
             RETURNING *`
           .pipe(

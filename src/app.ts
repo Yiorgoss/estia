@@ -1,11 +1,10 @@
 import { Etag, FileSystem, HttpLayerRouter, HttpPlatform, Path } from "@effect/platform"
 import { D1Client } from "@effect/sql-d1"
-import { Config, ConfigProvider, Effect, Layer, String } from "effect"
+import { Config, ConfigProvider, Effect, Layer, Logger, LogLevel, String } from "effect"
 import { SpanNameMW } from "./middleware/span-name"
 import { DisableTracerMW } from "./middleware/disable-tracer"
-import { PrivateApiRouter } from "./api/private"
 import { HealthRouter } from "./api/health"
-import { PublicRouterLive } from "./api"
+import { PrivateRouterLive, PublicRouterLive } from "./api"
 
 
 
@@ -37,7 +36,7 @@ const CorsLayer = Effect.gen(function*() {
 const WorkerApp = Layer.mergeAll(
   HealthRouter,
   PublicRouterLive,
-  PrivateApiRouter
+  PrivateRouterLive
 ).pipe(
   Layer.provide(Etag.layer),
   Layer.provide(HttpPlatform.layer),
@@ -54,6 +53,7 @@ const WorkerApp = Layer.mergeAll(
 
 type WorkerBindings = {
   readonly DB: D1Database
+  readonly ENVIRONMENT: 'local' | 'production'
 } & {
   readonly [key: string]: string
 }
@@ -77,11 +77,44 @@ const makeConfigProvider = (bindings: Record<string, unknown>) => {
   return ConfigProvider.fromMap(map)
 }
 
+// import * as util from 'util';
+// console.log(util.inspect({ args }, { depth: null, colors: true }));
+const DevLogger = Logger.make((args) => {
+  // console.log({ args })
+  console.log(`[${args.logLevel.label}] ${args.message} ${args.annotations} `)
+})
+const DevLoggerLive = Logger.replace(
+  Logger.defaultLogger,
+  DevLogger,
+).pipe(
+  Layer.provide(Logger.minimumLogLevel(LogLevel.Trace))
+);
+
+
+const WorkersJsonLogger = Logger.make(({ logLevel, message, date, spans, annotations }) => {
+  console.log(JSON.stringify({
+    level: logLevel.label,
+    message,
+    timestamp: date.toISOString(),
+    spans,
+    annotations,
+  }));
+})
+
+const ProdLoggerLive = Logger.replace(
+  Logger.defaultLogger,
+  WorkersJsonLogger
+).pipe(
+  Layer.provide(Logger.minimumLogLevel(LogLevel.Debug))
+);
+
 let runtime: { readonly handler: (request: globalThis.Request) => Promise<Response> } | undefined
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime
   const configProviderLayer = Layer.setConfigProvider(makeConfigProvider(bindings));
+
+
   runtime = HttpLayerRouter.toWebHandler(
     WorkerApp.pipe(
       Layer.provide(
@@ -91,7 +124,8 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
           transformResultNames: String.snakeToCamel
         }),
       ),
-      Layer.provide(configProviderLayer)
+      Layer.provide(configProviderLayer),
+      Layer.provide(bindings.ENVIRONMENT === 'local' ? DevLoggerLive : ProdLoggerLive)
     )
   )
   return runtime
@@ -99,7 +133,6 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
 
 export default {
   fetch(request: Request, env: WorkerBindings, executionContext: ExecutionContext): Promise<Response> {
-
     void executionContext;
     return makeOrGetRuntime(env).handler(request)
   }

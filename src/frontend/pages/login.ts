@@ -1,15 +1,21 @@
+import { head } from "../head";
 import { header } from "../header";
 
 export const loginPage = `
 <!doctype html>
 <html>
   <head>
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  </head>
+    ${head}
+  </head
   <body class="min-h-lvh">
     ${header}
     <main class="pt-[20vh]">
-      <form action="/login" method="post" class="w-full max-w-md mx-auto mt-6 space-y-5">
+      <form 
+        hx-post="/api/auth/login"
+        hx-target="#result"
+        class="w-full max-w-md mx-auto mt-6 space-y-5"
+        >
+    <div id="result">hi</div>
         <div>
           <label
             for="email"
@@ -26,6 +32,7 @@ export const loginPage = `
             class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+
 
         <div>
           <label

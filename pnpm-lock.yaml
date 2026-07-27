@@ -23,12 +23,12 @@ importers:
       '@effect/sql-d1':
         specifier: ^0.49.0
         version: 0.49.0(@effect/experimental@0.61.0(@effect/platform@0.96.3(effect@3.22.0))(effect@3.22.0))(@effect/platform@0.96.3(effect@3.22.0))(@effect/sql@0.52.0(@effect/experimental@0.61.0(@effect/platform@0.96.3(effect@3.22.0))(effect@3.22.0))(@effect/platform@0.96.3(effect@3.22.0))(effect@3.22.0))(effect@3.22.0)
+      '@phc/format':
+        specifier: ^1.0.0
+        version: 1.0.0
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-      hash-wasm:
-        specifier: ^4.12.0
-        version: 4.12.0
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -39,6 +39,9 @@ importers:
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.5
+      '@types/phc__format':
+        specifier: ^1.0.1
+        version: 1.0.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -517,6 +520,10 @@ packages:
   '@oxc-project/types@0.139.0':
     resolution: {integrity: sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw==}
 
+  '@phc/format@1.0.0':
+    resolution: {integrity: sha512-m7X9U6BG2+J+R1lSOdCiITLLrxm+cWlNI3HUFA92oLO77ObGNzaKdh8pMLqdZcshtkKuV84olNNXDfMc4FezBQ==}
+    engines: {node: '>=10'}
+
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
 
@@ -640,6 +647,9 @@ packages:
   '@types/node@25.9.5':
     resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
 
+  '@types/phc__format@1.0.1':
+    resolution: {integrity: sha512-hoAQFKcP3voXk/ZEl3jrvS63o/HYLszq4nA2mqjytaSEHEy3j3t0gSFtPLnfKtX34k/xfath7etOoGw5ukoqXQ==}
+
   blake3-wasm@2.1.5:
     resolution: {integrity: sha512-F1+K8EbfOZE49dtoPtmxUQrpXaBIl3ICvasLh+nJta0xkz+9kF/7uet9fLnwKqhDrmj6g+6K3Tw9yQPUg2ka5g==}
 
@@ -682,9 +692,6 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
-
-  hash-wasm@4.12.0:
-    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
 
   jose@6.2.3:
     resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
@@ -1244,6 +1251,8 @@ snapshots:
 
   '@oxc-project/types@0.139.0': {}
 
+  '@phc/format@1.0.0': {}
+
   '@poppinss/colors@4.1.6':
     dependencies:
       kleur: 4.1.5
@@ -1322,6 +1331,10 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/phc__format@1.0.1':
+    dependencies:
+      '@types/node': 25.9.5
+
   blake3-wasm@2.1.5: {}
 
   cookie@1.1.1: {}
@@ -1376,8 +1389,6 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
-
-  hash-wasm@4.12.0: {}
 
   jose@6.2.3: {}
 

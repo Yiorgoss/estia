@@ -1,13 +1,10 @@
 import { PublicApi } from "@/api/public";
-import { RefreshTokenRepositoryLive } from "@/repo/refresh-token-repo";
-import { UserRepositoryLive } from "@/repo/user-repo";
-import { AuthService, AuthServiceLive } from "@/services/auth";
-import { HasherServiceLive } from "@/services/hasher";
-import { JWTServiceLive } from "@/services/jwt";
-import { RefreshTokenServiceLive } from "@/services/refresh-token";
-import { UserService, UserServiceLive } from "@/services/user";
-import { HttpApiBuilder } from "@effect/platform";
-import { Effect, Layer } from "effect";
+import { AuthService } from "@/services/auth";
+import { JWTSchema, JWTService } from "@/services/jwt";
+import { RefreshTokenService } from "@/services/refresh-token";
+import { UserService } from "@/services/user";
+import { Cookies, HttpApiBuilder, HttpServerResponse } from "@effect/platform";
+import { Effect, Redacted, Schema } from "effect";
 
 
 export const PublicApiLive = HttpApiBuilder.group(
@@ -15,33 +12,85 @@ export const PublicApiLive = HttpApiBuilder.group(
   'auth',
   (handlers) =>
     handlers
+      .handle("test", (req) =>
+        Effect.gen(function*() {
+
+          const response = yield* HttpServerResponse.html(
+            ` <div class="bg-red-200">thisi s comingfrom  htmx!!</div>
+              `
+          ).pipe(
+            HttpServerResponse.setCookie("jwt", "yyyyyyy", {
+              httpOnly: true,
+              secure: true,
+              sameSite: "strict",
+              path: "/",
+              maxAge: 60 * 60 * 1000 //in ms 
+            }),
+            Effect.orDie
+          )
+          const reqCookie = req.request.cookies['access_token']
+          console.log("cookies on request:", reqCookie)
+          const jwtService = yield* JWTService
+          const object = yield* jwtService
+            .verify(Schema.decodeSync(JWTSchema)(reqCookie))
+            .pipe(
+              Effect.catchTags({
+                InvalidJWTError: () => Effect.log("invalid"),
+                ExpiredJWTError: () => Effect.log("expied")
+              })
+            )
+          console.log("verified: ", object)
+          return response ?? ""
+        })
+      )
       .handle('login', (req) =>
         Effect.gen(function*() {
           //validate user
+          Effect.logDebug("attempting login")
           const { email, password } = req.payload
+          const userAgent = req.request.headers['user-agent']
 
           const authService = yield* AuthService
-          const tokens = yield* authService.login({ email, password })
+          const { accessToken, refreshToken } = yield* authService
+            .authenticate({ email, password }, userAgent)
+          Effect.logInfo("authentication successful")
+          const jwtService = yield* JWTService
+          const accessCookie = yield* jwtService.asCookie(accessToken)
+          const refreshTokenService = yield* RefreshTokenService
+          const refreshCookie = yield* refreshTokenService.asCookie(refreshToken)
 
-          return tokens
+
+          return yield* HttpServerResponse.empty().pipe(
+            HttpServerResponse.setStatus(200),
+            HttpServerResponse.setCookies([
+              accessCookie,
+              refreshCookie
+            ]),
+            Effect.orDie
+          )
         })
       )
       .handle('register', (req) =>
         Effect.gen(function*() {
           const { email, password } = req.payload
-          const userService = yield* UserService
-          const tokens = yield* userService.registerUser({ email, password })
+          const userAgent = req.request.headers['user-agent']
 
-          return tokens
+          const userService = yield* UserService
+          const { accessToken, refreshToken } = yield* userService
+            .registerUser({ email, password }, userAgent)
+
+          return yield* HttpServerResponse.empty().pipe(
+            HttpServerResponse.setStatus(200),
+            HttpServerResponse.setCookies([
+              ["auth_token", accessToken,
+                { httpOnly: true, secure: true, path: "/", maxAge: 60 * 60 * 1000 }
+              ],
+              ["refresh_token", refreshToken,
+                { httpOnly: true, secure: true, path: "/", maxAge: 30 * 24 * 60 * 60 * 1000 }
+              ]
+            ]),
+            Effect.orDie
+          )
         })
       )
 )
-// .pipe(
-//   Layer.provide(AuthServiceLive),
-//   Layer.provide(UserServiceLive),
-//   Layer.provide(UserRepositoryLive),
-//   Layer.provide(JWTServiceLive),
-//   Layer.provide(RefreshTokenServiceLive),
-//   Layer.provide(RefreshTokenRepositoryLive),
-//   Layer.provide(HasherServiceLive),
-// )

@@ -1,13 +1,15 @@
 import { JWTSchema } from "@/services/jwt";
-import { Schema } from "effect";
+import { Context, Schema } from "effect";
 
 export const PasswordHash = Schema.String.pipe(Schema.brand("PasswordHash"))
+
+export const UserRoles = Schema.Literal("user", "owner", "admin", "moderator")
 
 export const UserSchema = Schema.Struct({
   id: Schema.Number,
   email: Schema.String,
   passwordHash: PasswordHash,
-  role: Schema.Literal("user", "owner", "admin"),
+  role: UserRoles,
   createdAt: Schema.DateFromString,
   updatedAt: Schema.Date
 });
@@ -15,7 +17,12 @@ export const UserSchema = Schema.Struct({
 export interface User extends Schema.Schema.Type<typeof UserSchema> { }
 
 
-export const UserActive = UserSchema.omit("createdAt", "updatedAt", "passwordHash")
+export const CurrentUser = UserSchema.pick("id", "role")
+
+export class CurrentUserTag extends Context.Tag("CurrentUser")<
+  typeof CurrentUser.Type,
+  typeof CurrentUser.Type
+>() { }
 
 export const UserCredentials = Schema.Struct({
   email: Schema.String,
@@ -25,7 +32,7 @@ export const UserCredentials = Schema.Struct({
 export interface UserCredentialsType extends Schema.Schema.Type<typeof UserCredentials> { }
 
 export const SuccessfulLogin = Schema.Struct({
-  user: UserActive,
+  user: CurrentUser,
   token: JWTSchema
 })
 

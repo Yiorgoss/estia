@@ -9,16 +9,12 @@ import { UserServiceLive } from "@/services/user";
 import { HasherServiceLive } from "@/services/hasher";
 import { PublicApiLive } from "@/handlers/public/auth-handler";
 import { AuthServiceLive } from "@/services/auth";
+import { PrivateApi, PrivateRoutes } from "./private";
+import { PrivateApiLive } from "@/handlers/private";
 
-// const Services = Layer.mergeAll(
-//   RefreshTokenRepositoryLive,
-//   UserRepositoryLive,
-//   JWTServiceLive,
-//   HasherServiceLive,
-//   RefreshTokenServiceLive,
-//   UserServiceLive,
-//   AuthServiceLive,
-// )
+/*
+ * PUBLIC API
+ */
 
 export const PublicApiRouterLive = HttpLayerRouter
   .addHttpApi(PublicApi)
@@ -29,13 +25,27 @@ export const PublicApiRouterLive = HttpLayerRouter
 export const PublicRouterLive = Layer.mergeAll(
   PublicApiRouterLive,
   PublicRoutes,
+).pipe(
+  Layer.provide(UserServiceLive),
+  Layer.provide(AuthServiceLive),
+  Layer.provide(RefreshTokenServiceLive),
+  Layer.provide(JWTServiceLive),
+  Layer.provide(RefreshTokenRepositoryLive),
+  Layer.provide(UserRepositoryLive),
+  Layer.provide(HasherServiceLive),
 )
+
+/*
+ * PRIVATE API
+ */
+
+export const PrivateApiRouterLive = HttpLayerRouter
+  .addHttpApi(PrivateApi)
   .pipe(
-    Layer.provide(AuthServiceLive),
-    Layer.provide(UserServiceLive),
-    Layer.provide(UserRepositoryLive),
-    Layer.provide(JWTServiceLive),
-    Layer.provide(RefreshTokenServiceLive),
-    Layer.provide(RefreshTokenRepositoryLive),
-    Layer.provide(HasherServiceLive),
+    Layer.provide(PrivateApiLive),
   )
+
+export const PrivateRouterLive = Layer.mergeAll(
+  PrivateApiRouterLive,
+  PrivateRoutes,
+).pipe()
