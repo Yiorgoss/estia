@@ -1,11 +1,13 @@
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, pipe, Schema } from "effect"
 import { UserRepository } from "../repo/user-repo"
-import { ExpiredJWTError, InvalidJWTError, JWT, JWTService } from "./jwt"
+import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt"
 import { HasherService } from "./hasher"
 import { RefreshTokenService } from "./refresh-token"
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User"
-import { RefreshTokenValue } from "@/db/schema/RefreshToken"
 import { InternalError, UserNotFoundError } from "./user"
+import { JWTSchema, RefreshTokenValue } from "@/brands"
+import { onDecision } from "effect/Schedule"
+import { linesWithSeparators } from "effect/String"
 
 
 export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(
@@ -22,15 +24,24 @@ export class UnauthorizedError extends Schema.TaggedError<UnauthorizedError>()(
 
 
 export interface AuthTokens {
-  readonly accessToken: JWT,
+  readonly accessToken: typeof JWTSchema.Type,
   readonly refreshToken: typeof RefreshTokenValue.Type
 }
 
 export class AuthService extends Context.Tag("AuthService")<
   AuthService,
   {
-    readonly tokenAuthFlow: (tokens: AuthTokens, userAgent: string) =>
-      Effect.Effect<{ tokens: AuthTokens, user: typeof CurrentUser.Type },
+    readonly tokenAuthFlow: (
+      tokens: {
+        refreshToken?: typeof RefreshTokenValue.Type | null | undefined,
+        accessToken?: typeof JWTSchema.Type | null | undefined,
+      }, userAgent: string) =>
+      Effect.Effect<{
+        tokens: {
+          refreshToken?: typeof RefreshTokenValue.Type | null | undefined,
+          accessToken?: typeof JWTSchema.Type | null | undefined,
+        }, user: typeof CurrentUser.Type
+      },
         InvalidJWTError | ExpiredJWTError | UserNotFoundError | UnauthorizedError | InternalError>
     readonly authenticate: (credentials: UserCredentialsType, userAgent: string) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>
     // readonly login: (credentials: UserCredentialsType, userAgent: string) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>
@@ -46,45 +57,49 @@ export const AuthServiceLive = Layer.effect(
     const refreshTokenService = yield* RefreshTokenService
 
     return {
-      tokenAuthFlow: ({ accessToken, refreshToken }, userAgent) =>
+      tokenAuthFlow: ({ accessToken: oldAccessToken, refreshToken }, userAgent) =>
         Effect.gen(function*() {
-          // use token for authentication.
-          // 
-          let jwtUser = yield* jwtService
-            .verify(accessToken)
+
+          let jwtUser = yield* Effect.fromNullable(oldAccessToken)
             .pipe(
-              Effect.flatMap((value) => jwtService.extractUser(value)),
-              Effect.catchTags({
-                ExpiredJWTError: () => Effect.succeed(null)
-              }),
+              Effect.flatMap(x => jwtService.verify(x)),
+              Effect.flatMap(x => jwtService.extractUser(x)),
+              Effect.catchAll(() => Effect.succeed(null)) // if it fails no user seeif refresh works
             )
 
           if (jwtUser) {
-            return { tokens: { accessToken, refreshToken }, user: jwtUser }
+            return yield* Effect.succeed({
+              user: jwtUser,
+              tokens: {
+                accessToken: oldAccessToken,
+                refreshToken: refreshToken
+              },
+            })
           }
 
-          //JWT Expired -> attempt refresh
-          const newAccessToken = yield* refreshTokenService
-            .consumeToken(refreshToken)
-
-          jwtUser = yield* jwtService
-            .verify(newAccessToken)
+          let oldRefreshToken = yield* Effect.fromNullable(refreshToken)
             .pipe(
-              Effect.flatMap(x => jwtService.extractUser(x))
+              Effect.matchEffect({
+                onFailure: () => Effect.fail(new UnauthorizedError({ cause: "Cause missing Refresh" })),
+                onSuccess: (token) => Effect.succeed(token)
+              })
             )
 
-          const newRefreshToken = yield* refreshTokenService
-            .rotateToken(jwtUser.id, userAgent, refreshToken)
-
-          return {
-            user: jwtUser,
-            tokens: {
-              accessToken: newAccessToken,
-              refreshToken: newRefreshToken
-            }
-          }
+          return yield* Effect.Do.pipe(
+            Effect.bind("newAccess", () => refreshTokenService.consumeToken(oldRefreshToken)),
+            Effect.bind("jwtObject", ({ newAccess }) => jwtService.verify(newAccess)),
+            Effect.bind("currentUser", ({ jwtObject }) => jwtService.extractUser(jwtObject)),
+            Effect.bind("newRefresh", ({ currentUser }) => refreshTokenService.rotateToken(currentUser.id, userAgent, oldRefreshToken)),
+            Effect.map(({ newAccess, currentUser, newRefresh }) => ({
+              user: currentUser,
+              tokens: {
+                accessToken: newAccess,
+                refreshToken: newRefresh
+              }
+            })),
+          )
         }).pipe(
-          Effect.tapError((err) => Effect.log({ err })),
+          Effect.tapError((err) => Effect.logError({ err })),
         ),
       authenticate: ({ email, password }, userAgent) =>
         Effect.gen(function*() {
@@ -111,33 +126,6 @@ export const AuthServiceLive = Layer.effect(
             JWTSigningError: () => Effect.fail(new InternalError())
           })
         )
-      // login: ({ email, password }, userAgent) =>
-      //   Effect.gen(function*() {
-      //     const user = yield* userRepo.findByEmail(email).pipe(
-      //       Effect.map(Option.getOrThrowWith(() => new InvalidCredentialsError()))
-      //     )
-
-      //     const valid = yield* hasher.verifyPassword(password, user.passwordHash)
-
-      //     if (!valid) {
-      //       return yield* Effect.fail(new InvalidCredentialsError())
-      //     }
-
-      //     const refreshToken = yield* refreshTokenService.issueToken(user.id, userAgent)
-      //     const jwtToken = yield* jwtService.signUser(user)
-
-      //     return {
-      //       accessToken: jwtToken,
-      //       refreshToken
-      //     }
-      //   }).pipe(
-      //     Effect.tapError((e) => Effect.logError(`Authentication Failed - ${e.cause}, ${e}`)),
-      //     Effect.catchTags({
-      //       SqlError: (e) => Effect.fail(new InternalError({ cause: e.cause })),
-      //       HashError: () => Effect.fail(new InternalError()),
-      //       JWTSigningError: () => Effect.fail(new InternalError())
-      //     })
-      //   )
     }
   })
 )

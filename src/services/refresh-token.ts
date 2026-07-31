@@ -1,14 +1,14 @@
-import { RefreshTokenValue } from "@/db/schema/RefreshToken";
-import { Clock, Context, Effect, Either, Layer, Option, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HashError, HasherService } from "./hasher";
 import { RefreshTokenNotFoundError, RefreshTokenRepository } from "@/repo/refresh-token-repo";
 import { SqlError } from "@effect/sql/SqlError";
-import { AuthTokens } from "./auth";
-import { JWT, JWTService } from "./jwt";
+
+import { JWTService } from "./jwt";
 import { UserRepository } from "@/repo/user-repo";
 import { InternalError, UserNotFoundError } from "./user";
-import { Cookie, CookiesError } from "@effect/platform/Cookies";
+
 import { Cookies } from "@effect/platform";
+import { JWTSchema, RefreshTokenValue, UserId } from "@/brands";
 
 
 // export class InvalidRefreshTokenError extends Schema.TaggedError<InvalidRefreshTokenError>()(
@@ -19,13 +19,13 @@ export interface RefreshTokenService {
   asCookie: (token: typeof RefreshTokenValue.Type) =>
     Effect.Effect<[name: string, value: string, options?: Cookies.Cookie["options"]],
       never>
-  issueToken: (id: number, userAgent: string) =>
+  issueToken: (id: typeof UserId.Type, userAgent: string) =>
     Effect.Effect<typeof RefreshTokenValue.Type,
       HashError | SqlError>;
   consumeToken: (token: typeof RefreshTokenValue.Type) =>
-    Effect.Effect<JWT,
+    Effect.Effect<typeof JWTSchema.Type,
       InternalError | UserNotFoundError>;
-  rotateToken: (userId: number, userAgent: string, token: typeof RefreshTokenValue.Type) =>
+  rotateToken: (userId: typeof UserId.Type, userAgent: string, token: typeof RefreshTokenValue.Type) =>
     Effect.Effect<typeof RefreshTokenValue.Type,
       InternalError>
 }
@@ -103,7 +103,7 @@ export const RefreshTokenServiceLive = Layer.effect(
         ),
       consumeToken: (token) =>
         Effect.gen(function*() {
-          //does token exist
+          //does token exist and is valid
           const tokenHash = yield* hasher.hashRefreshToken(token)
           const revokedToken = yield* refreshTokenRepo
             .revoke(tokenHash)
@@ -126,9 +126,9 @@ export const RefreshTokenServiceLive = Layer.effect(
         }).pipe(
           Effect.catchTags({
             HashError: () =>
-              Effect.fail(new InternalError({ cause: "" })),
+              Effect.fail(new InternalError({ cause: "Hashing" })),
             SqlError: () =>
-              Effect.fail(new InternalError({ cause: "" })),
+              Effect.fail(new InternalError({ cause: "SQL" })),
             JWTSigningError: () =>
               Effect.fail(new InternalError({ cause: "JWT Signing" }))
           })

@@ -1,17 +1,13 @@
-import { JWTSchema } from "@/services/jwt";
+import { UserPasswordHash, UserId, UserRoles, JWTSchema } from "@/brands";
 import { Context, Schema } from "effect";
 
-export const PasswordHash = Schema.String.pipe(Schema.brand("PasswordHash"))
-
-export const UserRoles = Schema.Literal("user", "owner", "admin", "moderator")
-
 export const UserSchema = Schema.Struct({
-  id: Schema.Number,
+  id: UserId,
   email: Schema.String,
-  passwordHash: PasswordHash,
+  passwordHash: UserPasswordHash,
   role: UserRoles,
-  createdAt: Schema.DateFromString,
-  updatedAt: Schema.Date
+  createdAt: Schema.DateFromNumber,
+  updatedAt: Schema.DateFromNumber
 });
 
 export interface User extends Schema.Schema.Type<typeof UserSchema> { }

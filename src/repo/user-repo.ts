@@ -1,12 +1,13 @@
 import { Option, Context, Effect, Layer } from "effect"
-import type { PasswordHash, User } from "@/db/schema/User"
+import type { User } from "@/db/schema/User"
 import { SqlClient, SqlError } from "@effect/sql";
+import { UserId, UserPasswordHash } from "@/brands";
 
 
 export interface UserRepository {
   readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
-  readonly findById: (id: number) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
-  readonly insert: (creds: { email: string, password: typeof PasswordHash.Type }) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
+  readonly findById: (id: number | typeof UserId.Type) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
+  readonly insert: (creds: { email: string, password: typeof UserPasswordHash.Type }) => Effect.Effect<Option.Option<User>, SqlError.SqlError>;
 }
 
 export const UserRepository = Context.GenericTag<UserRepository>("UserRepository");
@@ -29,7 +30,7 @@ export const UserRepositoryLive = Layer.effect(
               Effect.map(Option.fromNullable)
             )
         }),
-      findById: (id: number) =>
+      findById: (id) =>
         Effect.gen(function*() {
           return yield* sql<User>`
             SELECT *

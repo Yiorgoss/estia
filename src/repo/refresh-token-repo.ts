@@ -1,6 +1,7 @@
 import { Option, Context, Effect, Layer, Schema, Clock } from "effect"
 import { SqlClient, SqlError } from "@effect/sql";
-import { NewRefreshToken, RefreshToken, RefreshTokenHash, RefreshTokenSchema } from "@/db/schema/RefreshToken";
+import { NewRefreshToken, RefreshToken, RefreshTokenSchema } from "@/db/schema/RefreshToken";
+import { RefreshTokenHash } from "@/brands";
 
 
 export class RefreshTokenNotFoundError extends Schema.TaggedError<RefreshTokenNotFoundError>()(

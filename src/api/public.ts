@@ -1,12 +1,11 @@
 import { UserCredentials } from "@/db/schema/User"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpLayerRouter, HttpServerResponse } from "@effect/platform"
 import { Effect, Schema } from "effect"
-import { JWTSchema } from "@/services/jwt"
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth"
-import { RefreshTokenValue } from "@/db/schema/RefreshToken"
 import { InternalError, UserAlreadyExistsError } from "@/services/user"
 import { loginPage } from "@/frontend/pages/login"
 import { registerPage } from "@/frontend/pages/register"
+import { JWTSchema, RefreshTokenValue } from "@/brands"
 
 
 const AuthGroup = HttpApiGroup

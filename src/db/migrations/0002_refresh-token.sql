@@ -1,8 +1,8 @@
 -- Migration number: 0002 	 2026-07-17T17:17:58.638Z
 
 CREATE TABLE refresh_tokens (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+             id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      token_hash TEXT NOT NULL UNIQUE,     
     device_info TEXT,                     -- optional: user agent, device name
      expires_at DATETIME NOT NULL,         

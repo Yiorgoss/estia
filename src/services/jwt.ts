@@ -1,14 +1,12 @@
+import { JWTSchema, UserId, UserRoles } from "@/brands";
 import { CurrentUser, User } from "@/db/schema/User";
 import { Cookies } from "@effect/platform";
 import { Config, Context, Effect, Layer, Schema } from "effect";
 import { jwtVerify, SignJWT } from "jose";
 import { JWTClaimValidationFailed, JWTExpired } from "jose/errors";
 
-export const JWTSchema = Schema.String.pipe(
-  Schema.brand("JWT")
-)
 
-export type JWT = typeof JWTSchema.Type
+// export type JWT = typeof JWTSchema.Type
 
 export class JWTSigningError extends Schema.TaggedError<JWTSigningError>()(
   "JWTSigningError",
@@ -31,21 +29,25 @@ export class ExpiredJWTError extends Schema.TaggedError<ExpiredJWTError>()(
 ) { }
 
 export const JWTObjectSchema = Schema.Struct({
-  id: Schema.Number,
-  // role: UserRoles,
-  role: Schema.String,
-  sub: Schema.String,
-  iat: Schema.Number,
-  iss: Schema.String,
-  aud: Schema.String,
-  exp: Schema.Number
+  payload: Schema.Struct({
+    id: UserId,
+    role: UserRoles,
+    sub: Schema.String,
+    iat: Schema.Number,
+    iss: Schema.String,
+    aud: Schema.String,
+    exp: Schema.Number
+  }),
+  protectedHeader: Schema.Struct({
+    alg: Schema.String
+  })
 })
 export interface JWTService {
-  asCookie(token: JWT):
+  asCookie(token: typeof JWTSchema.Type):
     Effect.Effect<[name: string, value: string, options?: Cookies.Cookie["options"]],
       never>
-  signUser(user: User): Effect.Effect<JWT, JWTSigningError>;
-  verify(token: JWT): Effect.Effect<typeof JWTObjectSchema.Type, InvalidJWTError | ExpiredJWTError>;
+  signUser(user: User): Effect.Effect<typeof JWTSchema.Type, JWTSigningError>;
+  verify(token: typeof JWTSchema.Type): Effect.Effect<typeof JWTObjectSchema.Type, InvalidJWTError | ExpiredJWTError>;
   extractUser(object: typeof JWTObjectSchema.Type): Effect.Effect<typeof CurrentUser.Type, InvalidJWTError>
 }
 
@@ -62,7 +64,7 @@ export const JWTServiceLive = Layer.effect(
     return {
       asCookie: (token) => Effect.succeed(
         [
-          "auth_token",
+          "access_token",
           token,
           {
             httpOnly: true,
@@ -87,11 +89,11 @@ export const JWTServiceLive = Layer.effect(
             .sign(secretU8),
           catch: (error) => new JWTSigningError({ cause: error })
         }).pipe(
-          Effect.map(token => Schema.decodeSync(JWTSchema)(token))
+          Effect.map(token => Schema.decodeUnknownSync(JWTSchema)(token))
         ),
       extractUser: (object) =>
         Effect.try(
-          () => Schema.decodeUnknownSync(CurrentUser)({ id: object.id, role: object.role })
+          () => Schema.decodeUnknownSync(CurrentUser)({ id: object.payload.id, role: object.payload.role })
         )
           .pipe(
             Effect.catchTags({

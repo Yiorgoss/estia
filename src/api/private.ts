@@ -1,6 +1,5 @@
-import { AuthMiddleware } from "@/middleware/auth-mw";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpLayerRouter, HttpPlatform, HttpServerResponse, Path } from "@effect/platform";
-import { Effect, Schema } from "effect";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpLayerRouter, HttpMiddleware, HttpPlatform, HttpServerResponse } from "@effect/platform";
+import { Schema } from "effect";
 
 const PrivateGroup = HttpApiGroup
   .make('private')
@@ -13,13 +12,13 @@ const PrivateGroup = HttpApiGroup
 export const PrivateApi = HttpApi
   .make('private')
   .add(PrivateGroup)
-  // .middleware(AuthMiddleware)
   .prefix("/api")
 
-export const PrivateRoutes = HttpLayerRouter.addAll([
-  HttpLayerRouter.route("GET", "/private-get",
-    Effect.succeed(
-      HttpServerResponse.html(`
+
+export const PrivateRoutes = HttpLayerRouter.add(
+  "GET",
+  "/private-get",
+  HttpServerResponse.html(`
         <!doctype html>
         <html>
           <body>
@@ -27,7 +26,4 @@ export const PrivateRoutes = HttpLayerRouter.addAll([
           </body>
         </html>
       `)
-    )
-  ),
-])
-
+)

@@ -1,9 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { createHash, scrypt } from 'node:crypto';
 import { serialize, deserialize } from "@phc/format"
-
-import { PasswordHash } from "@/db/schema/User";
-import { RefreshTokenHash, RefreshTokenValue } from "@/db/schema/RefreshToken";
+import { RefreshTokenHash, RefreshTokenValue, UserPasswordHash } from "@/brands";
 
 export class HashError extends Schema.TaggedError<HashError>()(
   "HashError",
@@ -13,8 +11,8 @@ export class HashError extends Schema.TaggedError<HashError>()(
 ) { }
 
 export interface HasherService {
-  hashPassword(password: string): Effect.Effect<typeof PasswordHash.Type, HashError>;
-  verifyPassword(password: string, hash: typeof PasswordHash.Type): Effect.Effect<boolean, HashError>;
+  hashPassword(password: string): Effect.Effect<typeof UserPasswordHash.Type, HashError>;
+  verifyPassword(password: string, hash: typeof UserPasswordHash.Type): Effect.Effect<boolean, HashError>;
   hashRefreshToken(token: typeof RefreshTokenValue.Type): Effect.Effect<typeof RefreshTokenHash.Type, HashError>;
 }
 
@@ -64,7 +62,7 @@ export const HasherServiceLive = Layer.effect(
             )
           })
       }).pipe(
-        Effect.map(hash => Schema.decodeUnknownSync(PasswordHash)(hash))
+        Effect.map(hash => Schema.decodeUnknownSync(UserPasswordHash)(hash))
       ),
       verifyPassword: (password, checkHash) =>
         Effect.async<boolean, HashError>(

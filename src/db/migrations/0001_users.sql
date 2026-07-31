@@ -1,7 +1,7 @@
 -- 0001-user-table.sql
 
 CREATE TABLE users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
            email TEXT NOT NULL UNIQUE, 
             role TEXT NOT NULL CHECK (role IN ('user', 'owner', 'admin', 'moderator')) DEFAULT 'user',
    password_hash TEXT NOT NULL,

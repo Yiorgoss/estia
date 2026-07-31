@@ -1,10 +1,11 @@
 import { PublicApi } from "@/api/public";
+import { JWTSchema } from "@/brands";
 import { AuthService } from "@/services/auth";
-import { JWTSchema, JWTService } from "@/services/jwt";
+import { JWTService } from "@/services/jwt";
 import { RefreshTokenService } from "@/services/refresh-token";
 import { UserService } from "@/services/user";
-import { Cookies, HttpApiBuilder, HttpServerResponse } from "@effect/platform";
-import { Effect, Redacted, Schema } from "effect";
+import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
+import { Effect, Schema } from "effect";
 
 
 export const PublicApiLive = HttpApiBuilder.group(
@@ -82,7 +83,7 @@ export const PublicApiLive = HttpApiBuilder.group(
           return yield* HttpServerResponse.empty().pipe(
             HttpServerResponse.setStatus(200),
             HttpServerResponse.setCookies([
-              ["auth_token", accessToken,
+              ["access_token", accessToken,
                 { httpOnly: true, secure: true, path: "/", maxAge: 60 * 60 * 1000 }
               ],
               ["refresh_token", refreshToken,

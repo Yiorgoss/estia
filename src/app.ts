@@ -43,8 +43,8 @@ const WorkerApp = Layer.mergeAll(
   Layer.provide(Path.layer),
   Layer.provide(FileSystem.layerNoop({})),
   Layer.provide(CorsLayer),
-  DisableTracerMW,
-  SpanNameMW
+  // DisableTracerMW,
+  // SpanNameMW
 )
 
 /*
@@ -79,13 +79,14 @@ const makeConfigProvider = (bindings: Record<string, unknown>) => {
 
 // import * as util from 'util';
 // console.log(util.inspect({ args }, { depth: null, colors: true }));
-const DevLogger = Logger.make((args) => {
-  // console.log({ args })
-  console.log(`[${args.logLevel.label}] ${args.message} ${args.annotations} `)
-})
+// const DevLogger = Logger.make((args) => {
+//   // console.log({ args })
+//   console.log(`[${args.logLevel.label}] ${args.message} ${args.annotations} `)
+// })
 const DevLoggerLive = Logger.replace(
   Logger.defaultLogger,
-  DevLogger,
+  Logger.prettyLoggerDefault
+  // DevLogger,
 ).pipe(
   Layer.provide(Logger.minimumLogLevel(LogLevel.Trace))
 );

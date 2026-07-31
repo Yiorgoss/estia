@@ -1,7 +1,7 @@
 import { UserCredentials } from "@/db/schema/User"
 import { UserRepository } from "@/repo/user-repo"
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import { AuthService, AuthTokens, InvalidCredentialsError, UnauthorizedError } from "./auth"
+import { AuthService, AuthTokens, InvalidCredentialsError } from "./auth"
 import { HasherService } from "./hasher"
 import { JWTService } from "./jwt"
 import { RefreshTokenService } from "./refresh-token"

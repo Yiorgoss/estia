@@ -1,6 +1,6 @@
-import { Layer } from "effect";
+import { Layer, } from "effect";
 import { PublicApi, PublicRoutes } from "./public"
-import { HttpLayerRouter } from "@effect/platform";
+import { HttpLayerRouter, } from "@effect/platform";
 import { JWTServiceLive } from "@/services/jwt";
 import { UserRepositoryLive } from "@/repo/user-repo";
 import { RefreshTokenServiceLive } from "@/services/refresh-token";
@@ -11,6 +11,8 @@ import { PublicApiLive } from "@/handlers/public/auth-handler";
 import { AuthServiceLive } from "@/services/auth";
 import { PrivateApi, PrivateRoutes } from "./private";
 import { PrivateApiLive } from "@/handlers/private";
+import { AuthMiddleware } from "@/middleware/auth-mw";
+// import { AuthMiddlewareLive } from "@/middleware/auth-mw";
 
 /*
  * PUBLIC API
@@ -38,7 +40,6 @@ export const PublicRouterLive = Layer.mergeAll(
 /*
  * PRIVATE API
  */
-
 export const PrivateApiRouterLive = HttpLayerRouter
   .addHttpApi(PrivateApi)
   .pipe(
@@ -48,4 +49,13 @@ export const PrivateApiRouterLive = HttpLayerRouter
 export const PrivateRouterLive = Layer.mergeAll(
   PrivateApiRouterLive,
   PrivateRoutes,
-).pipe()
+).pipe(
+  Layer.provide(AuthMiddleware),
+  Layer.provide(UserServiceLive),
+  Layer.provide(AuthServiceLive),
+  Layer.provide(RefreshTokenServiceLive),
+  Layer.provide(JWTServiceLive),
+  Layer.provide(RefreshTokenRepositoryLive),
+  Layer.provide(UserRepositoryLive),
+  Layer.provide(HasherServiceLive),
+)
