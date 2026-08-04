@@ -1,10 +1,15 @@
 import { Etag, FileSystem, HttpLayerRouter, HttpPlatform, Path } from "@effect/platform"
 import { D1Client } from "@effect/sql-d1"
 import { Config, ConfigProvider, Effect, Layer, Logger, LogLevel, String } from "effect"
-import { SpanNameMW } from "./middleware/span-name"
-import { DisableTracerMW } from "./middleware/disable-tracer"
 import { HealthRouter } from "./api/health"
-import { PrivateRouterLive, PublicRouterLive } from "./api"
+import {
+  AppLive,
+  DomainServicesLive,
+  InfraServicesLive,
+  PrivateRouterLive,
+  PublicRouterLive,
+  RepositoriesLive
+} from "./api"
 
 
 
@@ -36,13 +41,19 @@ const CorsLayer = Effect.gen(function*() {
 const WorkerApp = Layer.mergeAll(
   HealthRouter,
   PublicRouterLive,
-  PrivateRouterLive
+  PrivateRouterLive,
+  // AppLive,
 ).pipe(
+  Layer.provide(AppLive),
+  Layer.provide(DomainServicesLive),
+  Layer.provide(InfraServicesLive),
+  Layer.provide(RepositoriesLive),
   Layer.provide(Etag.layer),
   Layer.provide(HttpPlatform.layer),
   Layer.provide(Path.layer),
   Layer.provide(FileSystem.layerNoop({})),
   Layer.provide(CorsLayer),
+  //   Layer.provide(AppLive)
   // DisableTracerMW,
   // SpanNameMW
 )

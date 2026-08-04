@@ -1,9 +1,9 @@
 import { PublicApi } from "@/api/public";
 import { JWTSchema } from "@/brands";
-import { AuthService } from "@/services/auth";
-import { JWTService } from "@/services/jwt";
-import { RefreshTokenService } from "@/services/refresh-token";
-import { UserService } from "@/services/user";
+import { AuthService, InvalidCredentialsError } from "@/services/auth.service";
+import { JWTService } from "@/services/jwt.service";
+import { RefreshTokenService } from "@/services/refresh-token.service";
+import { InternalError, UserService } from "@/services/user.service";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect, Schema } from "effect";
 
@@ -77,8 +77,10 @@ export const PublicApiLive = HttpApiBuilder.group(
           const userAgent = req.request.headers['user-agent']
 
           const userService = yield* UserService
-          const { accessToken, refreshToken } = yield* userService
+          const user = yield* userService
             .registerUser({ email, password }, userAgent)
+          const authService = yield* AuthService
+          const { accessToken, refreshToken } = yield* authService.authenticate({ email, password }, userAgent)
 
           return yield* HttpServerResponse.empty().pipe(
             HttpServerResponse.setStatus(200),
@@ -92,6 +94,6 @@ export const PublicApiLive = HttpApiBuilder.group(
             ]),
             Effect.orDie
           )
-        })
+        }).pipe(Effect.mapError(e => new InternalError(e)))
       )
 )

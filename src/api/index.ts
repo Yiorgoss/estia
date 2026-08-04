@@ -1,18 +1,44 @@
 import { Layer, } from "effect";
 import { PublicApi, PublicRoutes } from "./public"
 import { HttpLayerRouter, } from "@effect/platform";
-import { JWTServiceLive } from "@/services/jwt";
-import { UserRepositoryLive } from "@/repo/user-repo";
-import { RefreshTokenServiceLive } from "@/services/refresh-token";
-import { RefreshTokenRepositoryLive } from "@/repo/refresh-token-repo";
-import { UserServiceLive } from "@/services/user";
-import { HasherServiceLive } from "@/services/hasher";
+import { JWTServiceLive } from "@/services/jwt.service";
+import { UserRepositoryLive } from "@/repo/user.repo";
+import { RefreshTokenServiceLive } from "@/services/refresh-token.service";
+import { RefreshTokenRepositoryLive } from "@/repo/refresh-token.repo";
+import { UserServiceLive } from "@/services/user.service";
+import { HasherServiceLive } from "@/services/hasher.service";
 import { PublicApiLive } from "@/handlers/public/auth-handler";
-import { AuthServiceLive } from "@/services/auth";
+import { AuthServiceLive } from "@/services/auth.service";
 import { PrivateApi, PrivateRoutes } from "./private";
 import { PrivateApiLive } from "@/handlers/private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
-// import { AuthMiddlewareLive } from "@/middleware/auth-mw";
+import { SeekerRepositoryLive } from "@/repo/seeker.repo";
+import { ListerRepositoryLive } from "@/repo/lister.repo";
+
+// --- Repositories ---
+export const RepositoriesLive = Layer.mergeAll(
+  ListerRepositoryLive,
+  SeekerRepositoryLive,
+  RefreshTokenRepositoryLive,
+  UserRepositoryLive,
+)
+
+// --- Low-level / infra services ---
+export const InfraServicesLive = Layer.mergeAll(
+  HasherServiceLive,
+  JWTServiceLive
+)
+
+// --- Domain services (depend on repos + infra) ---
+export const DomainServicesLive = Layer.mergeAll(
+  UserServiceLive,
+  RefreshTokenServiceLive
+)
+
+// --- Final app layer ---
+export const AppLive = Layer.mergeAll(
+  AuthServiceLive
+)
 
 /*
  * PUBLIC API
@@ -27,14 +53,6 @@ export const PublicApiRouterLive = HttpLayerRouter
 export const PublicRouterLive = Layer.mergeAll(
   PublicApiRouterLive,
   PublicRoutes,
-).pipe(
-  Layer.provide(UserServiceLive),
-  Layer.provide(AuthServiceLive),
-  Layer.provide(RefreshTokenServiceLive),
-  Layer.provide(JWTServiceLive),
-  Layer.provide(RefreshTokenRepositoryLive),
-  Layer.provide(UserRepositoryLive),
-  Layer.provide(HasherServiceLive),
 )
 
 /*
@@ -51,11 +69,4 @@ export const PrivateRouterLive = Layer.mergeAll(
   PrivateRoutes,
 ).pipe(
   Layer.provide(AuthMiddleware),
-  Layer.provide(UserServiceLive),
-  Layer.provide(AuthServiceLive),
-  Layer.provide(RefreshTokenServiceLive),
-  Layer.provide(JWTServiceLive),
-  Layer.provide(RefreshTokenRepositoryLive),
-  Layer.provide(UserRepositoryLive),
-  Layer.provide(HasherServiceLive),
 )

@@ -1,13 +1,11 @@
-import { Context, Effect, Layer, Option, pipe, Schema } from "effect"
-import { UserRepository } from "../repo/user-repo"
-import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt"
-import { HasherService } from "./hasher"
-import { RefreshTokenService } from "./refresh-token"
+import { Context, Effect, Layer, Option, Schema } from "effect"
+import { UserRepository } from "../repo/user.repo"
+import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt.service"
+import { HasherService } from "./hasher.service"
+import { RefreshTokenService } from "./refresh-token.service"
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User"
-import { InternalError, UserNotFoundError } from "./user"
+import { InternalError, UserNotFoundError } from "./user.service"
 import { JWTSchema, RefreshTokenValue } from "@/brands"
-import { onDecision } from "effect/Schedule"
-import { linesWithSeparators } from "effect/String"
 
 
 export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(

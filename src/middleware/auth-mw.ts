@@ -1,7 +1,7 @@
 import { JWTSchema, RefreshTokenValue } from "@/brands";
-import { AuthService } from "@/services/auth";
-import { JWTService, } from "@/services/jwt";
-import { RefreshTokenService } from "@/services/refresh-token";
+import { AuthService } from "@/services/auth.service";
+import { JWTService, } from "@/services/jwt.service";
+import { RefreshTokenService } from "@/services/refresh-token.service";
 import { HttpLayerRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform";
 import { Array, Effect, pipe, Schema } from "effect";
 import { isNotNull } from "effect/Predicate";

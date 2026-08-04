@@ -2,7 +2,7 @@ import { ListerId, OwnershipEnum, UserId } from "@/brands";
 import { Schema } from "effect";
 
 
-export const Lister = Schema.Struct({
+export const ListerSchema = Schema.Struct({
   id: ListerId,
   userId: UserId,
   picture: Schema.NullishOr(Schema.String),
