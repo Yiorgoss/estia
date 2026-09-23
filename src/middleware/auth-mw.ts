@@ -1,4 +1,4 @@
-import { JWTSchema, RefreshTokenValue } from "@/brands";
+import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
 import { AuthService } from "@/services/auth.service";
 import { JWTService, } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
@@ -22,7 +22,6 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
         const request = yield* HttpServerRequest.HttpServerRequest
         const userAgent = request.headers['user-agent']
 
-
         const oldAccessToken = yield* Schema.decodeUnknown(JWTSchema)
           (request.cookies['access_token']).pipe(
             Effect.catchTags({
@@ -36,8 +35,6 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
               ParseError: () => Effect.succeed(null)
             })
           )
-
-
         const { tokens, user } = yield* auth.tokenAuthFlow({
           accessToken: oldAccessToken,
           refreshToken: oldRefreshToken
@@ -55,8 +52,6 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
         if (!user) {
           return HttpServerResponse.text("UnauthorizedError", { status: 401 })
         }
-
-
         const newAccessCookie = yield* Effect.fromNullable(tokens.accessToken)
           .pipe(
             Effect.matchEffect({
@@ -76,7 +71,6 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
           [newAccessCookie, newRefreshCookie],
           Array.filter(isNotNull),
         )
-        console.log({ cookies })
 
         return yield* HttpServerResponse.setCookies(response, cookies)
       })

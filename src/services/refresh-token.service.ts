@@ -8,7 +8,7 @@ import { UserRepository } from "@/repo/user.repo";
 import { InternalError, UserNotFoundError } from "./user.service";
 
 import { Cookies } from "@effect/platform";
-import { JWTSchema, RefreshTokenValue, UserId } from "@/brands";
+import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 
 
 // export class InvalidRefreshTokenError extends Schema.TaggedError<InvalidRefreshTokenError>()(

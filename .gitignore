@@ -2,6 +2,8 @@
 dist/
 dist-server/
 
+*.pmtiles
+
 # dev
 .yarn/
 !.yarn/releases

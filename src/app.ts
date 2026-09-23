@@ -10,6 +10,7 @@ import {
   PublicRouterLive,
   RepositoriesLive
 } from "./api"
+import { StorageRepositoryLive } from "./repo/storage.repo"
 
 
 
@@ -28,12 +29,12 @@ const CorsLayer = Effect.gen(function*() {
   const envVars = yield* EnvVars
   const allowedOrigins = envVars.ENVIRONMENT == 'production'
     ? ['https://domain.com']
-    : ['http://localhost:5173', 'http://localhost:3000'];
+    : ['http://localhost:5173', 'http://localhost:3000', '*'];
 
   return HttpLayerRouter.cors({
     allowedOrigins,
     allowedMethods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "traceparent"],
+    allowedHeaders: ["Access-Control-Allow-Origin", "Content-Type", "Authorization", "traceparent"],
     credentials: true
   })
 }).pipe(Layer.unwrapEffect, Layer.provide(EnvVars.Default))
@@ -64,6 +65,7 @@ const WorkerApp = Layer.mergeAll(
 
 type WorkerBindings = {
   readonly DB: D1Database
+  readonly STORAGE: R2Bucket,
   readonly ENVIRONMENT: 'local' | 'production'
 } & {
   readonly [key: string]: string
@@ -136,6 +138,7 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
           transformResultNames: String.snakeToCamel
         }),
       ),
+      Layer.provide(StorageRepositoryLive(bindings.STORAGE)),
       Layer.provide(configProviderLayer),
       Layer.provide(bindings.ENVIRONMENT === 'local' ? DevLoggerLive : ProdLoggerLive)
     )

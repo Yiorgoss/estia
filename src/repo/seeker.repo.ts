@@ -1,11 +1,12 @@
 import { Option, Context, Effect, Layer } from "effect"
 import { SeekerSchema } from "@/db/schema/Seeker"
 import { SqlClient, SqlError } from "@effect/sql";
-import { UserId } from "@/brands";
+import { UserId } from "@/db/schema/brands";
 
 
 export interface SeekerRepository {
-  readonly findByUserId: (userId: typeof UserId.Type) => Effect.Effect<Option.Option<typeof SeekerSchema.Type>, SqlError.SqlError>;
+  readonly findByUserId: (userId: typeof UserId.Type) =>
+    Effect.Effect<Option.Option<typeof SeekerSchema.Type>, SqlError.SqlError>;
 }
 
 export const SeekerRepository = Context.GenericTag<SeekerRepository>("SeekerRepository");

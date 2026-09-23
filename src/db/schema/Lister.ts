@@ -1,4 +1,4 @@
-import { ListerId, OwnershipEnum, UserId } from "@/brands";
+import { ListerId, OwnershipEnum, UserId } from "@/db/schema/brands";
 import { Schema } from "effect";
 
 

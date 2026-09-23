@@ -1,7 +1,7 @@
 import { Option, Context, Effect, Layer } from "effect"
 import type { User } from "@/db/schema/User"
 import { SqlClient, SqlError } from "@effect/sql";
-import { UserId, UserPasswordHash, UserRoles } from "@/brands";
+import { UserId, UserPasswordHash, UserRoles } from "@/db/schema/brands";
 
 
 export interface UserRepository {
@@ -20,51 +20,44 @@ export const UserRepositoryLive = Layer.effect(
 
     return {
       findByEmail: (email: string) =>
-        Effect.gen(function*() {
-          return yield* sql<User>`
+        sql<User> `
             SELECT *
               FROM users
              WHERE email=${email}
             `
-            .pipe(
-              Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
-            )
-        }),
+          .pipe(
+            Effect.map(rows => rows[0]),
+            Effect.map(Option.fromNullable)
+          ),
       findById: (id) =>
-        Effect.gen(function*() {
-          return yield* sql<User>`
+        sql<User> `
             SELECT *
               FROM users
              WHERE id=${id}
             `
-            .pipe(
-              Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
-            )
-        }),
-      insert: ({ email, password }) => Effect.gen(function*() {
-        return yield* sql<User>`
+          .pipe(
+            Effect.map(rows => rows[0]),
+            Effect.map(Option.fromNullable)
+          ),
+      insert: ({ email, password }) =>
+        sql<User> `
           INSERT INTO users (email, password_hash)
                VALUES (${email}, ${password})
             RETURNING *`
           .pipe(
             Effect.map(rows => rows[0]),
             Effect.map(Option.fromNullable)
-          )
-      }),
+          ),
       updateRole: (id, role) =>
-        Effect.gen(function*() {
-          return yield* sql<User>`
+        sql<User> `
               UPDATE users
                  SET role=${role}
                WHERE id = ${id}
            RETURNING *`
-            .pipe(
-              Effect.map(row => row[0]),
-              Effect.map(Option.fromNullable)
-            )
-        })
+          .pipe(
+            Effect.map(row => row[0]),
+            Effect.map(Option.fromNullable)
+          )
     } satisfies UserRepository // needed otherwise email/password become untyped when using taperror
   }).pipe(
     Effect.tapError(error =>

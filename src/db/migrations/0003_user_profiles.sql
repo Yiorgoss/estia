@@ -35,7 +35,7 @@ CREATE TABLE rooms (
         ensuite INTEGER NOT NULL DEFAULT 0 CHECK (ensuite IN (0,1)),
         smoking INTEGER NOT NULL DEFAULT 0 CHECK (smoking IN (0,1)),
            pets INTEGER NOT NULL DEFAULT 0 CHECK (pets IN (0,1)),
- available_from DATE NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),
+ available_from DATE,
      created_at DATETIME NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),
     FOREIGN KEY (lister_id) REFERENCES listers(id)
 );

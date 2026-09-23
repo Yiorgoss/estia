@@ -36,6 +36,9 @@ importers:
       '@cloudflare/vite-plugin':
         specifier: ^1.38.0
         version: 1.44.0(vite@8.1.4(@types/node@25.9.5)(esbuild@0.28.1))(workerd@1.20260708.1)(wrangler@4.110.0)
+      '@effect/language-service':
+        specifier: ^0.87.1
+        version: 0.87.1
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.5
@@ -123,6 +126,10 @@ packages:
         optional: true
       lmdb:
         optional: true
+
+  '@effect/language-service@0.87.1':
+    resolution: {integrity: sha512-kcljlJmEgqg5mFAM6UShJYJjMqJb3TbHHxrK8Qoubvwugc0aVWpRkbdgQvK5b17puOt3BKXXKOmcV+oQt0oQqQ==}
+    hasBin: true
 
   '@effect/platform@0.96.3':
     resolution: {integrity: sha512-LzvIj4HYE++TcTv/cVTCI/GRvQTV0ymwRmgjZMzNB5dU4OS05pTN36RKN0npiOm5orLJgw4yjIv1dNZoYGh/vg==}
@@ -991,6 +998,8 @@ snapshots:
       '@effect/platform': 0.96.3(effect@3.22.0)
       effect: 3.22.0
       uuid: 11.1.1
+
+  '@effect/language-service@0.87.1': {}
 
   '@effect/platform@0.96.3(effect@3.22.0)':
     dependencies:

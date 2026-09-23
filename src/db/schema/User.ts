@@ -1,4 +1,4 @@
-import { UserPasswordHash, UserId, UserRoles, JWTSchema } from "@/brands";
+import { UserPasswordHash, UserId, UserRoles, JWTSchema } from "@/db/schema/brands";
 import { Context, Schema } from "effect";
 
 export const UserSchema = Schema.Struct({
@@ -16,7 +16,7 @@ export interface User extends Schema.Schema.Type<typeof UserSchema> { }
 export const CurrentUser = UserSchema.pick("id", "role")
 
 export class CurrentUserTag extends Context.Tag("CurrentUser")<
-  typeof CurrentUser.Type,
+  CurrentUserTag,
   typeof CurrentUser.Type
 >() { }
 

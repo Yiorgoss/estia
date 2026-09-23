@@ -21,6 +21,7 @@
         {
             "binding": "STORAGE",
             "bucket_name": "estia",
+            // "remote": true,
         },
     ],
     "env": {

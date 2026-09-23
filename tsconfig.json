@@ -1,4 +1,5 @@
 {
+    "$schema": "./node_modules/@effect/language-service/schema.json",
     "compilerOptions": {
         "target": "ESNext",
         "module": "ESNext",
@@ -16,8 +17,15 @@
         "jsx": "react-jsx",
         "jsxImportSource": "hono/jsx",
         "paths": {
+            "@/brands": ["src/db/schema/brands.ts"],
             "@/*": ["./src/*"],
             // "@tests/*": ["./src/tests/*"]
         },
+        "plugins": [
+            // ... other LSPs (if any) and as last
+            {
+                "name": "@effect/language-service",
+            },
+        ],
     },
 }

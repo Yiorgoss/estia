@@ -1,9 +1,9 @@
-import { UserCredentials, UserSchema } from "@/db/schema/User"
+import { CurrentUser, UserCredentials, UserSchema } from "@/db/schema/User"
 import { UserRepository } from "@/repo/user.repo"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { HasherService } from "./hasher.service"
 import { ListerSchema } from "@/db/schema/Lister"
-import { UserId, UserRoles } from "@/brands"
+import { UserId, UserRoles } from "@/db/schema/brands"
 import { SeekerSchema } from "@/db/schema/Seeker"
 import { SeekerRepository } from "@/repo/seeker.repo"
 import { ListerRepository } from "@/repo/lister.repo"
@@ -22,9 +22,6 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
 export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {},) { }
 
 export interface UserService {
-  // getUser(id: string): Effect.Effect<User | null, Error>,
-  // loginUser: (credentials: typeof UserCredentials.Type, userAgent: string) =>
-  //   Effect.Effect<AuthTokens, InvalidCredentialsError | InternalError>
   registerUser: (credentials: typeof UserCredentials.Type, userAgent: string) => Effect.Effect<typeof UserSchema.Type, UserAlreadyExistsError | InternalError>
   switchRoles: (id: typeof UserId.Type, role: typeof UserRoles.Type) =>
     Effect.Effect<typeof SeekerSchema.Type | typeof ListerSchema.Type, never>
@@ -38,15 +35,13 @@ export const UserServiceLive = Layer.effect(
   Effect.gen(function*() {
     const userRepo = yield* UserRepository
     const hasherService = yield* HasherService
-    // const jwtService = yield* JWTService
-    // const refreshTokenService = yield* RefreshTokenService
-    // const authService = yield* AuthService
     const listerRepo = yield* ListerRepository
     const seekerRepo = yield* SeekerRepository
 
     return {
       switchRoles: (id, role) =>
         Effect.gen(function*() {
+          if (role === 'admin') return yield* Effect.dieMessage('cannot update to admin')
           const user = yield* userRepo.updateRole(id, role)
             .pipe(
               Effect.filterOrDieMessage(
@@ -56,15 +51,28 @@ export const UserServiceLive = Layer.effect(
               Effect.map(some => some.value)
             )
           if (user.role == 'seeker') {
-            return yield* seekerRepo.findByUserId(id)
+            return yield* seekerRepo
+              .findByUserId(id)
+              .pipe(
+                Effect.filterOrDieMessage(
+                  Option.isSome,
+                  "Cannot find Seeker"
+                ),
+                Effect.map(some => some.value)
+              )
           } else if (user.role == 'lister') {
-            return yield* listerRepo.findByUserId(id)
+            return yield* listerRepo
+              .findByUserId(id)
+              .pipe(
+                Effect.filterOrDieMessage(
+                  Option.isSome,
+                  "Cannot find Lister"
+                ),
+                Effect.map(some => some.value)
+              )
           }
-          return Effect.dieMessage("role didnt match shit")
+          return yield* Effect.dieMessage("role didnt match shit")
         }).pipe(Effect.catchAll(e => Effect.dieMessage(e.cause as string))),
-      // loginUser: ({ email, password }, userAgent) => Effect.gen(function*() {
-      //   return yield* authService.authenticate({ email, password }, userAgent)
-      // }),
       registerUser: ({ email, password }) => Effect.gen(function*() {
         yield* userRepo
           .findByEmail(email)

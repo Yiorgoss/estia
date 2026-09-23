@@ -1,4 +1,4 @@
-import { RefreshTokenHash, RefreshTokenId, UserId } from "@/brands";
+import { RefreshTokenHash, RefreshTokenId, UserId } from "@/db/schema/brands";
 import { Schema } from "effect";
 
 

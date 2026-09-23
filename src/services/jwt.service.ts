@@ -1,4 +1,4 @@
-import { JWTSchema, UserId, UserRoles } from "@/brands";
+import { JWTSchema, UserId, UserRoles } from "@/db/schema/brands";
 import { CurrentUser, User } from "@/db/schema/User";
 import { Cookies } from "@effect/platform";
 import { Config, Context, Effect, Layer, Schema } from "effect";

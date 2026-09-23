@@ -18,5 +18,7 @@ export const RefreshTokenId = Schema.String.pipe(Schema.brand("RefreshTokenId"))
 export const OwnershipEnum = Schema.Literal("owner", "leaseholder")
 export const ListerId = Schema.Number.pipe(Schema.brand("ListerId"))
 
+export const RoomId = Schema.Number.pipe(Schema.brand("RoomId"))
+
 export const SeekerId = Schema.Number.pipe(Schema.brand("SeekerID"))
 export const GenderEnum = Schema.Literal("male", "female", "NB")

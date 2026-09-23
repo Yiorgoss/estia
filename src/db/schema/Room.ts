@@ -1,7 +1,6 @@
+import { ListerId, RoomId } from "@/db/schema/brands"
 import { Schema } from "effect"
-import { ListerId } from "./Lister";
 
-export const RoomId = Schema.Number.pipe(Schema.brand("RoomId"))
 
 export const RoomSchema = Schema.Struct({
   id: RoomId,
@@ -14,9 +13,13 @@ export const RoomSchema = Schema.Struct({
   ensuite: Schema.BooleanFromUnknown,
   smoking: Schema.BooleanFromUnknown,
   pets: Schema.BooleanFromUnknown,
-  availableFrom: Schema.DateFromNumber,
+  availableFrom: Schema.NullishOr(Schema.DateFromNumber),
   createdAt: Schema.DateFromNumber,
 })
+
+export const RoomFilters = RoomSchema.pick("price", "location", "size", "furnished", "ensuite", "smoking", "pets", "availableFrom")
+
+export const UpdateRoomSchema = RoomSchema.pick('price', 'location', 'description', 'size', 'furnished', 'ensuite', 'smoking', 'pets', 'availableFrom')
 
 export const RoomPhoto = Schema.Struct({
   id: Schema.Number,

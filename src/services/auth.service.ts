@@ -5,7 +5,7 @@ import { HasherService } from "./hasher.service"
 import { RefreshTokenService } from "./refresh-token.service"
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User"
 import { InternalError, UserNotFoundError } from "./user.service"
-import { JWTSchema, RefreshTokenValue } from "@/brands"
+import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands"
 
 
 export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(

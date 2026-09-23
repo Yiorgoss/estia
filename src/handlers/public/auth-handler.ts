@@ -1,60 +1,96 @@
 import { PublicApi } from "@/api/public";
-import { JWTSchema } from "@/brands";
-import { AuthService, InvalidCredentialsError } from "@/services/auth.service";
+import { head } from "@/frontend/head";
+import { StorageRepository } from "@/repo/storage.repo";
+import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { InternalError, UserService } from "@/services/user.service";
-import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
-import { Effect, Schema } from "effect";
-
+import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from "@effect/platform";
+import { Chunk, Effect, pipe, Sink, Stream } from "effect";
 
 export const PublicApiLive = HttpApiBuilder.group(
   PublicApi,
   'auth',
   (handlers) =>
     handlers
-      .handle("test", (req) =>
+      // .handle("test", (req) =>
+      //   Effect.gen(function*() {
+
+      //     const response = yield* HttpServerResponse.html(
+      //       `
+      //     <!doctype html>
+      //     <html>
+      //       <head>
+      //         ${head}
+      //       </head>
+      //       <body class="flex place-content-center min-h-lvh">
+
+      //         <div id='result' class="font-2xl" style='background:purple;width:500px;height:100px'>
+      //           nothing yet
+      //         </div>
+      //         <form
+      //           hx-post="/api/auth/test-post"
+      //           enctype="multipart/form-data"
+      //           hx-target="#result"
+      //           hx-swap="outerHTML"
+      //           name="files"
+      //           >
+      //             <input type='text' name="hi" />
+      //             <input type='text' name="bye" />
+      //             <button type='submit'>Submit</button>
+      //         </form>
+      //       </body>
+      //     </html>
+      //       `
+      //     )
+      //     return response
+      //   }).pipe(
+      //     // @effect-diagnostics-next-line catchUnfailableEffect:off
+      //     Effect.catchAll(e => Effect.die(e))
+      //   )
+      // )
+      .handle("test-post", ({ request }) =>
         Effect.gen(function*() {
 
-          const response = yield* HttpServerResponse.html(
-            ` <div class="bg-red-200">thisi s comingfrom  htmx!!</div>
-              `
-          ).pipe(
-            HttpServerResponse.setCookie("jwt", "yyyyyyy", {
-              httpOnly: true,
-              secure: true,
-              sameSite: "strict",
-              path: "/",
-              maxAge: 60 * 60 * 1000 //in ms 
-            }),
-            Effect.orDie
-          )
-          const reqCookie = req.request.cookies['access_token']
-          console.log("cookies on request:", reqCookie)
-          const jwtService = yield* JWTService
-          const object = yield* jwtService
-            .verify(Schema.decodeSync(JWTSchema)(reqCookie))
-            .pipe(
-              Effect.catchTags({
-                InvalidJWTError: () => Effect.log("invalid"),
-                ExpiredJWTError: () => Effect.log("expied")
-              })
+          console.log("=========================================================================")
+
+          const r2 = yield* StorageRepository
+          yield* request.multipartStream.pipe(
+            Stream.runForEach(part => Effect.gen(function*() {
+              const { _tag, key } = part
+
+              console.log({ _tag, key })
+              if (_tag == 'File') {
+                const r2Obj = yield* r2.newMultipart(`map/${key}`, part.content)
+                console.log({ r2Obj })
+              }
+            })
             )
-          console.log("verified: ", object)
-          return response ?? ""
-        })
+          )
+          // yield* Effect.logInfo(formData['greece.pmtiles'])
+
+
+          const response = yield* HttpServerResponse.html(
+            `<div id='result' style="background:tomato">Successful</div>`
+          )
+
+          return response
+        }).pipe(
+          // @effect-diagnostics-next-line catchUnfailableEffect:off
+          Effect.catchAll(e => Effect.die(e))
+        )
       )
       .handle('login', (req) =>
         Effect.gen(function*() {
           //validate user
-          Effect.logDebug("attempting login")
+          yield* Effect.logDebug("attempting login")
           const { email, password } = req.payload
           const userAgent = req.request.headers['user-agent']
 
           const authService = yield* AuthService
           const { accessToken, refreshToken } = yield* authService
             .authenticate({ email, password }, userAgent)
-          Effect.logInfo("authentication successful")
+          yield* Effect.logInfo("authentication successful")
           const jwtService = yield* JWTService
           const accessCookie = yield* jwtService.asCookie(accessToken)
           const refreshTokenService = yield* RefreshTokenService

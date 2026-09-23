@@ -10,10 +10,10 @@ import { HasherServiceLive } from "@/services/hasher.service";
 import { PublicApiLive } from "@/handlers/public/auth-handler";
 import { AuthServiceLive } from "@/services/auth.service";
 import { PrivateApi, PrivateRoutes } from "./private";
-import { PrivateApiLive } from "@/handlers/private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
 import { SeekerRepositoryLive } from "@/repo/seeker.repo";
 import { ListerRepositoryLive } from "@/repo/lister.repo";
+import { UserHandler } from "@/handlers/private/user.handler";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -58,10 +58,11 @@ export const PublicRouterLive = Layer.mergeAll(
 /*
  * PRIVATE API
  */
+
 export const PrivateApiRouterLive = HttpLayerRouter
   .addHttpApi(PrivateApi)
   .pipe(
-    Layer.provide(PrivateApiLive),
+    Layer.provide(UserHandler),
   )
 
 export const PrivateRouterLive = Layer.mergeAll(

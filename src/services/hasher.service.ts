@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { createHash, scrypt } from 'node:crypto';
 import { serialize, deserialize } from "@phc/format"
-import { RefreshTokenHash, RefreshTokenValue, UserPasswordHash } from "@/brands";
+import { RefreshTokenHash, RefreshTokenValue, UserPasswordHash } from "@/db/schema/brands";
 
 export class HashError extends Schema.TaggedError<HashError>()(
   "HashError",
