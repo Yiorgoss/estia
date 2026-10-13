@@ -66,14 +66,14 @@ export const RoomRepositoryLive = Layer.effect(
             SELECT *
               FROM rooms
              WHERE 1=1
-                 ${filters.price !== undefined ? sql`AND price = ${filters.price}` : sql``}
-                 ${filters.location !== undefined ? sql`AND location = ${filters.location}` : sql``}
-                 ${filters.size !== undefined ? sql`AND size = ${filters.size}` : sql``}
-                 ${filters.furnished !== undefined ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
-                 ${filters.ensuite !== undefined ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
-                 ${filters.smoking !== undefined ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
-                 ${filters.pets !== undefined ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
-                 ${filters.availableFrom !== undefined ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
+                 ${filters.price != null ? sql`AND price = ${filters.price}` : sql``}
+                 ${filters.location != null ? sql`AND location = ${filters.location}` : sql``}
+                 ${filters.size != null ? sql`AND size = ${filters.size}` : sql``}
+                 ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
+                 ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
+                 ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
+                 ${filters.pets != null ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
+                 ${filters.availableFrom != null ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
             `
           .pipe(
             Effect.map(rows => rows.map(decodeRoom))
