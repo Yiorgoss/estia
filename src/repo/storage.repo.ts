@@ -1,5 +1,5 @@
-import { MultipartError } from "@effect/platform/Multipart";
-import { Chunk, Context, DateTime, Effect, Layer, Schema, Sink, Stream } from "effect";
+import { MultipartError } from "effect/http/Multipart";
+import { Context, Effect, Layer, Schema, Stream } from "effect";
 
 class R2UploadError extends Schema.TaggedError<R2UploadError>()("R2UploadError", {
   cause: Schema.Unknown
@@ -33,7 +33,7 @@ export interface StorageRepository {
   // list(options?: R2ListOptions): Promise<R2Objects>;
 }
 
-export const StorageRepository = Context.GenericTag<StorageRepository>("StorageRepository");
+export const StorageRepository = Context.Service<StorageRepository>("StorageRepository");
 
 export const StorageRepositoryLive = (bucket: R2Bucket) =>
   Layer.effect(StorageRepository,
@@ -62,20 +62,21 @@ export const StorageRepositoryLive = (bucket: R2Bucket) =>
             return yield* stream.pipe(
               // Stream.tap(x => Effect.log("lenght of each new chunk", x.length)),
               Stream.mapAccum(
-                { remainder: Buffer.alloc(0), length: 0 },
+                () => ({ remainder: Buffer.alloc(0), length: 0 }),
                 (state, chunk) => {
-                  const newLength = state.length + chunk.length
-                  if (newLength > bufferSize) {
-                    const overdraft = bufferSize - newLength //to count from back of buffer:w
-
-                    const keep = chunk.slice(0, overdraft)
-                    const remainder = Buffer.from(chunk.subarray(overdraft))
-                    const emit = Buffer.concat([state.remainder, keep])
-                    return [{ remainder, length: overdraft }, emit]
+                  const combined = Buffer.concat([state.remainder, chunk])
+                  const parts: Array<Buffer> = []
+                  let offset = 0
+                  while (combined.length - offset >= bufferSize) {
+                    parts.push(combined.subarray(offset, offset + bufferSize))
+                    offset += bufferSize
                   }
-                  const newState = { remainder: Buffer.concat([state.remainder, chunk]), length: newLength }
-                  return [newState, Buffer.alloc(0)]
+                  const remainder = Buffer.from(combined.subarray(offset))
+                  return [{ remainder, length: remainder.length }, parts]
                 },
+                {
+                  onHalt: (state) => state.remainder.length > 0 ? [state.remainder] : []
+                }
               ),
               Stream.filter(x => x.length > 0),
               Stream.tap(x => Effect.log('length after accum', x.length)),

@@ -16,7 +16,7 @@ export interface HasherService {
   hashRefreshToken(token: typeof RefreshTokenValue.Type): Effect.Effect<typeof RefreshTokenHash.Type, HashError>;
 }
 
-export const HasherService = Context.GenericTag<HasherService>("PasswordHasher");
+export const HasherService = Context.Service<HasherService>("PasswordHasher");
 
 export const scryptOptions = {
   N: 16384, //cost
@@ -32,7 +32,7 @@ export const HasherServiceLive = Layer.effect(
       hashPassword: (password) => Effect.gen(function*() {
         const salt = crypto.getRandomValues(new Uint8Array(16))
 
-        return yield* Effect.async<string, HashError>(
+        return yield* Effect.callback<string, HashError>(
           (resume) => {
             scrypt(
               password,
@@ -41,11 +41,11 @@ export const HasherServiceLive = Layer.effect(
               scryptOptions,
               (err, derivedKey) => {
                 if (err) {
-                  resume(Effect.fail(new HashError({ cause: String(err) })))
+                  return resume(Effect.fail(new HashError({ cause: String(err) })))
                 }
                 const ln = Math.log2(scryptOptions.N)
                 if (!Number.isSafeInteger(ln)) {
-                  resume(Effect.fail(new HashError({ cause: "use a cost value that is a power of 2" })))
+                  return resume(Effect.fail(new HashError({ cause: "use a cost value that is a power of 2" })))
                 }
                 const phcString = serialize({
                   id: 'scrypt',
@@ -65,24 +65,26 @@ export const HasherServiceLive = Layer.effect(
         Effect.map(hash => Schema.decodeUnknownSync(UserPasswordHash)(hash))
       ),
       verifyPassword: (password, checkHash) =>
-        Effect.async<boolean, HashError>(
+        Effect.callback<boolean, HashError>(
           (resume) => {
             const { salt, params, hash } = deserialize(checkHash)
 
             // ugh  untyped libs
-            if (!salt) new HashError({ cause: "Error verifying - no salt in hash" })
-            if (!hash) new HashError({ cause: "Error verifying - no hash" })
-            if (!params || !params.N || !params.r || !params.p) new HashError({ cause: `Error verifying - wrong params expected - N,p,r got - ${Object.keys(params!)}` })
+            if (!salt) return resume(Effect.fail(new HashError({ cause: "Error verifying - no salt in hash" })))
+            if (!hash) return resume(Effect.fail(new HashError({ cause: "Error verifying - no hash" })))
+            if (!params || params.ln === undefined || params.r === undefined || params.p === undefined) {
+              return resume(Effect.fail(new HashError({ cause: `Error verifying - wrong params expected - ln,p,r got - ${Object.keys(params ?? {})}` })))
+            }
 
             scrypt(
               password,
-              salt!,
+              salt,
               32,
-              params!,
+              { N: 2 ** Number(params.ln), r: Number(params.r), p: Number(params.p) },
               (err, derivedKey) => {
 
-                if (err) resume(Effect.fail(new HashError({ cause: String(err) })))
-                if (Buffer.from(derivedKey).equals(Buffer.from(hash!))) resume(Effect.succeed(true))
+                if (err) return resume(Effect.fail(new HashError({ cause: String(err) })))
+                if (Buffer.from(derivedKey).equals(Buffer.from(hash))) return resume(Effect.succeed(true))
                 resume(Effect.succeed(false))
               }
             )
@@ -97,4 +99,3 @@ export const HasherServiceLive = Layer.effect(
     }
   })
 )
-

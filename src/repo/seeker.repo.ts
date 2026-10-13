@@ -1,15 +1,16 @@
-import { Option, Context, Effect, Layer } from "effect"
+import { Option, Context, Effect, Layer, Schema } from "effect"
 import { SeekerSchema } from "@/db/schema/Seeker"
-import { SqlClient, SqlError } from "@effect/sql";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { UserId } from "@/db/schema/brands";
 
 
 export interface SeekerRepository {
   readonly findByUserId: (userId: typeof UserId.Type) =>
-    Effect.Effect<Option.Option<typeof SeekerSchema.Type>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<typeof SeekerSchema.Type>, SqlError>;
 }
 
-export const SeekerRepository = Context.GenericTag<SeekerRepository>("SeekerRepository");
+export const SeekerRepository = Context.Service<SeekerRepository>("SeekerRepository");
 
 export const SeekerRepositoryLive = Layer.effect(
   SeekerRepository,
@@ -19,15 +20,15 @@ export const SeekerRepositoryLive = Layer.effect(
     return {
       findByUserId: (userId) =>
         Effect.gen(function*() {
-          return yield* sql<typeof SeekerSchema.Type>`
+          return yield* sql<Record<string, unknown>>`
             SELECT *
               FROM seekers
              WHERE user_id=${userId}
-         RETURNING *;
             `
             .pipe(
               Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
+              Effect.map(Option.fromNullishOr),
+              Effect.map(Option.map(row => Schema.decodeUnknownSync(SeekerSchema)(row)))
             )
 
         })

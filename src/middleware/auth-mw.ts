@@ -2,12 +2,12 @@ import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
 import { AuthService } from "@/services/auth.service";
 import { JWTService, } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
-import { HttpLayerRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Array, Effect, pipe, Schema } from "effect";
 import { isNotNull } from "effect/Predicate";
 
 
-export const AuthMiddleware = HttpLayerRouter.middleware(
+export const AuthMiddleware = HttpRouter.middleware(
   Effect.gen(function*() {
 
     const auth = yield* AuthService
@@ -22,17 +22,17 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
         const request = yield* HttpServerRequest.HttpServerRequest
         const userAgent = request.headers['user-agent']
 
-        const oldAccessToken = yield* Schema.decodeUnknown(JWTSchema)
+        const oldAccessToken = yield* Schema.decodeUnknownEffect(JWTSchema)
           (request.cookies['access_token']).pipe(
             Effect.catchTags({
-              ParseError: () => Effect.succeed(null)
+              SchemaError: () => Effect.succeed(null)
             })
           )
 
-        const oldRefreshToken = yield* Schema.decodeUnknown(RefreshTokenValue)
+        const oldRefreshToken = yield* Schema.decodeUnknownEffect(RefreshTokenValue)
           (request.cookies['refresh_token']).pipe(
             Effect.catchTags({
-              ParseError: () => Effect.succeed(null)
+              SchemaError: () => Effect.succeed(null)
             })
           )
         const { tokens, user } = yield* auth.tokenAuthFlow({
@@ -52,14 +52,14 @@ export const AuthMiddleware = HttpLayerRouter.middleware(
         if (!user) {
           return HttpServerResponse.text("UnauthorizedError", { status: 401 })
         }
-        const newAccessCookie = yield* Effect.fromNullable(tokens.accessToken)
+        const newAccessCookie = yield* Effect.fromNullishOr(tokens.accessToken)
           .pipe(
             Effect.matchEffect({
               onSuccess: (token) => jwtService.asCookie(token),
               onFailure: () => Effect.succeed(null)
             })
           )
-        const newRefreshCookie = yield* Effect.fromNullable(tokens.refreshToken)
+        const newRefreshCookie = yield* Effect.fromNullishOr(tokens.refreshToken)
           .pipe(
             Effect.matchEffect({
               onSuccess: (token) => refreshTokenService.asCookie(token),

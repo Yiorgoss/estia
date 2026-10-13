@@ -1,13 +1,13 @@
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HashError, HasherService } from "./hasher.service";
 import { RefreshTokenNotFoundError, RefreshTokenRepository } from "@/repo/refresh-token.repo";
-import { SqlError } from "@effect/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { JWTService } from "./jwt.service";
 import { UserRepository } from "@/repo/user.repo";
 import { InternalError, UserNotFoundError } from "./user.service";
 
-import { Cookies } from "@effect/platform";
+import { Cookies } from "effect/http";
 import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 
 
@@ -29,7 +29,7 @@ export interface RefreshTokenService {
     Effect.Effect<typeof RefreshTokenValue.Type,
       InternalError>
 }
-export const RefreshTokenService = Context.GenericTag<RefreshTokenService>("RefreshTokenService");
+export const RefreshTokenService = Context.Service<RefreshTokenService>("RefreshTokenService");
 
 export const RefreshTokenServiceLive = Layer.effect(
   RefreshTokenService,
@@ -96,9 +96,9 @@ export const RefreshTokenServiceLive = Layer.effect(
         }).pipe(
           Effect.catchTags({
             HashError: () =>
-              Effect.fail(new InternalError({ cause: "" })),
+              Effect.fail(new InternalError()),
             SqlError: () =>
-              Effect.fail(new InternalError({ cause: "" })),
+              Effect.fail(new InternalError()),
           })
         ),
       consumeToken: (token) =>
@@ -126,11 +126,11 @@ export const RefreshTokenServiceLive = Layer.effect(
         }).pipe(
           Effect.catchTags({
             HashError: () =>
-              Effect.fail(new InternalError({ cause: "Hashing" })),
+              Effect.fail(new InternalError()),
             SqlError: () =>
-              Effect.fail(new InternalError({ cause: "SQL" })),
+              Effect.fail(new InternalError()),
             JWTSigningError: () =>
-              Effect.fail(new InternalError({ cause: "JWT Signing" }))
+              Effect.fail(new InternalError())
           })
         ),
     }

@@ -4,3 +4,6 @@ allowBuilds:
   msgpackr-extract: true
   sharp: true
   workerd: true
+minimumReleaseAgeExclude:
+  - '@effect/sql-d1@4.0.4'
+  - effect@4.0.4

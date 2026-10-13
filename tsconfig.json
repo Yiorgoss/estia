@@ -17,7 +17,7 @@
         "jsx": "react-jsx",
         "jsxImportSource": "hono/jsx",
         "paths": {
-            "@/brands": ["src/db/schema/brands.ts"],
+            "@/brands": ["./src/db/schema/brands.ts"],
             "@/*": ["./src/*"],
             // "@tests/*": ["./src/tests/*"]
         },

@@ -1,6 +1,6 @@
 import { JWTSchema, UserId, UserRoles } from "@/db/schema/brands";
 import { CurrentUser, User } from "@/db/schema/User";
-import { Cookies } from "@effect/platform";
+import { Cookies } from "effect/http";
 import { Config, Context, Effect, Layer, Schema } from "effect";
 import { jwtVerify, SignJWT } from "jose";
 import { JWTClaimValidationFailed, JWTExpired } from "jose/errors";
@@ -51,14 +51,14 @@ export interface JWTService {
   extractUser(object: typeof JWTObjectSchema.Type): Effect.Effect<typeof CurrentUser.Type, InvalidJWTError>
 }
 
-export const JWTService = Context.GenericTag<JWTService>("JWTService");
+export const JWTService = Context.Service<JWTService>("JWTService");
 
 export const JWTServiceLive = Layer.effect(
   JWTService,
   Effect.gen(function*() {
     // const domain = yield* Config.string("DOMAIN")
-    const domain = yield* Config.string("DOMAIN")
-    const secret = yield* Config.string("JWT_SECRET")
+    const domain = yield* Config.String("DOMAIN")
+    const secret = yield* Config.String("JWT_SECRET")
     const secretU8 = new TextEncoder().encode(secret)
 
     return {
@@ -97,7 +97,7 @@ export const JWTServiceLive = Layer.effect(
         )
           .pipe(
             Effect.catchTags({
-              UnknownException: (e) => Effect.fail(new InvalidJWTError({ cause: e.cause }))
+              UnknownError: (e) => Effect.fail(new InvalidJWTError({ cause: e.cause }))
             })
           ),
       verify: (token) => Effect.tryPromise({

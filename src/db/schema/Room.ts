@@ -1,5 +1,5 @@
 import { ListerId, RoomId } from "@/db/schema/brands"
-import { Schema } from "effect"
+import { Schema, Struct } from "effect"
 
 
 export const RoomSchema = Schema.Struct({
@@ -9,17 +9,17 @@ export const RoomSchema = Schema.Struct({
   location: Schema.String,
   description: Schema.NullishOr(Schema.String),
   size: Schema.NullishOr(Schema.Number),
-  furnished: Schema.BooleanFromUnknown,
-  ensuite: Schema.BooleanFromUnknown,
-  smoking: Schema.BooleanFromUnknown,
-  pets: Schema.BooleanFromUnknown,
-  availableFrom: Schema.NullishOr(Schema.DateFromNumber),
-  createdAt: Schema.DateFromNumber,
+  furnished: Schema.BooleanFromBit,
+  ensuite: Schema.BooleanFromBit,
+  smoking: Schema.BooleanFromBit,
+  pets: Schema.BooleanFromBit,
+  availableFrom: Schema.NullishOr(Schema.DateFromMillis),
+  createdAt: Schema.DateFromMillis,
 })
 
-export const RoomFilters = RoomSchema.pick("price", "location", "size", "furnished", "ensuite", "smoking", "pets", "availableFrom")
+export const RoomFilters = RoomSchema.mapFields(Struct.pick(["price", "location", "size", "furnished", "ensuite", "smoking", "pets", "availableFrom"]))
 
-export const UpdateRoomSchema = RoomSchema.pick('price', 'location', 'description', 'size', 'furnished', 'ensuite', 'smoking', 'pets', 'availableFrom')
+export const UpdateRoomSchema = RoomSchema.mapFields(Struct.pick(['price', 'location', 'description', 'size', 'furnished', 'ensuite', 'smoking', 'pets', 'availableFrom']))
 
 export const RoomPhoto = Schema.Struct({
   id: Schema.Number,
