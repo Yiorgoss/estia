@@ -35,6 +35,8 @@ export const RefreshTokenRepositoryLive = Layer.effect(
               UPDATE refresh_tokens
                  SET revoked_at = ${now}
                WHERE token_hash = ${hash}
+                 AND revoked_at IS NULL
+                 AND expires_at >= ${now}
            RETURNING *;`
             .pipe(
               Effect.map(rows => rows[0]),

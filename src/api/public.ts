@@ -1,9 +1,9 @@
 import { UserCredentials } from "@/db/schema/User"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import { HttpRouter, HttpServerResponse } from "effect/http"
 import { Effect, Schema } from "effect"
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service"
-import { InternalError, UserAlreadyExistsError } from "@/services/user.service"
+import { InternalError } from "@/services/user.service"
 import { loginPage } from "@/frontend/pages/login"
 import { registerPage } from "@/frontend/pages/register"
 import { mapDemo } from "@/frontend/map-demo"
@@ -41,7 +41,6 @@ const AuthGroup = HttpApiGroup
           refreshToken: RefreshTokenValue,
         }),
         error: [
-          UserAlreadyExistsError.pipe(HttpApiSchema.status(409)),
           InternalError,
         ],
       })

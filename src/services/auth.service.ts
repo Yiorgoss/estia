@@ -3,6 +3,7 @@ import { UserRepository } from "../repo/user.repo"
 import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt.service"
 import { HasherService } from "./hasher.service"
 import { RefreshTokenService } from "./refresh-token.service"
+import { RefreshTokenNotFoundError } from "@/repo/refresh-token.repo"
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User"
 import { InternalError, UserNotFoundError } from "./user.service"
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands"
@@ -38,7 +39,7 @@ export class AuthService extends Context.Service<AuthService, {
         accessToken?: typeof JWTSchema.Type | null | undefined,
       }, user: typeof CurrentUser.Type
     },
-      InvalidJWTError | ExpiredJWTError | UserNotFoundError | UnauthorizedError | InternalError>
+      InvalidJWTError | ExpiredJWTError | UserNotFoundError | UnauthorizedError | InternalError | RefreshTokenNotFoundError>
   readonly authenticate: (credentials: UserCredentialsType, userAgent: string) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>
   // readonly login: (credentials: UserCredentialsType, userAgent: string) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>
 }>()("AuthService") { }
@@ -101,7 +102,10 @@ export const AuthServiceLive = Layer.effect(
           const user = yield* userRepo
             .findByEmail(email)
             .pipe(
-              Effect.map(Option.getOrThrowWith(() => new InvalidCredentialsError()))
+              Effect.flatMap(Option.match({
+                onNone: () => Effect.fail(new InvalidCredentialsError()),
+                onSome: Effect.succeed
+              }))
             )
           yield* hasher
             .verifyPassword(password, user.passwordHash)

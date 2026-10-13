@@ -24,10 +24,10 @@ export interface RefreshTokenService {
       HashError | SqlError>;
   consumeToken: (token: typeof RefreshTokenValue.Type) =>
     Effect.Effect<typeof JWTSchema.Type,
-      InternalError | UserNotFoundError>;
+      InternalError | UserNotFoundError | RefreshTokenNotFoundError>;
   rotateToken: (userId: typeof UserId.Type, userAgent: string, token: typeof RefreshTokenValue.Type) =>
     Effect.Effect<typeof RefreshTokenValue.Type,
-      InternalError>
+      InternalError | RefreshTokenNotFoundError>
 }
 export const RefreshTokenService = Context.Service<RefreshTokenService>("RefreshTokenService");
 
@@ -78,7 +78,13 @@ export const RefreshTokenServiceLive = Layer.effect(
           const now = yield* Clock.currentTimeMillis
           const expiresAt = now + 30 * 24 * 60 * 60 * 1000
 
-          yield* refreshTokenRepo.revoke(oldToken)
+          const revoked = yield* refreshTokenRepo.revoke(oldToken)
+          yield* revoked.pipe(
+            Option.match({
+              onNone: () => Effect.fail(new RefreshTokenNotFoundError()),
+              onSome: Effect.succeed
+            })
+          )
 
           const newTokenValue = Schema.decodeSync(RefreshTokenValue)(
             crypto.getRandomValues(new Uint8Array(32)).toHex())
@@ -105,18 +111,21 @@ export const RefreshTokenServiceLive = Layer.effect(
         Effect.gen(function*() {
           //does token exist and is valid
           const tokenHash = yield* hasher.hashRefreshToken(token)
-          const revokedToken = yield* refreshTokenRepo
-            .revoke(tokenHash)
-            .pipe(
-              Effect.map(Option.getOrThrowWith(
-                () => new RefreshTokenNotFoundError())))
+          const validToken = yield* refreshTokenRepo.findValidByHash(tokenHash)
+          const tokenRecord = yield* validToken.pipe(
+            Option.match({
+              onNone: () => Effect.fail(new RefreshTokenNotFoundError()),
+              onSome: Effect.succeed
+            }))
 
           // get associated user
           const user = yield* userRepo
-            .findById(revokedToken.userId)
+            .findById(tokenRecord.userId)
             .pipe(
-              Effect.map(Option.getOrThrowWith(
-                () => new UserNotFoundError({ cause: "User Not Found" }))))
+              Effect.flatMap(Option.match({
+                onNone: () => Effect.fail(new UserNotFoundError({ cause: "User Not Found" })),
+                onSome: Effect.succeed
+              })))
 
           //construct jwt
           const newJWT = yield* jwtService.signUser(user)
