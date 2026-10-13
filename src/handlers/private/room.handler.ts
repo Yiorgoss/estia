@@ -1,8 +1,3 @@
-// NOTE: `RoomGroup` is currently commented out of `PrivateApi` (see
-// `src/api/private.ts`), so this handler cannot be registered. It is kept here,
-// commented out, because it is dead code. Re-enable it together with `RoomGroup`
-// and the `RoomGroup` endpoint definitions.
-/*
 import { PrivateApi } from "@/api/private";
 import { RoomId } from "@/db/schema/brands";
 import { RoomNotFoundError, RoomRepository } from "@/repo/room.repo";
@@ -16,7 +11,7 @@ export const RoomHandler = HttpApiBuilder.group(
   'room-group',
   (handlers) =>
     handlers
-      .handle("get-one", ({ path: { id } }) =>
+      .handle("get-one", ({ params: { id } }) =>
         Effect.gen(function*() {
           const roomId = yield* Schema.decodeUnknownEffect(RoomId)(id)
 
@@ -26,7 +21,7 @@ export const RoomHandler = HttpApiBuilder.group(
             .pipe(
               Effect.filterOrFail(
                 Option.isSome,
-                () => new RoomNotFoundError({ cause: "" })
+                () => new RoomNotFoundError({ cause: "Room not found" })
               ),
               Effect.map(x => x.value)
             )
@@ -39,4 +34,3 @@ export const RoomHandler = HttpApiBuilder.group(
         )
       )
 )
-*/

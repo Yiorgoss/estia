@@ -4,7 +4,7 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "dev": "vite dev",
+        "dev": "vite dev --host",
         "build": "vite build",
         "preview": "pnpm run build && vite preview",
         "deploy": "pnpm run build && wrangler deploy",

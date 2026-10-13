@@ -38,26 +38,27 @@ export const UserGroup = HttpApiGroup
   )
   .prefix("/users")
 
-// export const RoomGroup = HttpApiGroup
-//   .make('room-group')
-//   .add(
-//     HttpApiEndpoint
-//       .get("get-one", "/:id")
-//       .setPath(
-//         Schema.Struct({
-//           id: Schema.NumberFromString
-//         })
-//       )
-//       .addSuccess(RoomSchema)
-//       .addError(InternalError)
-//       .addError(RoomNotFoundError, { status: 404 })
-//   )
-//   .prefix("/rooms")
+export const RoomGroup = HttpApiGroup
+  .make('room-group')
+  .add(
+    HttpApiEndpoint
+      .get("get-one", "/:id", {
+        params: Schema.Struct({
+          id: Schema.NumberFromString
+        }),
+        success: RoomSchema,
+        error: [
+          InternalError,
+          RoomNotFoundError,
+        ],
+      })
+  )
+  .prefix("/rooms")
 
 export const PrivateApi = HttpApi
   .make('private-api')
   .add(UserGroup)
-  // .add(RoomGroup)
+  .add(RoomGroup)
   .prefix("/api")
 
 

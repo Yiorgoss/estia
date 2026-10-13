@@ -93,7 +93,29 @@ assert_status "$CODE" 200 "current-user /api/users/me"
 grep -q '"userProfile"' "$WORK/me" || fail "current-user response has userProfile"
 pass "current-user response shape"
 
-# 5. refresh rotation via a route that does not re-read the access token
+# 5. rooms round-trip: seed a lister + room, then read it back through the API
+ROOM_LOCATION="Smokeville-$(date +%s)"
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "INSERT OR IGNORE INTO listers (user_id, name, ownership) VALUES ('${USER_ID}', 'Smoke Lister', 'owner'); INSERT INTO rooms (lister_id, price, location, description, size, furnished, ensuite, smoking, pets, available_from) SELECT id, 500, '${ROOM_LOCATION}', 'smoke room', 20, 1, 0, 0, 1, 946684800000 FROM listers WHERE user_id='${USER_ID}';" \
+  >/dev/null 2>&1 || fail "seed room"
+pass "seed room"
+
+ROOM_ID="$(pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
+  --command "SELECT id FROM rooms WHERE location='${ROOM_LOCATION}' ORDER BY id DESC LIMIT 1;" 2>/dev/null \
+  | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].id)))')"
+[ -n "$ROOM_ID" ] || fail "room id"
+
+CODE=$(curl -s -o "$WORK/room" -w '%{http_code}' "${BASE_URL}/api/rooms/${ROOM_ID}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "get room by id"
+grep -q "\"location\":\"${ROOM_LOCATION}\"" "$WORK/room" || fail "room response has the seeded location"
+pass "room response shape"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/99999999" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 404 "unknown room rejected"
+
+# 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")
 assert_status "$CODE" 200 "refresh rotation request"
@@ -103,7 +125,7 @@ ROTATED_REFRESH="$(cookie_value "$WORK/rotate.h" refresh_token)"
 [ "$ROTATED_REFRESH" != "$REFRESH" ] || fail "refresh rotation did not rotate the token"
 pass "refresh rotation issued new access + refresh cookies"
 
-# 6. multipart upload
+# 7. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
 CODE=$(curl -s -o "$WORK/multipart" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/auth/test-post" \

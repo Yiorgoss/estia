@@ -14,7 +14,9 @@ import { PrivateApi, PrivateRoutes } from "./private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
 import { SeekerRepositoryLive } from "@/repo/seeker.repo";
 import { ListerRepositoryLive } from "@/repo/lister.repo";
+import { RoomRepositoryLive } from "@/repo/room.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
+import { RoomHandler } from "@/handlers/private/room.handler";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -22,6 +24,7 @@ export const RepositoriesLive = Layer.mergeAll(
   SeekerRepositoryLive,
   RefreshTokenRepositoryLive,
   UserRepositoryLive,
+  RoomRepositoryLive,
 )
 
 // --- Low-level / infra services ---
@@ -82,7 +85,7 @@ export const PublicRouterLive = Layer.mergeAll(
 export const PrivateApiRouterLive = HttpApiBuilder
   .layer(PrivateApi)
   .pipe(
-    Layer.provide(UserHandler),
+    Layer.provide(Layer.mergeAll(UserHandler, RoomHandler)),
   )
 
 export const PrivateRouterLive = Layer.mergeAll(
