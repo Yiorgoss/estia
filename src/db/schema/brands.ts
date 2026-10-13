@@ -9,16 +9,16 @@ export const JWTSchema = Schema.String.pipe(Schema.brand("JWT"))
 
 export const UserPasswordHash = Schema.String.pipe(Schema.brand("UserPasswordHash"))
 export const UserId = Schema.String.pipe(Schema.brand("UserId"))
-export const UserRoles = Schema.Literal("admin", "seeker", "lister", "user") //user is unassigned
+export const UserRoles = Schema.Literals(["admin", "seeker", "lister", "user"]) //user is unassigned
 
 export const RefreshTokenValue = Schema.String.pipe(Schema.brand("RefreshTokenValue"))
 export const RefreshTokenHash = Schema.String.pipe(Schema.brand("RefreshTokenHash"))
 export const RefreshTokenId = Schema.String.pipe(Schema.brand("RefreshTokenId"))
 
-export const OwnershipEnum = Schema.Literal("owner", "leaseholder")
+export const OwnershipEnum = Schema.Literals(["owner", "leaseholder"])
 export const ListerId = Schema.Number.pipe(Schema.brand("ListerId"))
 
 export const RoomId = Schema.Number.pipe(Schema.brand("RoomId"))
 
 export const SeekerId = Schema.Number.pipe(Schema.brand("SeekerID"))
-export const GenderEnum = Schema.Literal("male", "female", "NB")
+export const GenderEnum = Schema.Literals(["male", "female", "NB"])

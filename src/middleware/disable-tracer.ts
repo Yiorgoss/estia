@@ -1,7 +1,7 @@
+import { Layer } from "effect"
+import { HttpMiddleware } from "effect/http"
 
-import { HttpMiddleware } from "@effect/platform"
-
-export const DisableTracerMW = HttpMiddleware.withTracerDisabledWhen(request => {
+export const DisableTracerMW = Layer.succeed(HttpMiddleware.TracerDisabledWhen)(request => {
   if (request.method === 'OPTIONS') return true
   const path = request.url.split("?")[0]
 

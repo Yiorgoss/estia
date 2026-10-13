@@ -1,8 +1,13 @@
+// NOTE: `RoomGroup` is currently commented out of `PrivateApi` (see
+// `src/api/private.ts`), so this handler cannot be registered. It is kept here,
+// commented out, because it is dead code. Re-enable it together with `RoomGroup`
+// and the `RoomGroup` endpoint definitions.
+/*
 import { PrivateApi } from "@/api/private";
-import { RoomId, UserId } from "@/db/schema/brands";
+import { RoomId } from "@/db/schema/brands";
 import { RoomNotFoundError, RoomRepository } from "@/repo/room.repo";
 import { InternalError } from "@/services/user.service";
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import { Effect, Option, Schema } from "effect";
 
 
@@ -13,7 +18,7 @@ export const RoomHandler = HttpApiBuilder.group(
     handlers
       .handle("get-one", ({ path: { id } }) =>
         Effect.gen(function*() {
-          const roomId = yield* Schema.decodeUnknown(RoomId)(id)
+          const roomId = yield* Schema.decodeUnknownEffect(RoomId)(id)
 
           const roomRepo = yield* RoomRepository
           return yield* roomRepo
@@ -27,10 +32,11 @@ export const RoomHandler = HttpApiBuilder.group(
             )
         }).pipe(
           Effect.catchTags({
-            ParseError: (e) => Effect.fail(new InternalError({ cause: e._tag })),
-            SqlError: (e) => Effect.fail(new InternalError({ cause: e._tag })),
+            SchemaError: () => Effect.fail(new InternalError()),
+            SqlError: () => Effect.fail(new InternalError()),
             RoomNotFoundError: (e) => Effect.fail(e),
           })
         )
       )
 )
+*/

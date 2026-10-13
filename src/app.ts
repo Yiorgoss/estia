@@ -1,29 +1,30 @@
-import { Etag, FileSystem, HttpLayerRouter, HttpPlatform, Path } from "@effect/platform"
 import { D1Client } from "@effect/sql-d1"
-import { Config, ConfigProvider, Effect, Layer, Logger, LogLevel, String } from "effect"
+import { Config, ConfigProvider, Context, Effect, FileSystem, Layer, Logger, Path, References, String } from "effect"
+import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { HealthRouter } from "./api/health"
 import {
-  AppLive,
-  DomainServicesLive,
-  InfraServicesLive,
+  AppServicesLive,
   PrivateRouterLive,
   PublicRouterLive,
-  RepositoriesLive
 } from "./api"
 import { StorageRepositoryLive } from "./repo/storage.repo"
 
 
 
-export class EnvVars extends Effect.Service<EnvVars>()("EnvVars", {
-  effect: Effect.gen(function*() {
+export class EnvVars extends Context.Service<EnvVars, {
+  readonly ENVIRONMENT: "local" | "production"
+}>()("EnvVars", {
+  make: Effect.gen(function*() {
     return {
-      ENVIRONMENT: yield* Config.literal(
-        "local",
-        "production"
-      )("ENVIRONMENT").pipe(Config.withDefault("local" as const))
+      ENVIRONMENT: yield* Config.Literals(
+        ["local", "production"],
+        "ENVIRONMENT"
+      ).pipe(Config.withDefault("local" as const))
     }
   })
 }) { }
+
+const EnvVarsLive = Layer.effect(EnvVars, EnvVars.make)
 
 const CorsLayer = Effect.gen(function*() {
   const envVars = yield* EnvVars
@@ -31,13 +32,13 @@ const CorsLayer = Effect.gen(function*() {
     ? ['https://domain.com']
     : ['http://localhost:5173', 'http://localhost:3000', '*'];
 
-  return HttpLayerRouter.cors({
+  return HttpRouter.cors({
     allowedOrigins,
     allowedMethods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Access-Control-Allow-Origin", "Content-Type", "Authorization", "traceparent"],
     credentials: true
   })
-}).pipe(Layer.unwrapEffect, Layer.provide(EnvVars.Default))
+}).pipe(Layer.unwrap, Layer.provide(EnvVarsLive))
 
 const WorkerApp = Layer.mergeAll(
   HealthRouter,
@@ -45,15 +46,13 @@ const WorkerApp = Layer.mergeAll(
   PrivateRouterLive,
   // AppLive,
 ).pipe(
-  Layer.provide(AppLive),
-  Layer.provide(DomainServicesLive),
-  Layer.provide(InfraServicesLive),
-  Layer.provide(RepositoriesLive),
   Layer.provide(Etag.layer),
   Layer.provide(HttpPlatform.layer),
   Layer.provide(Path.layer),
   Layer.provide(FileSystem.layerNoop({})),
   Layer.provide(CorsLayer),
+  Layer.provide(AppServicesLive),
+  HttpRouter.provideRequest(AppServicesLive),
   //   Layer.provide(AppLive)
   // DisableTracerMW,
   // SpanNameMW
@@ -72,22 +71,22 @@ type WorkerBindings = {
 }
 
 const makeConfigProvider = (bindings: Record<string, unknown>) => {
-  const map = new Map<string, string>();
+  const map: Record<string, string> = {};
 
   if (typeof globalThis.process != 'undefined') {
     for (const [key, value] of Object.entries(globalThis.process.env)) {
       if (typeof value === 'string') {
-        map.set(key, value)
+        map[key] = value
       }
     }
   }
   for (const [key, value] of Object.entries(bindings)) {
     if (typeof value === 'string') {
-      map.set(key, value)
+      map[key] = value
     }
   }
 
-  return ConfigProvider.fromMap(map)
+  return ConfigProvider.fromUnknown(map)
 }
 
 // import * as util from 'util';
@@ -96,40 +95,30 @@ const makeConfigProvider = (bindings: Record<string, unknown>) => {
 //   // console.log({ args })
 //   console.log(`[${args.logLevel.label}] ${args.message} ${args.annotations} `)
 // })
-const DevLoggerLive = Logger.replace(
-  Logger.defaultLogger,
-  Logger.prettyLoggerDefault
-  // DevLogger,
-).pipe(
-  Layer.provide(Logger.minimumLogLevel(LogLevel.Trace))
+const DevLoggerLive = Layer.merge(
+  Logger.layer([
+    Logger.consolePretty()
+    // DevLogger,
+  ]),
+  Layer.succeed(References.MinimumLogLevel, "Trace")
 );
 
 
-const WorkersJsonLogger = Logger.make(({ logLevel, message, date, spans, annotations }) => {
-  console.log(JSON.stringify({
-    level: logLevel.label,
-    message,
-    timestamp: date.toISOString(),
-    spans,
-    annotations,
-  }));
-})
-
-const ProdLoggerLive = Logger.replace(
-  Logger.defaultLogger,
-  WorkersJsonLogger
-).pipe(
-  Layer.provide(Logger.minimumLogLevel(LogLevel.Debug))
+const ProdLoggerLive = Layer.merge(
+  Logger.layer([
+    Logger.consoleJson
+  ]),
+  Layer.succeed(References.MinimumLogLevel, "Debug")
 );
 
 let runtime: { readonly handler: (request: globalThis.Request) => Promise<Response> } | undefined
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime
-  const configProviderLayer = Layer.setConfigProvider(makeConfigProvider(bindings));
+  const configProviderLayer = ConfigProvider.layer(makeConfigProvider(bindings));
 
 
-  runtime = HttpLayerRouter.toWebHandler(
+  const handler = HttpRouter.toWebHandler(
     WorkerApp.pipe(
       Layer.provide(
         D1Client.layer({
@@ -138,12 +127,13 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
           transformResultNames: String.snakeToCamel
         }),
       ),
-      Layer.provide(StorageRepositoryLive(bindings.STORAGE)),
+      HttpRouter.provideRequest(StorageRepositoryLive(bindings.STORAGE)),
       Layer.provide(configProviderLayer),
       Layer.provide(bindings.ENVIRONMENT === 'local' ? DevLoggerLive : ProdLoggerLive)
     )
   )
-  return runtime
+  runtime = handler
+  return handler
 }
 
 export default {

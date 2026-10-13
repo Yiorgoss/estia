@@ -1,6 +1,7 @@
 import { Layer, } from "effect";
 import { PublicApi, PublicRoutes } from "./public"
-import { HttpLayerRouter, } from "@effect/platform";
+import { HttpRouter } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 import { JWTServiceLive } from "@/services/jwt.service";
 import { UserRepositoryLive } from "@/repo/user.repo";
 import { RefreshTokenServiceLive } from "@/services/refresh-token.service";
@@ -40,12 +41,31 @@ export const AppLive = Layer.mergeAll(
   AuthServiceLive
 )
 
+// --- Fully wired application services (only `SqlClient` is left to provide) ---
+const RepositoriesFully = RepositoriesLive
+const InfraServicesFully = InfraServicesLive
+const DomainServicesFully = DomainServicesLive.pipe(
+  Layer.provide(RepositoriesFully),
+  Layer.provide(InfraServicesFully),
+)
+const AppFully = AppLive.pipe(
+  Layer.provide(DomainServicesFully),
+  Layer.provide(RepositoriesFully),
+  Layer.provide(InfraServicesFully),
+)
+export const AppServicesLive = Layer.mergeAll(
+  AppFully,
+  DomainServicesFully,
+  InfraServicesFully,
+  RepositoriesFully,
+)
+
 /*
  * PUBLIC API
  */
 
-export const PublicApiRouterLive = HttpLayerRouter
-  .addHttpApi(PublicApi)
+export const PublicApiRouterLive = HttpApiBuilder
+  .layer(PublicApi)
   .pipe(
     Layer.provide(PublicApiLive),
   )
@@ -59,8 +79,8 @@ export const PublicRouterLive = Layer.mergeAll(
  * PRIVATE API
  */
 
-export const PrivateApiRouterLive = HttpLayerRouter
-  .addHttpApi(PrivateApi)
+export const PrivateApiRouterLive = HttpApiBuilder
+  .layer(PrivateApi)
   .pipe(
     Layer.provide(UserHandler),
   )

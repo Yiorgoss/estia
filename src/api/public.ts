@@ -1,8 +1,9 @@
 import { UserCredentials } from "@/db/schema/User"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, HttpLayerRouter, HttpServerResponse, Multipart } from "@effect/platform"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
+import { HttpRouter, HttpServerResponse } from "effect/http"
 import { Effect, Schema } from "effect"
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service"
-import { InternalError, UserAlreadyExistsError } from "@/services/user.service"
+import { InternalError } from "@/services/user.service"
 import { loginPage } from "@/frontend/pages/login"
 import { registerPage } from "@/frontend/pages/register"
 import { mapDemo } from "@/frontend/map-demo"
@@ -18,32 +19,31 @@ const AuthGroup = HttpApiGroup
   )
   .add(
     HttpApiEndpoint
-      .post('login', '/login')
-      .addSuccess(
-        Schema.Struct({
+      .post('login', '/login', {
+        payload: UserCredentials,
+        success: Schema.Struct({
           accessToken: JWTSchema,
           refreshToken: RefreshTokenValue,
         }),
-        { status: 200 }
-      )
-      .setPayload(UserCredentials)
-      .addError(InvalidCredentialsError, { status: 401 })
-      .addError(UnauthorizedError, { status: 401 })
-      .addError(InternalError, { status: 500 })
+        error: [
+          InvalidCredentialsError,
+          UnauthorizedError,
+          InternalError,
+        ],
+      })
   )
   .add(
     HttpApiEndpoint
-      .post('register', '/register')
-      .addSuccess(
-        Schema.Struct({
+      .post('register', '/register', {
+        payload: UserCredentials,
+        success: Schema.Struct({
           accessToken: JWTSchema,
           refreshToken: RefreshTokenValue,
         }),
-        { status: 200 }
-      )
-      .setPayload(UserCredentials)
-      .addError(UserAlreadyExistsError, { status: 409 })
-      .addError(InternalError, { status: 500 })
+        error: [
+          InternalError,
+        ],
+      })
   ).prefix("/auth")
 
 export const PublicApi = HttpApi
@@ -51,8 +51,8 @@ export const PublicApi = HttpApi
   .add(AuthGroup)
   .prefix("/api")
 
-export const PublicRoutes = HttpLayerRouter.addAll([
-  HttpLayerRouter.route("GET", "/",
+export const PublicRoutes = HttpRouter.addAll([
+  HttpRouter.route("GET", "/",
     Effect.succeed(
       HttpServerResponse.html(`
         <!doctype html>
@@ -64,21 +64,21 @@ export const PublicRoutes = HttpLayerRouter.addAll([
       `)
     )
   ),
-  HttpLayerRouter.route("GET", "/login",
+  HttpRouter.route("GET", "/login",
     Effect.succeed(
       HttpServerResponse.html(loginPage)
     )
   ),
-  HttpLayerRouter.route("GET", "/register",
+  HttpRouter.route("GET", "/register",
     Effect.succeed(
       HttpServerResponse.html(registerPage)
     )
   ),
-  HttpLayerRouter.route("GET", "/map",
+  HttpRouter.route("GET", "/map",
     Effect.succeed(
       HttpServerResponse.html(mapDemo)
     )),
-  HttpLayerRouter.route("GET", "/test",
+  HttpRouter.route("GET", "/test",
     Effect.succeed(
       HttpServerResponse.html(
         `
@@ -109,4 +109,3 @@ export const PublicRoutes = HttpLayerRouter.addAll([
       )
     ))
 ])
-

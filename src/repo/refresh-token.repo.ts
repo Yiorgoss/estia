@@ -1,5 +1,6 @@
 import { Option, Context, Effect, Layer, Schema, Clock } from "effect"
-import { SqlClient, SqlError } from "@effect/sql";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { NewRefreshToken, RefreshToken, RefreshTokenSchema } from "@/db/schema/RefreshToken";
 import { RefreshTokenHash } from "@/db/schema/brands";
 
@@ -10,16 +11,16 @@ export class RefreshTokenNotFoundError extends Schema.TaggedError<RefreshTokenNo
 
 export interface RefreshTokenRepository {
   readonly findValidByUserID: (id: number) =>
-    Effect.Effect<Option.Option<RefreshToken>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<RefreshToken>, SqlError>;
   readonly findValidByHash: (hash: typeof RefreshTokenHash.Type) =>
-    Effect.Effect<Option.Option<RefreshToken>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<RefreshToken>, SqlError>;
   readonly revoke: (hash: typeof RefreshTokenHash.Type) =>
-    Effect.Effect<Option.Option<RefreshToken>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<RefreshToken>, SqlError>;
   readonly new: (newToken: typeof NewRefreshToken.Type) =>
-    Effect.Effect<RefreshToken, SqlError.SqlError>;
+    Effect.Effect<RefreshToken, SqlError>;
 }
 
-export const RefreshTokenRepository = Context.GenericTag<RefreshTokenRepository>("RefreshTokenRepository");
+export const RefreshTokenRepository = Context.Service<RefreshTokenRepository>("RefreshTokenRepository");
 
 export const RefreshTokenRepositoryLive = Layer.effect(
   RefreshTokenRepository,
@@ -34,10 +35,12 @@ export const RefreshTokenRepositoryLive = Layer.effect(
               UPDATE refresh_tokens
                  SET revoked_at = ${now}
                WHERE token_hash = ${hash}
+                 AND revoked_at IS NULL
+                 AND expires_at >= ${now}
            RETURNING *;`
             .pipe(
               Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
+              Effect.map(Option.fromNullishOr)
             )
         }),
       findValidByHash: (hash) =>
@@ -52,7 +55,7 @@ export const RefreshTokenRepositoryLive = Layer.effect(
                ;`
             .pipe(
               Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
+              Effect.map(Option.fromNullishOr)
             )
         }),
       findValidByUserID: (id) =>
@@ -62,13 +65,13 @@ export const RefreshTokenRepositoryLive = Layer.effect(
           return yield* sql<RefreshToken>`
             SELECT *
               FROM refresh_tokens
-             WHERE userId=${id}
+             WHERE user_id=${id}
                AND revoked_at IS NULL
                AND expires_at >= ${now}
                ;`
             .pipe(
               Effect.map(rows => rows[0]),
-              Effect.map(Option.fromNullable)
+              Effect.map(Option.fromNullishOr)
             )
         }),
       new: ({ userId, tokenHash, expiresAt, deviceInfo }) =>

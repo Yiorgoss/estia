@@ -1,6 +1,7 @@
 import { ListerId, RoomId, } from "@/db/schema/brands";
 import { RoomFilters, RoomSchema, UpdateRoomSchema } from "@/db/schema/Room";
-import { SqlClient, SqlError } from "@effect/sql";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
 
@@ -11,16 +12,16 @@ export class RoomNotFoundError extends Schema.TaggedError<RoomNotFoundError>()(
 
 export interface RoomRepository {
   readonly findAllByListerId: (listerId: typeof ListerId.Type) =>
-    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
   readonly findByRoomId: (roomId: typeof RoomId.Type) =>
-    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
   readonly updateRoom: (room: typeof RoomId.Type, values: typeof UpdateRoomSchema.Type) =>
-    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError.SqlError>;
+    Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
   // readonly findWithFilters: (filters: typeof RoomFilters.Type) =>
-  //   Effect.Effect<Option.Option<typeof RoomSchema.Type[]>, SqlError.SqlError>
+  //   Effect.Effect<Option.Option<typeof RoomSchema.Type[]>, SqlError>
 }
 
-export const RoomRepository = Context.GenericTag<RoomRepository>("RoomRepository");
+export const RoomRepository = Context.Service<RoomRepository>("RoomRepository");
 
 export const RoomRepositoryLive = Layer.effect(
   RoomRepository,
@@ -32,22 +33,20 @@ export const RoomRepositoryLive = Layer.effect(
             SELECT *
               FROM rooms
              WHERE lister_id=${listerId}
-         RETURNING *;
             `
           .pipe(
             Effect.map(rows => rows[0]),
-            Effect.map(Option.fromNullable)
+            Effect.map(Option.fromNullishOr)
           ),
       findByRoomId: (roomId) =>
         sql<typeof RoomSchema.Type> `
             SELECT *
               FROM rooms
              WHERE id=${roomId}
-         RETURNING *;
             `
           .pipe(
             Effect.map(rows => rows[0]),
-            Effect.map(Option.fromNullable)
+            Effect.map(Option.fromNullishOr)
           ),
       updateRoom: (roomId, { price, location, description: desc, size, furnished, ensuite, smoking, pets, availableFrom }) =>
         sql<typeof RoomSchema.Type> `
@@ -60,7 +59,7 @@ export const RoomRepositoryLive = Layer.effect(
             `
           .pipe(
             Effect.map(rows => rows[0]),
-            Effect.map(Option.fromNullable)
+            Effect.map(Option.fromNullishOr)
           ),
       // findWithFilters: (filters) =>
       //   Effect.gen(function*() {
@@ -79,7 +78,7 @@ export const RoomRepositoryLive = Layer.effect(
       //     `
       //       .pipe(
       //         Effect.map(rows => rows[0]),
-      //         Effect.map(Option.fromNullable)
+      //         Effect.map(Option.fromNullishOr)
       //       )
       //   })
     } satisfies RoomRepository // needed otherwise email/password become untyped when using taperror

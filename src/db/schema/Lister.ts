@@ -8,5 +8,5 @@ export const ListerSchema = Schema.Struct({
   picture: Schema.NullishOr(Schema.String),
   name: Schema.NullishOr(Schema.String),
   ownership: OwnershipEnum,
-  createdAt: Schema.DateFromNumber
+  createdAt: Schema.DateFromMillis
 })

@@ -28,7 +28,7 @@ export interface UserService {
 }
 
 export const UserService =
-  Context.GenericTag<UserService>("UserService")
+  Context.Service<UserService>("UserService")
 
 export const UserServiceLive = Layer.effect(
   UserService,
@@ -41,38 +41,41 @@ export const UserServiceLive = Layer.effect(
     return {
       switchRoles: (id, role) =>
         Effect.gen(function*() {
-          if (role === 'admin') return yield* Effect.dieMessage('cannot update to admin')
+          if (role === 'admin') return yield* Effect.die('cannot update to admin')
           const user = yield* userRepo.updateRole(id, role)
             .pipe(
-              Effect.filterOrDieMessage(
+              Effect.filterOrFail(
                 Option.isSome,
-                "Cannot update Role"
+                () => new Error("Cannot update Role")
               ),
+              Effect.orDie,
               Effect.map(some => some.value)
             )
           if (user.role == 'seeker') {
             return yield* seekerRepo
               .findByUserId(id)
               .pipe(
-                Effect.filterOrDieMessage(
+                Effect.filterOrFail(
                   Option.isSome,
-                  "Cannot find Seeker"
+                  () => new Error("Cannot find Seeker")
                 ),
+                Effect.orDie,
                 Effect.map(some => some.value)
               )
           } else if (user.role == 'lister') {
             return yield* listerRepo
               .findByUserId(id)
               .pipe(
-                Effect.filterOrDieMessage(
+                Effect.filterOrFail(
                   Option.isSome,
-                  "Cannot find Lister"
+                  () => new Error("Cannot find Lister")
                 ),
+                Effect.orDie,
                 Effect.map(some => some.value)
               )
           }
-          return yield* Effect.dieMessage("role didnt match shit")
-        }).pipe(Effect.catchAll(e => Effect.dieMessage(e.cause as string))),
+          return yield* Effect.die("role didnt match shit")
+        }).pipe(Effect.catch(e => Effect.die(e as unknown))),
       registerUser: ({ email, password }) => Effect.gen(function*() {
         yield* userRepo
           .findByEmail(email)

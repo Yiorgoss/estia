@@ -5,8 +5,9 @@ import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { InternalError, UserService } from "@/services/user.service";
-import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from "@effect/platform";
-import { Chunk, Effect, pipe, Sink, Stream } from "effect";
+import { HttpApiBuilder } from "effect/http-api";
+import { HttpServerResponse } from "effect/http";
+import { Effect, Stream } from "effect";
 
 export const PublicApiLive = HttpApiBuilder.group(
   PublicApi,
@@ -70,14 +71,14 @@ export const PublicApiLive = HttpApiBuilder.group(
           // yield* Effect.logInfo(formData['greece.pmtiles'])
 
 
-          const response = yield* HttpServerResponse.html(
+          const response = HttpServerResponse.html(
             `<div id='result' style="background:tomato">Successful</div>`
           )
 
           return response
         }).pipe(
           // @effect-diagnostics-next-line catchUnfailableEffect:off
-          Effect.catchAll(e => Effect.die(e))
+          Effect.catch(e => Effect.die(e))
         )
       )
       .handle('login', (req) =>
@@ -130,6 +131,6 @@ export const PublicApiLive = HttpApiBuilder.group(
             ]),
             Effect.orDie
           )
-        }).pipe(Effect.mapError(e => new InternalError(e)))
+        }).pipe(Effect.mapError(() => new InternalError()))
       )
 )

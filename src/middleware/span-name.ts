@@ -1,8 +1,8 @@
-
-import { HttpMiddleware, HttpServerRequest } from "@effect/platform"
+import { Layer } from "effect";
+import { HttpMiddleware, HttpServerRequest } from "effect/http"
 
 export const SpanNameMW =
-  HttpMiddleware.withSpanNameGenerator(
+  Layer.succeed(HttpMiddleware.SpanNameGenerator)(
     (request: HttpServerRequest.HttpServerRequest) => {
       let path = request.url
       try {

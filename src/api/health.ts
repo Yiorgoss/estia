@@ -1,5 +1,5 @@
-import { HttpLayerRouter, HttpServerResponse } from "@effect/platform";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 
-export const HealthRouter = HttpLayerRouter.use(router =>
+export const HealthRouter = HttpRouter.use(router =>
   router.add("GET", "/api/health", HttpServerResponse.text("OK"))
 )
