@@ -4,63 +4,12 @@ import { fileURLToPath } from "node:url"
 import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
+import { splitStatements } from "../../scripts/sql-split.mjs"
 
 const migrationsDirectory = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../src/db/migrations",
 )
-
-// The node SQLite driver prepares a single statement at a time, so each
-// migration file is split into top-level statements. The splitter ignores
-// semicolons inside string literals and inside a trigger's `BEGIN ... END`
-// body.
-const splitStatements = (sql: string): ReadonlyArray<string> => {
-  const statements: Array<string> = []
-  let buffer = ""
-  let inSingle = false
-  let inDouble = false
-  let depth = 0
-  let begins = 0
-  let ends = 0
-  const isWordChar = (char: string) => /[A-Za-z_]/.test(char)
-  for (let i = 0; i < sql.length; i++) {
-    const char = sql[i]
-    if (inSingle) {
-      buffer += char
-      if (char === "'") {
-        if (sql[i + 1] === "'") buffer += sql[++i]
-        else inSingle = false
-      }
-      continue
-    }
-    if (inDouble) {
-      buffer += char
-      if (char === '"') inDouble = false
-      continue
-    }
-    if (char === "'") inSingle = true
-    else if (char === '"') inDouble = true
-    else if (char === "(") depth++
-    else if (char === ")") depth--
-    else if (isWordChar(char) && !isWordChar(sql[i - 1] ?? "")) {
-      const match = /^(BEGIN|END)\b/i.exec(sql.slice(i))
-      if (match) {
-        if (match[1].toUpperCase() === "BEGIN") begins++
-        else ends++
-      }
-    }
-    if (char === ";" && depth === 0 && begins <= ends) {
-      const statement = buffer.trim()
-      if (statement) statements.push(statement)
-      buffer = ""
-      continue
-    }
-    buffer += char
-  }
-  const tail = buffer.trim()
-  if (tail) statements.push(tail)
-  return statements
-}
 
 const loadMigrations = () =>
   Object.fromEntries(
