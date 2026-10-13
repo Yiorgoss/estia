@@ -47,7 +47,7 @@ export const RefreshTokenServiceLive = Layer.effect(
           'refresh_token',
           token,
           {
-            http: true,
+            httpOnly: true,
             secure: true,
             path: "/",
             maxAge: 30 * 24 * 60 * 60 * 1000 // one month

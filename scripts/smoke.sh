@@ -66,7 +66,8 @@ REFRESH_H=$(cookie_flags "$WORK/register.h" refresh_token)
 printf '%s' "$ACCESS_H" | grep -qi 'httponly' || fail "access_token missing HttpOnly"
 printf '%s' "$ACCESS_H" | grep -qi 'secure'   || fail "access_token missing Secure"
 printf '%s' "$REFRESH_H" | grep -qi 'secure'  || fail "refresh_token missing Secure"
-pass "register cookie flags (access HttpOnly+Secure, refresh Secure)"
+printf '%s' "$REFRESH_H" | grep -qi 'httponly' || fail "refresh_token missing HttpOnly"
+pass "register cookie flags (access HttpOnly+Secure, refresh HttpOnly+Secure)"
 
 ACCESS="$(cookie_value "$WORK/register.h" access_token)"
 REFRESH="$(cookie_value "$WORK/register.h" refresh_token)"
@@ -101,7 +102,10 @@ ROTATED_ACCESS="$(cookie_value "$WORK/rotate.h" access_token)"
 ROTATED_REFRESH="$(cookie_value "$WORK/rotate.h" refresh_token)"
 [ -n "$ROTATED_ACCESS" ] && [ -n "$ROTATED_REFRESH" ] || fail "refresh rotation set new cookies"
 [ "$ROTATED_REFRESH" != "$REFRESH" ] || fail "refresh rotation did not rotate the token"
-pass "refresh rotation issued new access + refresh cookies"
+ROTATED_REFRESH_H=$(cookie_flags "$WORK/rotate.h" refresh_token)
+printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'httponly' || fail "rotated refresh_token missing HttpOnly"
+printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'secure'   || fail "rotated refresh_token missing Secure"
+pass "refresh rotation issued new access + refresh cookies (refresh HttpOnly+Secure)"
 
 # 6. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
