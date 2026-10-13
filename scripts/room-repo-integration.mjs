@@ -30,8 +30,6 @@ const findMiniflare = () => {
   return entry
 }
 
-// Miniflare's D1 `exec()` mishandles multi-line statements, so split each
-// migration into top-level statements and run them through `prepare()`.
 let failures = 0
 const check = (label, cond, detail = '') => {
   if (cond) {
@@ -66,6 +64,8 @@ const main = async () => {
     })
     const db = await mf.getD1Database('DB')
 
+    // The shared splitter in `scripts/sql-split.mjs` explains why each
+    // migration is run one statement at a time through `prepare()`.
     const migDir = path.join(root, 'src/db/migrations')
     for (const f of fs.readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()) {
       const raw = fs.readFileSync(path.join(migDir, f), 'utf8').replace(/--[^\n]*/g, '')
