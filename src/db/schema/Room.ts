@@ -17,7 +17,9 @@ export const RoomSchema = Schema.Struct({
   createdAt: Schema.DateFromMillis,
 })
 
-export const RoomFilters = RoomSchema.mapFields(Struct.pick(["price", "location", "size", "furnished", "ensuite", "smoking", "pets", "availableFrom"]))
+export const RoomFilters = RoomSchema
+  .mapFields(Struct.pick(["price", "location", "size", "furnished", "ensuite", "smoking", "pets", "availableFrom"]))
+  .mapFields(Struct.map(Schema.optional))
 
 export const UpdateRoomSchema = RoomSchema.mapFields(Struct.pick(['price', 'location', 'description', 'size', 'furnished', 'ensuite', 'smoking', 'pets', 'availableFrom']))
 

@@ -77,7 +77,6 @@ export const PublicApiLive = HttpApiBuilder.group(
 
           return response
         }).pipe(
-          // @effect-diagnostics-next-line catchUnfailableEffect:off
           Effect.catch(e => Effect.die(e))
         )
       )

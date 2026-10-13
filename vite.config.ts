@@ -10,6 +10,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     }
   },
+  server: {
+    allowedHosts: ["server"],
+  },
   // plugins: [tailwindcss(), cloudflare(), ssrPlugin()],
   plugins: [cloudflare()],
 })
