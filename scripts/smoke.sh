@@ -102,7 +102,10 @@ ROTATED_ACCESS="$(cookie_value "$WORK/rotate.h" access_token)"
 ROTATED_REFRESH="$(cookie_value "$WORK/rotate.h" refresh_token)"
 [ -n "$ROTATED_ACCESS" ] && [ -n "$ROTATED_REFRESH" ] || fail "refresh rotation set new cookies"
 [ "$ROTATED_REFRESH" != "$REFRESH" ] || fail "refresh rotation did not rotate the token"
-pass "refresh rotation issued new access + refresh cookies"
+ROTATED_REFRESH_H=$(cookie_flags "$WORK/rotate.h" refresh_token)
+printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'httponly' || fail "rotated refresh_token missing HttpOnly"
+printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'secure'   || fail "rotated refresh_token missing Secure"
+pass "refresh rotation issued new access + refresh cookies (refresh HttpOnly+Secure)"
 
 # 6. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
