@@ -66,7 +66,8 @@ REFRESH_H=$(cookie_flags "$WORK/register.h" refresh_token)
 printf '%s' "$ACCESS_H" | grep -qi 'httponly' || fail "access_token missing HttpOnly"
 printf '%s' "$ACCESS_H" | grep -qi 'secure'   || fail "access_token missing Secure"
 printf '%s' "$REFRESH_H" | grep -qi 'secure'  || fail "refresh_token missing Secure"
-pass "register cookie flags (access HttpOnly+Secure, refresh Secure)"
+printf '%s' "$REFRESH_H" | grep -qi 'httponly' || fail "refresh_token missing HttpOnly"
+pass "register cookie flags (access HttpOnly+Secure, refresh HttpOnly+Secure)"
 
 ACCESS="$(cookie_value "$WORK/register.h" access_token)"
 REFRESH="$(cookie_value "$WORK/register.h" refresh_token)"
