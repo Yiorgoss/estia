@@ -15,7 +15,7 @@ layer(HasherServiceLive)("HasherService", (it) => {
       const hash = yield* hasher.hashPassword("correct horse battery staple")
 
       assert.strictEqual(typeof hash, "string")
-      // $scrypt$ln=14,r=8,p=1$<salt>$<derived key>, with scryptOptions N=16384.
+      // $scrypt$ln=14,p=1,r=8$<salt>$<derived key>, with scryptOptions N=16384.
       assert.match(hash, /^\$scrypt\$ln=14,p=1,r=8\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$/)
       // The decoded value is a valid branded `UserPasswordHash`.
       assert.doesNotThrow(() => passwordHash(hash))
