@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Deterministic test entrypoint for estia.
+# Deterministic end-to-end test entrypoint for estia (`pnpm test:e2e`).
 #
 # 1. Applies the local D1 migrations.
 # 2. Runs the rooms repository integration test against a real D1 engine.

@@ -13,6 +13,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createServer } from 'vite'
 import { Effect, Layer, Option, String as Str } from 'effect'
+import { splitStatements } from './sql-split.mjs'
 
 const root = process.cwd()
 
@@ -27,58 +28,6 @@ const findMiniflare = () => {
     .find((candidate) => fs.existsSync(candidate))
   if (!entry) throw new Error('miniflare package not found under node_modules/.pnpm')
   return entry
-}
-
-// Miniflare's D1 `exec()` mishandles multi-line statements, so split each
-// migration into top-level statements and run them through `prepare()`. The
-// splitter ignores semicolons inside string literals and inside a trigger's
-// `BEGIN ... END` body.
-const splitStatements = (sql) => {
-  const statements = []
-  let buf = ''
-  let inSingle = false
-  let inDouble = false
-  let depth = 0
-  let begins = 0
-  let ends = 0
-  const isWordChar = (c) => /[A-Za-z_]/.test(c)
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i]
-    if (inSingle) {
-      buf += ch
-      if (ch === "'") {
-        if (sql[i + 1] === "'") buf += sql[++i]
-        else inSingle = false
-      }
-      continue
-    }
-    if (inDouble) {
-      buf += ch
-      if (ch === '"') inDouble = false
-      continue
-    }
-    if (ch === "'") inSingle = true
-    else if (ch === '"') inDouble = true
-    else if (ch === '(') depth++
-    else if (ch === ')') depth--
-    else if (isWordChar(ch) && !isWordChar(sql[i - 1] ?? '')) {
-      const m = /^(BEGIN|END)\b/i.exec(sql.slice(i))
-      if (m) {
-        if (m[1].toUpperCase() === 'BEGIN') begins++
-        else ends++
-      }
-    }
-    if (ch === ';' && depth === 0 && begins <= ends) {
-      const statement = buf.trim()
-      if (statement) statements.push(statement)
-      buf = ''
-      continue
-    }
-    buf += ch
-  }
-  const tail = buf.trim()
-  if (tail) statements.push(tail)
-  return statements
 }
 
 let failures = 0
@@ -115,6 +64,8 @@ const main = async () => {
     })
     const db = await mf.getD1Database('DB')
 
+    // The shared splitter in `scripts/sql-split.mjs` explains why each
+    // migration is run one statement at a time through `prepare()`.
     const migDir = path.join(root, 'src/db/migrations')
     for (const f of fs.readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()) {
       const raw = fs.readFileSync(path.join(migDir, f), 'utf8').replace(/--[^\n]*/g, '')
