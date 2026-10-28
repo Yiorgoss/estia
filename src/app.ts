@@ -122,7 +122,7 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime;
   const configProviderLayer = ConfigProvider.layer(makeConfigProvider(bindings));
 
-  return HttpRouter.toWebHandler(
+  runtime = HttpRouter.toWebHandler(
     WorkerApp.pipe(
       Layer.provide(
         D1Client.layer({
@@ -136,6 +136,7 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
       Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
     ),
   );
+  return runtime;
 };
 
 export default {

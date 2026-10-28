@@ -1,5 +1,4 @@
 import { PublicApi } from "@/api/public";
-import { head } from "@/frontend/head";
 import { StorageRepository } from "@/repo/storage.repo";
 import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";

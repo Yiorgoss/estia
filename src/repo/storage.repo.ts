@@ -14,9 +14,9 @@ class R2MultipartUploadError extends Schema.TaggedError<R2MultipartUploadError>(
   },
 ) {}
 
-class R2FileStreamError extends Schema.TaggedError<R2FileStreamError>()("R2FileStreamError", {
-  cause: Schema.Unknown,
-}) {}
+// class R2FileStreamError extends Schema.TaggedError<R2FileStreamError>()("R2FileStreamError", {
+//   cause: Schema.Unknown,
+// }) {}
 
 export interface StorageRepository {
   readonly put: (
@@ -47,80 +47,76 @@ export const StorageRepository = Context.Service<StorageRepository>("StorageRepo
 export const StorageRepositoryLive = (bucket: R2Bucket) =>
   Layer.effect(
     StorageRepository,
-    Effect.gen(function* () {
-      return {
-        put: (key, value) =>
-          Effect.tryPromise({
-            try: () => bucket.put(key, value),
-            catch: (e) => new R2UploadError({ cause: e }),
-          }).pipe(
-            Effect.filterOrFail(
-              (result) => !!result,
-              () => new R2UploadError({ cause: "Preconditions Failed" }),
-            ),
+    Effect.succeed({
+      put: (key, value) =>
+        Effect.tryPromise({
+          try: () => bucket.put(key, value),
+          catch: (e) => new R2UploadError({ cause: e }),
+        }).pipe(
+          Effect.filterOrFail(
+            (result) => !!result,
+            () => new R2UploadError({ cause: "Preconditions Failed" }),
           ),
-        newMultipart: (key, stream) =>
-          Effect.gen(function* () {
-            yield* Effect.logInfo(`Starting upload: ${key}`);
-            const r2 = yield* Effect.tryPromise({
-              try: () => bucket.createMultipartUpload(key),
-              catch: (e) => new R2MultipartKeyError({ cause: e }),
-            });
-            const bufferSize = 10_000_000; //5 * 1024 * 1024 //5mb
+        ),
+      newMultipart: (key, stream) =>
+        Effect.gen(function* () {
+          yield* Effect.logInfo(`Starting upload: ${key}`);
+          const r2 = yield* Effect.tryPromise({
+            try: () => bucket.createMultipartUpload(key),
+            catch: (e) => new R2MultipartKeyError({ cause: e }),
+          });
+          const bufferSize = 10_000_000; //5 * 1024 * 1024 //5mb
 
-            let remaining = bufferSize;
-            return yield* stream.pipe(
-              // Stream.tap(x => Effect.log("lenght of each new chunk", x.length)),
-              Stream.mapAccum(
-                () => ({ remainder: Buffer.alloc(0), length: 0 }),
-                (state, chunk) => {
-                  const combined = Buffer.concat([state.remainder, chunk]);
-                  const parts: Array<Buffer> = [];
-                  let offset = 0;
-                  while (combined.length - offset >= bufferSize) {
-                    parts.push(combined.subarray(offset, offset + bufferSize));
-                    offset += bufferSize;
-                  }
-                  const remainder = Buffer.from(combined.subarray(offset));
-                  return [{ remainder, length: remainder.length }, parts];
-                },
-                {
-                  onHalt: (state) => (state.remainder.length > 0 ? [state.remainder] : []),
-                },
-              ),
-              Stream.filter((x) => x.length > 0),
-              Stream.tap((x) => Effect.log("length after accum", x.length)),
-              Stream.zipWithIndex,
-              Stream.mapEffect(
-                ([bytes, idx]) =>
-                  Effect.gen(function* () {
-                    // if (idx >= 2) throw new R2MultipartKeyError({ cause: "test" })
-                    // console.log({ length: bytes.length, idx })
+          return yield* stream.pipe(
+            // Stream.tap(x => Effect.log("lenght of each new chunk", x.length)),
+            Stream.mapAccum(
+              () => ({ remainder: Buffer.alloc(0), length: 0 }),
+              (state, chunk) => {
+                const combined = Buffer.concat([state.remainder, chunk]);
+                const parts: Array<Buffer> = [];
+                let offset = 0;
+                while (combined.length - offset >= bufferSize) {
+                  parts.push(combined.subarray(offset, offset + bufferSize));
+                  offset += bufferSize;
+                }
+                const remainder = Buffer.from(combined.subarray(offset));
+                return [{ remainder, length: remainder.length }, parts];
+              },
+              {
+                onHalt: (state) => (state.remainder.length > 0 ? [state.remainder] : []),
+              },
+            ),
+            Stream.filter((x) => x.length > 0),
+            Stream.tap((x) => Effect.log("length after accum", x.length)),
+            Stream.zipWithIndex,
+            Stream.mapEffect(
+              ([bytes, idx]) =>
+                Effect.gen(function* () {
+                  // if (idx >= 2) throw new R2MultipartKeyError({ cause: "test" })
+                  // console.log({ length: bytes.length, idx })
 
-                    const part = yield* Effect.tryPromise({
-                      try: () => r2.uploadPart(idx + 1, bytes),
-                      catch: (e) =>
-                        new R2MultipartUploadError({ cause: `Upload Part Error: ${e}` }),
-                    }).pipe(
-                      Effect.timed,
-                      Effect.tap(([duration, part]) =>
-                        Effect.logInfo(
-                          `Uploaded Part: ${part.partNumber} - ${bytes.byteLength} ${bytes.length} in ${duration}`,
-                        ),
+                  const part = yield* Effect.tryPromise({
+                    try: () => r2.uploadPart(idx + 1, bytes),
+                    catch: (e) => new R2MultipartUploadError({ cause: `Upload Part Error: ${e}` }),
+                  }).pipe(
+                    Effect.timed,
+                    Effect.tap(([duration, part]) =>
+                      Effect.logInfo(
+                        `Uploaded Part: ${part.partNumber} - ${bytes.byteLength} ${bytes.length} in ${duration}`,
                       ),
-                      Effect.map(([_, part]) => part),
-                    );
-                    return part;
-                  }),
-                // { concurrency: 4 } //more seems to crash maybe add some retries?
-              ),
-              Stream.runCollect,
-              Effect.map((chunk) => Array.from(chunk)),
-              Effect.flatMap((parts) => Effect.promise(() => r2.complete(parts))),
-              Effect.tap((_) => Effect.logInfo(`Finished Uploading: ${key}`)),
-            );
-          }),
-      };
+                    ),
+                    Effect.map(([__, part]) => part),
+                  );
+                  return part;
+                }),
+              // { concurrency: 4 } //more seems to crash maybe add some retries?
+            ),
+            Stream.runCollect,
+            Effect.map((chunk) => Array.from(chunk)),
+            Effect.flatMap((parts) => Effect.promise(() => r2.complete(parts))),
+            Effect.tap((__) => Effect.logInfo(`Finished Uploading: ${key}`)),
+          );
+        }),
     }),
   );
 // get: (key) => Effect.promise(() => bucket.get(key)),

@@ -1,6 +1,5 @@
 import { Layer } from "effect";
 import { PublicApi, PublicRoutes } from "./public";
-import { HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { JWTServiceLive } from "@/services/jwt.service";
 import { UserRepositoryLive } from "@/repo/user.repo";

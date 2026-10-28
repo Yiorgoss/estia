@@ -1,4 +1,4 @@
-import { CurrentUser, UserCredentials, UserSchema } from "@/db/schema/User";
+import { UserCredentials, UserSchema } from "@/db/schema/User";
 import { UserRepository } from "@/repo/user.repo";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { HasherService } from "./hasher.service";
