@@ -1,4 +1,4 @@
-import { head } from "./head"
+import { head } from "./head";
 
 export const mapDemo = `<!DOCTYPE html>
 <html lang="en">
@@ -86,4 +86,4 @@ layers: [
 </script>
   </body>
   </html>
-    `
+    `;

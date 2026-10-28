@@ -1,58 +1,45 @@
-import { UserCredentials } from "@/db/schema/User"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
-import { HttpRouter, HttpServerResponse } from "effect/http"
-import { Effect, Schema } from "effect"
-import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service"
-import { InternalError } from "@/services/user.service"
-import { loginPage } from "@/frontend/pages/login"
-import { registerPage } from "@/frontend/pages/register"
-import { mapDemo } from "@/frontend/map-demo"
-import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands"
-import { head } from "@/frontend/head"
+import { UserCredentials } from "@/db/schema/User";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
+import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Effect, Schema } from "effect";
+import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
+import { InternalError } from "@/services/user.service";
+import { loginPage } from "@/frontend/pages/login";
+import { registerPage } from "@/frontend/pages/register";
+import { mapDemo } from "@/frontend/map-demo";
+import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
+import { head } from "@/frontend/head";
 
-
-const AuthGroup = HttpApiGroup
-  .make('auth')
+const AuthGroup = HttpApiGroup.make("auth")
+  .prefix("/auth")
+  .add(HttpApiEndpoint.post("test-post", "/test-post"))
   .add(
-    HttpApiEndpoint
-      .post("test-post", "/test-post")
+    HttpApiEndpoint.post("login", "/login", {
+      payload: UserCredentials,
+      success: Schema.Struct({
+        accessToken: JWTSchema,
+        refreshToken: RefreshTokenValue,
+      }),
+      error: [InvalidCredentialsError, UnauthorizedError, InternalError],
+    }),
   )
   .add(
-    HttpApiEndpoint
-      .post('login', '/login', {
-        payload: UserCredentials,
-        success: Schema.Struct({
-          accessToken: JWTSchema,
-          refreshToken: RefreshTokenValue,
-        }),
-        error: [
-          InvalidCredentialsError,
-          UnauthorizedError,
-          InternalError,
-        ],
-      })
-  )
-  .add(
-    HttpApiEndpoint
-      .post('register', '/register', {
-        payload: UserCredentials,
-        success: Schema.Struct({
-          accessToken: JWTSchema,
-          refreshToken: RefreshTokenValue,
-        }),
-        error: [
-          InternalError,
-        ],
-      })
-  ).prefix("/auth")
+    HttpApiEndpoint.post("register", "/register", {
+      payload: UserCredentials,
+      success: Schema.Struct({
+        accessToken: JWTSchema,
+        refreshToken: RefreshTokenValue,
+      }),
+      error: [InternalError],
+    }),
+  );
 
-export const PublicApi = HttpApi
-  .make('public')
-  .add(AuthGroup)
-  .prefix("/api")
+export const PublicApi = HttpApi.make("public").add(AuthGroup).prefix("/api");
 
 export const PublicRoutes = HttpRouter.addAll([
-  HttpRouter.route("GET", "/",
+  HttpRouter.route(
+    "GET",
+    "/",
     Effect.succeed(
       HttpServerResponse.html(`
         <!doctype html>
@@ -61,24 +48,15 @@ export const PublicRoutes = HttpRouter.addAll([
             <h1>Hello!</h1>
           </body>
         </html>
-      `)
-    )
+      `),
+    ),
   ),
-  HttpRouter.route("GET", "/login",
-    Effect.succeed(
-      HttpServerResponse.html(loginPage)
-    )
-  ),
-  HttpRouter.route("GET", "/register",
-    Effect.succeed(
-      HttpServerResponse.html(registerPage)
-    )
-  ),
-  HttpRouter.route("GET", "/map",
-    Effect.succeed(
-      HttpServerResponse.html(mapDemo)
-    )),
-  HttpRouter.route("GET", "/test",
+  HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage))),
+  HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage))),
+  HttpRouter.route("GET", "/map", Effect.succeed(HttpServerResponse.html(mapDemo))),
+  HttpRouter.route(
+    "GET",
+    "/test",
     Effect.succeed(
       HttpServerResponse.html(
         `
@@ -105,7 +83,8 @@ export const PublicRoutes = HttpRouter.addAll([
               </form>
             </body>
           </html>
-            `
-      )
-    ))
-])
+            `,
+      ),
+    ),
+  ),
+]);

@@ -81,4 +81,4 @@ export const registerPage = `
   </body>
 
 </html>
-    `
+    `;

@@ -1,8 +1,7 @@
 import { RefreshTokenHash, RefreshTokenId, UserId } from "@/db/schema/brands";
 import { Schema, Struct } from "effect";
 
-
-export interface RefreshToken extends Schema.Schema.Type<typeof RefreshTokenSchema> { }
+export interface RefreshToken extends Schema.Schema.Type<typeof RefreshTokenSchema> {}
 
 export const RefreshTokenSchema = Schema.Struct({
   id: RefreshTokenId,
@@ -13,13 +12,8 @@ export const RefreshTokenSchema = Schema.Struct({
   expiresAt: Schema.Number,
   createdAt: Schema.Number,
   revokedAt: Schema.NullOr(Schema.Number),
-})
+});
 
 export const NewRefreshToken = RefreshTokenSchema.mapFields(
-  Struct.pick([
-    'userId',
-    'tokenHash',
-    'expiresAt',
-    'deviceInfo'
-  ])
-)
+  Struct.pick(["userId", "tokenHash", "expiresAt", "deviceInfo"]),
+);

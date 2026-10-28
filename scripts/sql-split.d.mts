@@ -1,1 +1,1 @@
-export declare const splitStatements: (sql: string) => ReadonlyArray<string>
+export declare const splitStatements: (sql: string) => ReadonlyArray<string>;

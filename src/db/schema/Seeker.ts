@@ -1,7 +1,6 @@
 import { GenderEnum, SeekerId, UserId } from "@/db/schema/brands";
 import { Schema } from "effect";
 
-
 export const SeekerSchema = Schema.Struct({
   id: SeekerId,
   userId: UserId,
@@ -13,4 +12,4 @@ export const SeekerSchema = Schema.Struct({
   smoking: Schema.BooleanFromBit,
   pets: Schema.BooleanFromBit,
   createdAt: Schema.DateFromMillis,
-})
+});
