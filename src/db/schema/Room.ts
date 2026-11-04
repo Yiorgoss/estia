@@ -16,6 +16,9 @@ export const RoomSchema = Schema.Struct({
   createdAt: Schema.DateFromMillis,
 });
 
+export const CreateRoomSchema = RoomSchema.mapFields(Struct.omit(["id", "createdAt"]));
+export const CreateRoomBodySchema = CreateRoomSchema.mapFields(Struct.omit(["listerId"]));
+
 export const RoomFilters = RoomSchema.mapFields(
   Struct.pick([
     "price",

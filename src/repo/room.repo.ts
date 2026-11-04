@@ -1,5 +1,5 @@
 import { ListerId, RoomId } from "@/db/schema/brands";
-import { RoomFilters, RoomSchema, UpdateRoomSchema } from "@/db/schema/Room";
+import { CreateRoomSchema, RoomFilters, RoomSchema, UpdateRoomSchema } from "@/db/schema/Room";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { Context, Effect, Layer, Option, Schema } from "effect";
@@ -11,6 +11,9 @@ export class RoomNotFoundError extends Schema.TaggedError<RoomNotFoundError>()(
 ) {}
 
 export interface RoomRepository {
+  readonly insertRoom: (
+    roomArgs: typeof CreateRoomSchema.Type,
+  ) => Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
   readonly findAllByListerId: (
     listerId: typeof ListerId.Type,
   ) => Effect.Effect<ReadonlyArray<typeof RoomSchema.Type>, SqlError>;
@@ -45,6 +48,25 @@ export const RoomRepositoryLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return {
+      insertRoom: (args) =>
+        sql<typeof RoomSchema.Type>`
+        INSERT INTO rooms
+                    (
+                      lister_id, price, location,
+                      description, size, furnished,
+                      ensuite, smoking, pets,
+                      availableFrom
+                    )
+             VALUES (
+                      ${args.listerId}, ${args.price}, ${args.location},
+                      ${args.description}, ${args.size}, ${args.furnished},
+                      ${args.ensuite}, ${args.smoking}, ${args.pets},
+                      ${args.availableFrom}
+                    )
+          RETURNING *;`.pipe(
+          Effect.map((rows) => rows[0]),
+          Effect.map(Option.fromNullishOr),
+        ),
       findAllByListerId: (listerId) =>
         sql<Record<string, unknown>>`
             SELECT *
@@ -81,8 +103,16 @@ export const RoomRepositoryLive = Layer.effect(
       ) =>
         sql<Record<string, unknown>>`
             UPDATE rooms
-               SET ( price, location, description, size, furnished, ensuite, smoking, pets, available_from )
-                 = (${price}, ${location}, ${description}, ${size}, ${toBit(furnished)}, ${toBit(ensuite)}, ${toBit(smoking)}, ${toBit(pets)}, ${toEpochMillis(availableFrom)})
+               SET (
+                    price, location, description,
+                    size, furnished, ensuite,
+                    smoking, pets, available_from
+                   )
+                 = (
+                    ${price}, ${location}, ${description},
+                    ${size}, ${toBit(furnished)}, ${toBit(ensuite)},
+                    ${toBit(smoking)}, ${toBit(pets)}, ${toEpochMillis(availableFrom)}
+                   )
              WHERE id=${roomId}
          RETURNING *;
             `.pipe(

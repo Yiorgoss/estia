@@ -49,7 +49,7 @@ export const UserRepositoryLive = Layer.effect(
         sql<User>`
           INSERT INTO users (email, password_hash)
                VALUES (${email}, ${password})
-            RETURNING *`.pipe(
+            RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
         ),
@@ -58,7 +58,7 @@ export const UserRepositoryLive = Layer.effect(
               UPDATE users
                  SET role=${role}
                WHERE id = ${id}
-           RETURNING *`.pipe(
+           RETURNING *;`.pipe(
           Effect.map((row) => row[0]),
           Effect.map(Option.fromNullishOr),
         ),

@@ -1,13 +1,15 @@
 import { ListerSchema } from "@/db/schema/Lister";
-import { RoomSchema } from "@/db/schema/Room";
+import { CreateRoomBodySchema, CreateRoomSchema, RoomSchema } from "@/db/schema/Room";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { CurrentUser } from "@/db/schema/User";
 import { RoomNotFoundError } from "@/repo/room.repo";
 import { UnauthorizedError } from "@/services/auth.service";
 import { InternalError } from "@/services/user.service";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
+import { createRoom } from "@/frontend/pages/create-room";
+import { BadRequest } from "effect/http-api/HttpApiError";
 
 export const UserGroup = HttpApiGroup.make("user-group")
   .add(
@@ -30,6 +32,14 @@ export const UserGroup = HttpApiGroup.make("user-group")
   .prefix("/users");
 
 export const RoomGroup = HttpApiGroup.make("room-group")
+  .prefix("/rooms")
+  .add(
+    HttpApiEndpoint.post("create", "/create", {
+      payload: CreateRoomBodySchema,
+      success: RoomSchema.pipe(HttpApiSchema.status("Created")),
+      error: [UnauthorizedError, InternalError, BadRequest],
+    }),
+  )
   .add(
     HttpApiEndpoint.get("get-one", "/:id", {
       params: Schema.Struct({
@@ -38,15 +48,15 @@ export const RoomGroup = HttpApiGroup.make("room-group")
       success: RoomSchema,
       error: [InternalError, RoomNotFoundError],
     }),
-  )
-  .prefix("/rooms");
+  );
 
-export const PrivateApi = HttpApi.make("private-api").add(UserGroup).add(RoomGroup).prefix("/api");
+export const PrivateApi = HttpApi.make("private-api").prefix("/api").add(UserGroup).add(RoomGroup);
 
-export const PrivateRoutes = HttpRouter.add(
-  "GET",
-  "/private-get",
-  HttpServerResponse.html(`
+export const PrivateRoutes = HttpRouter.addAll([
+  HttpRouter.route(
+    "GET",
+    "/private-get",
+    HttpServerResponse.html(`
         <!doctype html>
         <html>
           <body>
@@ -54,4 +64,6 @@ export const PrivateRoutes = HttpRouter.add(
           </body>
         </html>
       `),
-);
+  ),
+  HttpRouter.route("GET", "/create-room", HttpServerResponse.html(createRoom)),
+]);
