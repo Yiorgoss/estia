@@ -1,11 +1,11 @@
 import { PrivateApi } from "@/api/private";
 import { JWTSchema, RoomId } from "@/db/schema/brands";
-import { RoomNotFoundError, RoomRepository } from "@/repo/room.repo";
+import { RoomNotFoundError, RoomRepository } from "@/repos/room.repo";
 import { InternalError } from "@/services/user.service";
 import { HttpApiBuilder } from "effect/http-api";
 import { Effect, Option, Schema } from "effect";
 import { JWTService } from "@/services/jwt.service";
-import { ListerRepository } from "@/repo/lister.repo";
+import { ListerRepository } from "@/repos/lister.repo";
 import { UnauthorizedError } from "@/services/auth.service";
 import { CreateRoomSchema } from "@/db/schema/Room";
 

@@ -1,10 +1,10 @@
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HashError, HasherService } from "./hasher.service";
-import { RefreshTokenNotFoundError, RefreshTokenRepository } from "@/repo/refresh-token.repo";
+import { RefreshTokenNotFoundError, RefreshTokenRepository } from "@/repos/refresh-token.repo";
 import type { SqlError } from "effect/sql/SqlError";
 
 import { JWTService } from "./jwt.service";
-import { UserRepository } from "@/repo/user.repo";
+import { UserRepository } from "@/repos/user.repo";
 import { InternalError, UserNotFoundError } from "./user.service";
 
 import { Cookies } from "effect/http";

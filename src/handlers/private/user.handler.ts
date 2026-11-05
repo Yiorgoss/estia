@@ -1,7 +1,7 @@
 import { PrivateApi } from "@/api/private";
 import { JWTSchema } from "@/db/schema/brands";
-import { ListerRepository } from "@/repo/lister.repo";
-import { SeekerRepository } from "@/repo/seeker.repo";
+import { ListerRepository } from "@/repos/lister.repo";
+import { SeekerRepository } from "@/repos/seeker.repo";
 import { UnauthorizedError } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { InternalError, UserService } from "@/services/user.service";

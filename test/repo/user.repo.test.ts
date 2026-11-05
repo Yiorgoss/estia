@@ -2,7 +2,7 @@ import { assert, layer } from "@effect/vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { UserId, UserPasswordHash } from "@/db/schema/brands";
-import { UserRepository, UserRepositoryLive } from "@/repo/user.repo";
+import { UserRepository, UserRepositoryLive } from "@/repos/user.repo";
 import { TestSqlLive } from "../support/sql";
 
 const password = (value: string) => Schema.decodeSync(UserPasswordHash)(value);

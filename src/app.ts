@@ -14,7 +14,7 @@ import {
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HealthRouter } from "./api/health";
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "./api";
-import { StorageRepositoryLive } from "./repo/storage.repo";
+import { StorageRepositoryLive } from "./repos/storage.repo";
 
 export class EnvVars extends Context.Service<
   EnvVars,

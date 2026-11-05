@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
-import { StorageRepository, StorageRepositoryLive } from "@/repo/storage.repo";
+import { StorageRepository, StorageRepositoryLive } from "@/repos/storage.repo";
 
 const fakeObject = (key: string, size = 0): R2Object =>
   ({

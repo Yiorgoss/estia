@@ -1,7 +1,7 @@
 import { assert, layer } from "@effect/vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import { RefreshTokenHash, UserId } from "@/db/schema/brands";
-import { RefreshTokenRepository, RefreshTokenRepositoryLive } from "@/repo/refresh-token.repo";
+import { RefreshTokenRepository, RefreshTokenRepositoryLive } from "@/repos/refresh-token.repo";
 import { TestSqlLive } from "../support/sql";
 import { insertRefreshToken, insertUser } from "../support/seed";
 

@@ -2,7 +2,7 @@ import { ListerSchema } from "@/db/schema/Lister";
 import { CreateRoomBodySchema, CreateRoomSchema, RoomSchema } from "@/db/schema/Room";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { CurrentUser } from "@/db/schema/User";
-import { RoomNotFoundError } from "@/repo/room.repo";
+import { RoomNotFoundError } from "@/repos/room.repo";
 import { UnauthorizedError } from "@/services/auth.service";
 import { InternalError } from "@/services/user.service";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api";

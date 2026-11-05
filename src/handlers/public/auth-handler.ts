@@ -1,5 +1,5 @@
 import { PublicApi } from "@/api/public";
-import { StorageRepository } from "@/repo/storage.repo";
+import { StorageRepository } from "@/repos/storage.repo";
 import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";

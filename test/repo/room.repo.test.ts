@@ -1,7 +1,7 @@
 import { assert, layer } from "@effect/vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import { ListerId, RoomId } from "@/db/schema/brands";
-import { RoomRepository, RoomRepositoryLive } from "@/repo/room.repo";
+import { RoomRepository, RoomRepositoryLive } from "@/repos/room.repo";
 import { TestSqlLive } from "../support/sql";
 import { insertLister, insertRoom, insertUser } from "../support/seed";
 

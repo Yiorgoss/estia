@@ -1,9 +1,9 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { UserRepository } from "../repo/user.repo";
+import { UserRepository } from "@/repos/user.repo";
 import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt.service";
 import { HasherService } from "./hasher.service";
 import { RefreshTokenService } from "./refresh-token.service";
-import { RefreshTokenNotFoundError } from "@/repo/refresh-token.repo";
+import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User";
 import { InternalError, UserNotFoundError } from "./user.service";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";

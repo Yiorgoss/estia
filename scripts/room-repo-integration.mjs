@@ -53,7 +53,7 @@ const main = async () => {
       appType: "custom",
     });
 
-    const repoMod = await vite.ssrLoadModule("/src/repo/room.repo.ts");
+    const repoMod = await vite.ssrLoadModule("/src/repos/room.repo.ts");
     const { D1Client } = await import("@effect/sql-d1");
     const { Miniflare } = await import(pathToFileURL(findMiniflare()).href);
 

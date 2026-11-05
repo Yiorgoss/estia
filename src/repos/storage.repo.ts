@@ -27,19 +27,6 @@ export interface StorageRepository {
     key: string,
     value: Stream.Stream<Uint8Array, MultipartError>,
   ) => Effect.Effect<R2Object, MultipartError | R2MultipartKeyError | R2MultipartUploadError>;
-  // head(key: string): Promise<R2Object | null>;
-  // get(key: string, options: R2GetOptions & {
-  //     onlyIf: R2Conditional | Headers;
-  // }): Promise<R2ObjectBody | R2Object | null>;
-  // get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null>;
-  // put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions & {
-  //     onlyIf: R2Conditional | Headers;
-  // }): Promise<R2Object | null>;
-  // put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
-  // createMultipartUpload(key: string, options?: R2MultipartOptions): Promise<R2MultipartUpload>;
-  // resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;
-  // delete(keys: string | string[]): Promise<void>;
-  // list(options?: R2ListOptions): Promise<R2Objects>;
 }
 
 export const StorageRepository = Context.Service<StorageRepository>("StorageRepository");

@@ -1,12 +1,12 @@
 import { UserCredentials, UserSchema } from "@/db/schema/User";
-import { UserRepository } from "@/repo/user.repo";
+import { UserRepository } from "@/repos/user.repo";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { HasherService } from "./hasher.service";
 import { ListerSchema } from "@/db/schema/Lister";
 import { UserId, UserRoles } from "@/db/schema/brands";
 import { SeekerSchema } from "@/db/schema/Seeker";
-import { SeekerRepository } from "@/repo/seeker.repo";
-import { ListerRepository } from "@/repo/lister.repo";
+import { SeekerRepository } from "@/repos/seeker.repo";
+import { ListerRepository } from "@/repos/lister.repo";
 
 export class UserAlreadyExistsError extends Schema.TaggedError<UserAlreadyExistsError>()(
   "UserAlreadyExistsError",
