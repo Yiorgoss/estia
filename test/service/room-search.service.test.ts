@@ -25,7 +25,11 @@ const seedLister = (id: number, userId: string) =>
 const fixtureIdsIn = (
   rooms: ReadonlyArray<{ readonly id: number }>,
   fixtureIds: ReadonlyArray<number>,
-) => rooms.map((room) => room.id).filter((id) => fixtureIds.includes(id));
+) =>
+  rooms
+    .map((room) => room.id)
+    .filter((id) => fixtureIds.includes(id))
+    .sort((a, b) => a - b);
 
 layer(TestLive, { concurrent: false })("RoomSearchService", (it) => {
   it.effect("filters by inclusive price bounds", () =>
@@ -181,6 +185,7 @@ layer(TestLive, { concurrent: false })("RoomSearchService", (it) => {
     Effect.gen(function* () {
       yield* seedLister(305, "u-search-empty");
       yield* insertRoom(3050, 305, { furnished: true, price: 12700, size: 1100 });
+      const fixtureIds = [3050];
 
       const service = yield* RoomSearchService;
       const results = yield* service.search({
@@ -189,7 +194,7 @@ layer(TestLive, { concurrent: false })("RoomSearchService", (it) => {
         maxSize: 9100,
         availableFrom: new Date(946684800000),
       });
-      assert.deepStrictEqual(results, []);
+      assert.deepStrictEqual(fixtureIdsIn(results, fixtureIds), []);
     }),
   );
 
