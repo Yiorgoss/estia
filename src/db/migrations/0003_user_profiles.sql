@@ -7,7 +7,6 @@ CREATE TABLE seekers (
             bio TEXT,
   date_of_birth DATETIME NOT NULL,
          gender TEXT NOT NULL CHECK (gender IN ('male', 'female', 'NB')),
-        picture TEXT,
         smoking INTEGER NOT NULL DEFAULT 0 CHECK (smoking IN (0,1)),
            pets INTEGER NOT NULL DEFAULT 0 CHECK (pets IN (0,1)),
      created_at DATETIME NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),
@@ -17,7 +16,6 @@ CREATE TABLE seekers (
 CREATE TABLE listers (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-        picture TEXT,
            name TEXT,  
       ownership TEXT NOT NULL DEFAULT 'owner' CHECK (ownership IN ('owner','leaseholder')),
      created_at DATETIME NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),

@@ -17,6 +17,7 @@ export interface UserRepository {
     id: typeof UserId.Type,
     role: typeof UserRoles.Type,
   ) => Effect.Effect<Option.Option<User>, SqlError>;
+  readonly updateAvatar: (id: typeof UserId.Type, avatar: string) => Effect.Effect<void, SqlError>;
 }
 
 export const UserRepository = Context.Service<UserRepository>("UserRepository");
@@ -57,8 +58,17 @@ export const UserRepositoryLive = Layer.effect(
         sql<User>`
               UPDATE users
                  SET role=${role}
-               WHERE id = ${id}
+               WHERE id=${id}
            RETURNING *;`.pipe(
+          Effect.map((row) => row[0]),
+          Effect.map(Option.fromNullishOr),
+        ),
+      updateAvatar: (id, avatar) =>
+        sql<typeof UserId.Type>`
+          UPDATE users
+             SET avatar=${avatar}
+           WHERE id=${id};
+       RETURNING id;`.pipe(
           Effect.map((row) => row[0]),
           Effect.map(Option.fromNullishOr),
         ),

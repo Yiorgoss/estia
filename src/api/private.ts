@@ -1,5 +1,5 @@
 import { ListerSchema } from "@/db/schema/Lister";
-import { CreateRoomBodySchema, CreateRoomSchema, RoomSchema } from "@/db/schema/Room";
+import { CreateRoomBodySchema, RoomSchema } from "@/db/schema/Room";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { CurrentUser } from "@/db/schema/User";
 import { RoomNotFoundError } from "@/repos/room.repo";

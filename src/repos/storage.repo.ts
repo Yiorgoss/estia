@@ -1,13 +1,16 @@
 import { MultipartError } from "effect/http/Multipart";
 import { Context, Effect, Layer, Schema, Stream } from "effect";
 
-class R2UploadError extends Schema.TaggedError<R2UploadError>()("R2UploadError", {
+export class R2UploadError extends Schema.TaggedError<R2UploadError>()("R2UploadError", {
   cause: Schema.Unknown,
 }) {}
-class R2MultipartKeyError extends Schema.TaggedError<R2MultipartKeyError>()("R2MultipartKeyError", {
-  cause: Schema.Unknown,
-}) {}
-class R2MultipartUploadError extends Schema.TaggedError<R2MultipartUploadError>()(
+export class R2MultipartKeyError extends Schema.TaggedError<R2MultipartKeyError>()(
+  "R2MultipartKeyError",
+  {
+    cause: Schema.Unknown,
+  },
+) {}
+export class R2MultipartUploadError extends Schema.TaggedError<R2MultipartUploadError>()(
   "R2MultipartUploadError",
   {
     cause: Schema.Unknown,
