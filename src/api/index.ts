@@ -16,6 +16,7 @@ import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { RoomRepositoryLive } from "@/repos/room.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { RoomHandler } from "@/handlers/private/room.handler";
+import { RoomSearchServiceLive } from "@/services/room-search.service";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -30,7 +31,11 @@ export const RepositoriesLive = Layer.mergeAll(
 export const InfraServicesLive = Layer.mergeAll(HasherServiceLive, JWTServiceLive);
 
 // --- Domain services (depend on repos + infra) ---
-export const DomainServicesLive = Layer.mergeAll(UserServiceLive, RefreshTokenServiceLive);
+export const DomainServicesLive = Layer.mergeAll(
+  UserServiceLive,
+  RefreshTokenServiceLive,
+  RoomSearchServiceLive,
+);
 
 // --- Final app layer ---
 export const AppLive = Layer.mergeAll(AuthServiceLive);

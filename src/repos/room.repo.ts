@@ -1,5 +1,11 @@
 import { ListerId, RoomId } from "@/db/schema/brands";
-import { CreateRoomSchema, RoomFilters, RoomSchema, UpdateRoomSchema } from "@/db/schema/Room";
+import {
+  CreateRoomSchema,
+  RoomFilters,
+  RoomSchema,
+  RoomSearchFilters,
+  UpdateRoomSchema,
+} from "@/db/schema/Room";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { Context, Effect, Layer, Option, Schema } from "effect";
@@ -22,6 +28,9 @@ export interface RoomRepository {
   ) => Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
   readonly findWithFilters: (
     filters: typeof RoomFilters.Type,
+  ) => Effect.Effect<ReadonlyArray<typeof RoomSchema.Type>, SqlError>;
+  readonly search: (
+    filters: typeof RoomSearchFilters.Type,
   ) => Effect.Effect<ReadonlyArray<typeof RoomSchema.Type>, SqlError>;
   readonly updateRoom: (
     roomId: typeof RoomId.Type,
@@ -91,6 +100,21 @@ export const RoomRepositoryLive = Layer.effect(
                  ${filters.price != null ? sql`AND price = ${filters.price}` : sql``}
                  ${filters.location != null ? sql`AND location = ${filters.location}` : sql``}
                  ${filters.size != null ? sql`AND size = ${filters.size}` : sql``}
+                 ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
+                 ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
+                 ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
+                 ${filters.pets != null ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
+                 ${filters.availableFrom != null ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
+            `.pipe(Effect.map((rows) => rows.map(decodeRoom))),
+      search: (filters) =>
+        sql<Record<string, unknown>>`
+            SELECT *
+              FROM rooms
+             WHERE 1=1
+                 ${filters.minPrice != null ? sql`AND price >= ${filters.minPrice}` : sql``}
+                 ${filters.maxPrice != null ? sql`AND price <= ${filters.maxPrice}` : sql``}
+                 ${filters.minSize != null ? sql`AND size >= ${filters.minSize}` : sql``}
+                 ${filters.maxSize != null ? sql`AND size <= ${filters.maxSize}` : sql``}
                  ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
                  ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
                  ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
