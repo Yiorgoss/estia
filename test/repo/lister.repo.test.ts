@@ -16,7 +16,6 @@ layer(TestLive, { concurrent: false })("ListerRepository", (it) => {
       yield* insertLister(101, "u-lister-profile", {
         name: "Ada Lister",
         ownership: "leaseholder",
-        picture: "https://cdn.test.local/ada.png",
       });
 
       const repo = yield* ListerRepository;
@@ -27,7 +26,6 @@ layer(TestLive, { concurrent: false })("ListerRepository", (it) => {
       assert.strictEqual(lister.userId, "u-lister-profile");
       assert.strictEqual(lister.name, "Ada Lister");
       assert.strictEqual(lister.ownership, "leaseholder");
-      assert.strictEqual(lister.picture, "https://cdn.test.local/ada.png");
       assert.instanceOf(lister.createdAt, Date);
     }),
   );
@@ -40,7 +38,6 @@ layer(TestLive, { concurrent: false })("ListerRepository", (it) => {
       const repo = yield* ListerRepository;
       const found = Option.getOrThrow(yield* repo.findByUserId(userId("u-lister-empty")));
       assert.strictEqual(found.ownership, "owner");
-      assert.isNull(found.picture);
       assert.strictEqual(found.name, "Lister");
     }),
   );
