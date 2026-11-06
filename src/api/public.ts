@@ -68,10 +68,14 @@ const searchResultsRoute = HttpRouter.route(
     return HttpServerResponse.html(searchResults(rooms));
   }).pipe(
     Effect.catchTags({
+      // This route only feeds the htmx search page, and htmx swaps 2xx
+      // responses by default, so a filter it cannot read is rendered in-band
+      // with a swappable status; otherwise the user keeps looking at the stale
+      // result list. The JSON API endpoint still rejects the same filters with
+      // a 400.
       SchemaError: () =>
         Effect.succeed(
           HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
-            status: 400,
             contentType: "text/html",
           }),
         ),

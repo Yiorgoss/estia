@@ -159,8 +159,18 @@ assert_status "$CODE" 200 "search fragment with blank fields"
 grep -q "${ROOM_LOCATION}" "$WORK/search-blank" || fail "blank fields filtered rooms out"
 pass "blank fields are treated as no filter"
 
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/search/results?minPrice=abc")
-assert_status "$CODE" 400 "search fragment rejects an invalid filter"
+CODE=$(curl -s -o "$WORK/search-invalid" -w '%{http_code}' "${BASE_URL}/search/results?minPrice=abc")
+assert_status "$CODE" 200 "search fragment rejects an invalid filter in-band"
+grep -q 'Those filters could not be read' "$WORK/search-invalid" || fail "invalid filter did not render the error"
+pass "invalid filter renders the error"
+
+# htmx swaps 2xx responses only, so the fragment reports an inverted range in
+# the same swappable way instead of leaving the previous results on screen.
+CODE=$(curl -s -o "$WORK/search-inverted" -w '%{http_code}' \
+  "${BASE_URL}/search/results?minPrice=930003&maxPrice=910001")
+assert_status "$CODE" 200 "search fragment rejects an inverted range in-band"
+grep -q 'Those filters could not be read' "$WORK/search-inverted" || fail "inverted range did not render the error"
+pass "inverted range renders the error"
 
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
