@@ -11,6 +11,13 @@ export const header = `
         </a>
 
         <a
+          href="/search"
+          class="text-sm font-medium text-gray-700 hover:text-blue-600"
+        >
+          Search
+        </a>
+
+        <a
           href="/login"
           class="rounded-md border-2 border-blue-700 px-4 py-2 text-sm font-medium text-blue-700 hover:text-white transition-colors duration-300 hover:bg-blue-700"
         >
