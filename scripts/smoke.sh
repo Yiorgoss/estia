@@ -152,7 +152,8 @@ assert_status "$CODE" 200 "search results fragment"
 grep -q "${ROOM_LOCATION}" "$WORK/search-fragment" || fail "search fragment rendered the seeded room"
 pass "search fragment rendered the seeded room"
 
-# Empty form fields must not narrow the results: `""` decodes to 0 otherwise.
+# Empty form fields must not narrow the results: they are dropped before
+# decoding, since a blank numeric bound is a 400 on its own.
 CODE=$(curl -s -o "$WORK/search-blank" -w '%{http_code}' \
   "${BASE_URL}/search/results?minPrice=&maxPrice=&minSize=&maxSize=&availableFrom=")
 assert_status "$CODE" 200 "search fragment with blank fields"
