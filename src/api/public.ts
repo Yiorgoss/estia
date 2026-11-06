@@ -67,10 +67,13 @@ const searchResultsRoute = HttpRouter.route(
     return HttpServerResponse.html(searchResults(rooms));
   }).pipe(
     Effect.catchTags({
+      // htmx only swaps 2xx responses by default, so a bad filter has to come
+      // back as 200 with the error fragment; a 4xx here would leave the page
+      // showing the previous results with no explanation. The JSON endpoint
+      // still rejects bad filters with the runtime's 400.
       SchemaError: () =>
         Effect.succeed(
           HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
-            status: 400,
             contentType: "text/html",
           }),
         ),

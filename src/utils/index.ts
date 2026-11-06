@@ -17,9 +17,9 @@ const htmlEscapes: Record<string, string> = {
 export const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => htmlEscapes[char] ?? char);
 
-// An HTML form submits every named field, empty ones included, and `""` is a
-// valid number to the query schemas (it decodes to 0). Dropping empty values
-// keeps an untouched "max price" box from filtering every room out.
+// An HTML form submits every named field, empty ones included, and `""` is not
+// a valid numeric bound to the query schemas (it is a bad request). Dropping
+// empty values keeps an untouched "max price" box from failing the search.
 export const omitEmptySearchParams = (
   params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
 ) => {
