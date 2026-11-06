@@ -131,6 +131,15 @@ pass "room search with a non-matching bound is empty"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?furnished=yes")
 assert_status "$CODE" 400 "room search rejects an invalid boolean"
 
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minSize=large")
+assert_status "$CODE" 400 "room search rejects an invalid number"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=-1")
+assert_status "$CODE" 400 "room search rejects a negative bound"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=1000&maxPrice=500")
+assert_status "$CODE" 400 "room search rejects an inverted price range"
+
 # 5c. the htmx search page and its results fragment
 CODE=$(curl -s -o "$WORK/search-page" -w '%{http_code}' "${BASE_URL}/search")
 assert_status "$CODE" 200 "search page"
