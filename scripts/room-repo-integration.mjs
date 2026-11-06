@@ -209,81 +209,11 @@ const main = async () => {
       }),
     );
 
-    // Scenario B: findWithFilters filters on value and bit flags
-    const byPrice = await run(withRepo((r) => r.findWithFilters({ price: 500 })));
-    check(
-      "findWithFilters({price:500}) -> 1 room",
-      byPrice.length === 1 && byPrice[0].id === 10,
-      `got ${byPrice.length}`,
-    );
-    const byLocation = await run(withRepo((r) => r.findWithFilters({ location: "Athens" })));
-    check(
-      "findWithFilters({location:Athens}) -> 2 rooms (10,12)",
-      byLocation.length === 2,
-      `got ${byLocation.length}`,
-    );
-    const byFurnished = await run(withRepo((r) => r.findWithFilters({ furnished: true })));
-    check(
-      "findWithFilters({furnished:true}) -> 2 rooms (10,12)",
-      byFurnished.length === 2,
-      `got ${byFurnished.length}`,
-    );
-    const byNotFurnished = await run(withRepo((r) => r.findWithFilters({ furnished: false })));
-    check(
-      "findWithFilters({furnished:false}) filters to 0-bit rooms (11,20)",
-      byNotFurnished.length === 2,
-      `got ${byNotFurnished.length}`,
-    );
-    const byPets = await run(withRepo((r) => r.findWithFilters({ pets: true })));
-    check(
-      "findWithFilters({pets:true}) -> 2 rooms (10,12)",
-      byPets.length === 2,
-      `got ${byPets.length}`,
-    );
-    const byNoPets = await run(withRepo((r) => r.findWithFilters({ pets: false })));
-    check(
-      "findWithFilters({pets:false}) filters to 0-bit rooms (11,20)",
-      byNoPets.length === 2,
-      `got ${byNoPets.length}`,
-    );
-    const byAvailable = await run(
-      withRepo((r) => r.findWithFilters({ availableFrom: new Date(978307200000) })),
-    );
-    check(
-      "findWithFilters({availableFrom}) -> room 11 (>= 2001-01-01)",
-      byAvailable.length === 1 &&
-        byAvailable[0].id === 11 &&
-        byAvailable.every((x) => x.availableFrom.getTime() >= 978307200000),
-      `got ${byAvailable.length}`,
-    );
-    const combined = await run(
-      withRepo((r) => r.findWithFilters({ location: "Athens", furnished: true })),
-    );
-    check(
-      "findWithFilters combined -> rooms 10,12",
-      combined.length === 2,
-      `got ${combined.length}`,
-    );
-    const empty = await run(withRepo((r) => r.findWithFilters({})));
-    check("findWithFilters({}) -> all 4 rooms", empty.length === 4, `got ${empty.length}`);
-
-    // Scenario C: nullish filter values must be ignored, not turned into `= NULL`
-    const nullish = await run(
-      withRepo((r) =>
-        r.findWithFilters({ size: null, availableFrom: null, price: null, location: null }),
-      ),
-    );
-    check(
-      "findWithFilters(nullish values) -> all 4 rooms",
-      nullish.length === 4,
-      `got ${nullish.length}`,
-    );
-
-    // Scenario D: findByRoomId returns None for missing id
+    // Scenario B: findByRoomId returns None for missing id
     const none = await run(withRepo((r) => r.findByRoomId(99999)));
     check("findByRoomId(unknown) -> None", Option.isNone(none));
 
-    // Scenario E: updateRoom produces valid SQL and persists changes
+    // Scenario C: updateRoom produces valid SQL and persists changes
     const updated = await run(
       withRepo((r) =>
         r.updateRoom(11, {
@@ -348,7 +278,7 @@ const main = async () => {
     );
     check("updateRoom returns None for unknown id", Option.isNone(missing));
 
-    // Scenario F: nullish update values persist as SQL NULL, not a crash or string
+    // Scenario D: nullish update values persist as SQL NULL, not a crash or string
     const nulled = await run(
       withRepo((r) =>
         r.updateRoom(12, {

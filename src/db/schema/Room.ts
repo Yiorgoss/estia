@@ -19,19 +19,6 @@ export const RoomSchema = Schema.Struct({
 export const CreateRoomSchema = RoomSchema.mapFields(Struct.omit(["id", "createdAt"]));
 export const CreateRoomBodySchema = CreateRoomSchema.mapFields(Struct.omit(["listerId"]));
 
-export const RoomFilters = RoomSchema.mapFields(
-  Struct.pick([
-    "price",
-    "location",
-    "size",
-    "furnished",
-    "ensuite",
-    "smoking",
-    "pets",
-    "availableFrom",
-  ]),
-).mapFields(Struct.map(Schema.optional));
-
 // Search filters describe ranges rather than exact values: price and size are
 // inclusive bounds, the bit flags filter on their exact value (a `false` flag
 // is a real filter), and `availableFrom` means "available on or after".
