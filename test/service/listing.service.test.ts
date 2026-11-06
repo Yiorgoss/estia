@@ -124,9 +124,7 @@ layer(TestLive, { concurrent: false })("ListingService", (it) => {
       assert.strictEqual(updated.title, "Bigger room");
 
       assert.strictEqual(
-        yield* tagOf(
-          service.updateListing(ownerId("u-svc-title"), created.id, { title: "   " }),
-        ),
+        yield* tagOf(service.updateListing(ownerId("u-svc-title"), created.id, { title: "   " })),
         "ListingValidationError",
       );
     }),
