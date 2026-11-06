@@ -18,7 +18,6 @@ layer(TestLive, { concurrent: false })("SeekerRepository", (it) => {
         bio: "Looking for a quiet room",
         dateOfBirth: new Date("1995-04-12T00:00:00.000Z").getTime(),
         gender: "female",
-        picture: "https://cdn.test.local/lin.png",
         smoking: true,
         pets: false,
       });

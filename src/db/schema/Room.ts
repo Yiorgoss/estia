@@ -32,6 +32,21 @@ export const RoomFilters = RoomSchema.mapFields(
   ]),
 ).mapFields(Struct.map(Schema.optional));
 
+// Search filters describe ranges rather than exact values: price and size are
+// inclusive bounds, the bit flags filter on their exact value (a `false` flag
+// is a real filter), and `availableFrom` means "available on or after".
+export const RoomSearchFilters = Schema.Struct({
+  minPrice: Schema.optional(Schema.Number),
+  maxPrice: Schema.optional(Schema.Number),
+  minSize: Schema.optional(Schema.Number),
+  maxSize: Schema.optional(Schema.Number),
+  furnished: Schema.optional(Schema.Boolean),
+  ensuite: Schema.optional(Schema.Boolean),
+  smoking: Schema.optional(Schema.Boolean),
+  pets: Schema.optional(Schema.Boolean),
+  availableFrom: Schema.optional(Schema.Date),
+});
+
 export const UpdateRoomSchema = RoomSchema.mapFields(
   Struct.pick([
     "price",

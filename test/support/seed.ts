@@ -22,15 +22,16 @@ export const insertLister = (
   options: {
     readonly name?: string | null;
     readonly ownership?: "owner" | "leaseholder";
-    readonly picture?: string | null;
   } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql.unsafe(
-      "INSERT INTO listers (id, user_id, name, ownership, picture) VALUES (?, ?, ?, ?, ?)",
-      [id, userId, options.name ?? "Lister", options.ownership ?? "owner", options.picture ?? null],
-    );
+    yield* sql.unsafe("INSERT INTO listers (id, user_id, name, ownership) VALUES (?, ?, ?, ?)", [
+      id,
+      userId,
+      options.name ?? "Lister",
+      options.ownership ?? "owner",
+    ]);
   });
 
 export const insertSeeker = (
@@ -40,7 +41,6 @@ export const insertSeeker = (
     readonly bio?: string | null;
     readonly dateOfBirth?: number;
     readonly gender?: "male" | "female" | "NB";
-    readonly picture?: string | null;
     readonly smoking?: boolean;
     readonly pets?: boolean;
   } = {},
@@ -48,15 +48,14 @@ export const insertSeeker = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql.unsafe(
-      `INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, picture, smoking, pets)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         options.name ?? "Seeker",
         options.bio ?? null,
         options.dateOfBirth ?? 946684800000,
         options.gender ?? "NB",
-        options.picture ?? null,
         options.smoking === true ? 1 : 0,
         options.pets === true ? 1 : 0,
       ],

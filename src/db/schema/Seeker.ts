@@ -8,7 +8,6 @@ export const SeekerSchema = Schema.Struct({
   bio: Schema.NullishOr(Schema.String),
   dateOfBirth: Schema.DateFromMillis,
   gender: Schema.NullishOr(GenderEnum),
-  picture: Schema.NullishOr(Schema.String),
   smoking: Schema.BooleanFromBit,
   pets: Schema.BooleanFromBit,
   createdAt: Schema.DateFromMillis,
