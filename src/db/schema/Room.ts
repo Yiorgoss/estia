@@ -1,5 +1,5 @@
 import { ListerId, RoomId } from "@/db/schema/brands";
-import { BooleanFromString } from "@/db/schema/codecs";
+import { BooleanFromString, NonBlankFiniteFromString } from "@/db/schema/codecs";
 import { Schema, Struct } from "effect";
 
 export const RoomSchema = Schema.Struct({
@@ -35,22 +35,49 @@ export const RoomSearchFilters = Schema.Struct({
   availableFrom: Schema.optional(Schema.Date),
 });
 
+// Price and size are non-negative quantities, so a negative bound is rejected
+// as a malformed request instead of being forwarded as a filter.
+const NonNegativeFiniteFromString = NonBlankFiniteFromString.check(
+  Schema.isGreaterThanOrEqualTo(0),
+);
+
 // The same filters as they travel over HTTP: query parameters are strings, so
 // every field carries a string codec even though the decoded type stays
-// identical to `RoomSearchFilters`. `FiniteFromString` is used instead of
-// `NumberFromString` because the latter accepts `NaN` and `Infinity`, which
-// would silently turn a typo into a filter that matches nothing.
+// identical to `RoomSearchFilters`. Numeric bounds go through
+// `NonNegativeFiniteFromString` so a blank, non-numeric, non-finite, or
+// negative value is a bad request instead of a filter that silently matches
+// nothing, and a range whose minimum is above its maximum is a bad request
+// rather than a query that happens to match nothing.
 export const RoomSearchQuery = Schema.Struct({
-  minPrice: Schema.optional(Schema.FiniteFromString),
-  maxPrice: Schema.optional(Schema.FiniteFromString),
-  minSize: Schema.optional(Schema.FiniteFromString),
-  maxSize: Schema.optional(Schema.FiniteFromString),
+  minPrice: Schema.optional(NonNegativeFiniteFromString),
+  maxPrice: Schema.optional(NonNegativeFiniteFromString),
+  minSize: Schema.optional(NonNegativeFiniteFromString),
+  maxSize: Schema.optional(NonNegativeFiniteFromString),
   furnished: Schema.optional(BooleanFromString),
   ensuite: Schema.optional(BooleanFromString),
   smoking: Schema.optional(BooleanFromString),
   pets: Schema.optional(BooleanFromString),
   availableFrom: Schema.optional(Schema.DateFromString),
-});
+}).check(
+  Schema.makeFilter((query) => {
+    const issues: Array<Schema.FilterIssue> = [];
+    if (
+      query.minPrice !== undefined &&
+      query.maxPrice !== undefined &&
+      query.minPrice > query.maxPrice
+    ) {
+      issues.push({ path: ["minPrice"], issue: "minPrice must not be greater than maxPrice" });
+    }
+    if (
+      query.minSize !== undefined &&
+      query.maxSize !== undefined &&
+      query.minSize > query.maxSize
+    ) {
+      issues.push({ path: ["minSize"], issue: "minSize must not be greater than maxSize" });
+    }
+    return issues;
+  }),
+);
 
 // Query parameters arrive as a string tree, so the schema is read through this
 // codec instead of its own encoded side.

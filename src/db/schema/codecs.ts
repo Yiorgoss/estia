@@ -18,3 +18,12 @@ export const BooleanFromString: Schema.Codec<boolean, string> = Schema.Literals(
     }),
   ),
 );
+
+/*
+ * `Schema.FiniteFromString` coerces with JavaScript's `Number`, which turns a
+ * blank string into `0`. A filter is either present with a value or absent, so
+ * a blank parameter is rejected instead of silently becoming zero.
+ */
+export const NonBlankFiniteFromString: Schema.Codec<number, string> = Schema.String.check(
+  Schema.isPattern(/\S/),
+).pipe(Schema.decodeTo(Schema.Finite, SchemaTransformation.numberFromString));
