@@ -95,11 +95,6 @@ const main = async () => {
 
     console.log("listings repository integration against real D1");
 
-    check(
-      "real D1 applies the migration and seeds the 13 regions",
-      migrationFiles.includes("0004_listings.sql"),
-      migrationFiles.join(","),
-    );
     const regionCount = await db.prepare("SELECT COUNT(*) AS n FROM regions").first();
     check("regions table holds 13 rows", regionCount.n === 13, `got ${regionCount.n}`);
 

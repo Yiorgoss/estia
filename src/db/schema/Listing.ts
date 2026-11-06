@@ -1,5 +1,5 @@
 import { ListingId, UserId } from "@/db/schema/brands";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, SchemaTransformation } from "effect";
 
 /*
  * One listing table covers all three kinds of ad, so every schema here is
@@ -54,7 +54,17 @@ export const GREEK_LONGITUDE_RANGE = { minimum: 19.0, maximum: 30.5 } as const;
 const Latitude = Schema.Number.check(Schema.isBetween(GREEK_LATITUDE_RANGE));
 const Longitude = Schema.Number.check(Schema.isBetween(GREEK_LONGITUDE_RANGE));
 
-export const ListingTitle = Schema.NonEmptyString.check(Schema.isMaxLength(120));
+// A title is trimmed before it is bounded, so a padded title is stored trimmed
+// and a whitespace-only title is rejected instead of reaching the database.
+export const ListingTitle = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.NonEmptyString.check(Schema.isMaxLength(120)),
+    SchemaTransformation.transform({
+      decode: (value: string) => value.trim(),
+      encode: (value: string) => value,
+    }),
+  ),
+);
 const ListingDescription = Schema.String.check(Schema.isMaxLength(5000));
 const PriceMinor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const SizeSqm = Schema.Int.check(Schema.isGreaterThan(0));

@@ -98,6 +98,40 @@ layer(TestLive, { concurrent: false })("ListingService", (it) => {
     }),
   );
 
+  it.effect("createDraft and updateListing trim the title and reject a blank one with a 400", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-svc-title", "svc-title@test.local");
+      const service = yield* ListingService;
+
+      assert.strictEqual(
+        yield* tagOf(service.createDraft(ownerId("u-svc-title"), draft({ title: "   " }))),
+        "ListingValidationError",
+      );
+      assert.strictEqual(
+        yield* tagOf(service.createDraft(ownerId("u-svc-title"), draft({ title: "\t\n " }))),
+        "ListingValidationError",
+      );
+
+      const created = yield* service.createDraft(
+        ownerId("u-svc-title"),
+        draft({ title: "  Sunny room  " }),
+      );
+      assert.strictEqual(created.title, "Sunny room");
+
+      const updated = yield* service.updateListing(ownerId("u-svc-title"), created.id, {
+        title: "  Bigger room ",
+      });
+      assert.strictEqual(updated.title, "Bigger room");
+
+      assert.strictEqual(
+        yield* tagOf(
+          service.updateListing(ownerId("u-svc-title"), created.id, { title: "   " }),
+        ),
+        "ListingValidationError",
+      );
+    }),
+  );
+
   it.effect("getOwn and getPublic draw the ownership and visibility lines", () =>
     Effect.gen(function* () {
       yield* insertUser("u-svc-own", "svc-own@test.local");

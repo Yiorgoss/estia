@@ -8,6 +8,7 @@ import {
   ListingSchema,
   ListingSearchFilters,
   ListingStatus,
+  ListingTitle,
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { ListingRepository } from "@/repos/listing.repo";
@@ -18,9 +19,10 @@ import type { SqlError } from "effect/sql/SqlError";
 /*
  * The listings service owns every rule that needs the current row or a
  * cross-field view: ownership, the status state machine, and the coordinate
- * pair. Value domains are already decoded by the time a caller gets here (the
- * HTTP boundary decodes with `src/db/schema/Listing.ts`), and the database
- * CHECK/foreign-key constraints remain the last line of defence.
+ * pair. It also decodes the title with the shared codec, so a caller that
+ * reaches it without the HTTP boundary still gets the trimmed value and a 400
+ * instead of a database error; the database CHECK/foreign-key constraints
+ * remain the last line of defence.
  */
 
 export class ListingNotFoundError extends Schema.TaggedError<ListingNotFoundError>()(
@@ -160,6 +162,15 @@ export interface ListingService {
 
 export const ListingService = Context.Service<ListingService>("ListingService");
 
+// A title that does not satisfy the shared codec is a bad request (400), never a
+// driver failure: a whitespace-only title must not reach the database CHECK.
+const decodeTitle = (title: string): Effect.Effect<string, ListingValidationError> =>
+  Schema.decodeUnknownEffect(ListingTitle)(title).pipe(
+    Effect.catchTag("SchemaError", (error) =>
+      Effect.fail(new ListingValidationError({ message: String(error) })),
+    ),
+  );
+
 // Services collapse driver failures into `InternalError` (the 500 contract every
 // other service already follows) and log the real cause.
 const fromSql = <A>(effect: Effect.Effect<A, SqlError>): Effect.Effect<A, InternalError> =>
@@ -217,19 +228,22 @@ export const ListingServiceLive = Layer.effect(
     return {
       createDraft: (ownerId, input) =>
         Effect.gen(function* () {
-          yield* assertLocation(input.lat, input.lng);
-          return yield* fromSql(repo.create(ownerId, input));
+          const values = { ...input, title: yield* decodeTitle(input.title) };
+          yield* assertLocation(values.lat, values.lng);
+          return yield* fromSql(repo.create(ownerId, values));
         }),
       updateListing: (ownerId, id, input) =>
         Effect.gen(function* () {
+          const title = input.title === undefined ? undefined : yield* decodeTitle(input.title);
+          const values = { ...input, title };
           const current = yield* loadOwned(ownerId, id);
           // Merge before validating so a partial update cannot leave a
           // half-populated coordinate pair behind.
           yield* assertLocation(
-            input.lat === undefined ? current.lat : input.lat,
-            input.lng === undefined ? current.lng : input.lng,
+            values.lat === undefined ? current.lat : values.lat,
+            values.lng === undefined ? current.lng : values.lng,
           );
-          const updated = yield* fromSql(repo.update(id, ownerId, input));
+          const updated = yield* fromSql(repo.update(id, ownerId, values));
           if (Option.isNone(updated)) {
             return yield* Effect.fail(new ListingNotFoundError({ id }));
           }
