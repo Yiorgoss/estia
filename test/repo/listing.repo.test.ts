@@ -212,7 +212,7 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
       assert.deepStrictEqual(ids(yield* repo.search({ ensuite: true }, page(50))), [4201]);
       assert.deepStrictEqual(ids(yield* repo.search({ smoking: true }, page(50))), [4202]);
 
-      // Availability excludes rows with no date, exactly like the legacy search.
+      // Availability excludes rows with no date.
       assert.deepStrictEqual(
         ids(yield* repo.search({ availableFrom: new Date(AT + 2_000) }, page(50))),
         [4202],

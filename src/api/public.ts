@@ -110,10 +110,7 @@ export const ListingsGroup = HttpApiGroup.make("listings")
   )
   .prefix("/listings");
 
-export const PublicApi = HttpApi.make("public")
-  .add(AuthGroup)
-  .add(ListingsGroup)
-  .prefix("/api");
+export const PublicApi = HttpApi.make("public").add(AuthGroup).add(ListingsGroup).prefix("/api");
 
 const searchResultsRoute = HttpRouter.route(
   "GET",
