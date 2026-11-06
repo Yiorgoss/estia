@@ -12,7 +12,9 @@ import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
 import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
 import {
-  ListingPageResponse,
+  ListingCursorFromString,
+  ListingPage,
+  ListingSchema,
   ListingSearchQuery,
   ListingSearchQueryCodec,
 } from "@/db/schema/Listing";
@@ -55,11 +57,61 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
   )
   .prefix("/rooms");
 
-const ListingsGroup = HttpApiGroup.make("listings")
+/*
+ * The feed is unauthenticated, so its wire shape is a projection of the listing
+ * row, not the row itself: the owner's account id, the exact coordinates, and
+ * the lifecycle timestamps stay behind the owner-scoped endpoints.
+ */
+const PublicListingSchema = Schema.Struct({
+  id: ListingSchema.fields.id,
+  kind: ListingSchema.fields.kind,
+  title: ListingSchema.fields.title,
+  description: ListingSchema.fields.description,
+  priceMinor: ListingSchema.fields.priceMinor,
+  currency: ListingSchema.fields.currency,
+  regionCode: ListingSchema.fields.regionCode,
+  sizeSqm: ListingSchema.fields.sizeSqm,
+  furnished: ListingSchema.fields.furnished,
+  ensuite: ListingSchema.fields.ensuite,
+  smoking: ListingSchema.fields.smoking,
+  pets: ListingSchema.fields.pets,
+  availableFrom: ListingSchema.fields.availableFrom,
+  publishedAt: ListingSchema.fields.publishedAt,
+});
+
+export const PublicListingPageResponse = Schema.Struct({
+  items: Schema.Array(PublicListingSchema),
+  nextCursor: Schema.NullishOr(ListingCursorFromString),
+});
+export type PublicListingPageResponse = typeof PublicListingPageResponse.Type;
+
+export const toPublicListingPage = (
+  page: typeof ListingPage.Type,
+): typeof PublicListingPageResponse.Type => ({
+  items: page.items.map((listing) => ({
+    id: listing.id,
+    kind: listing.kind,
+    title: listing.title,
+    description: listing.description,
+    priceMinor: listing.priceMinor,
+    currency: listing.currency,
+    regionCode: listing.regionCode,
+    sizeSqm: listing.sizeSqm,
+    furnished: listing.furnished,
+    ensuite: listing.ensuite,
+    smoking: listing.smoking,
+    pets: listing.pets,
+    availableFrom: listing.availableFrom,
+    publishedAt: listing.publishedAt,
+  })),
+  nextCursor: page.nextCursor,
+});
+
+export const ListingsGroup = HttpApiGroup.make("listings")
   .add(
     HttpApiEndpoint.get("search", "/", {
       query: ListingSearchQuery,
-      success: ListingPageResponse,
+      success: PublicListingPageResponse,
       error: [InternalError],
     }),
   )

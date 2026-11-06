@@ -31,8 +31,6 @@ export const omitEmptySearchParams = (
   return kept;
 };
 
-export const formatPrice = (price: number) => `€${price.toLocaleString("en-GB")}`;
-
 // Listing prices are stored in minor units; a whole price shows no decimals and
 // a price with cents shows exactly two, so a card never reads "€455.5".
 export const formatPriceMinor = (priceMinor: number) =>

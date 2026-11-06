@@ -3,7 +3,7 @@ import { kindLabels, regionLabels } from "../listing-labels";
 import { head } from "../head";
 import { header } from "../header";
 
-const numberField = (name: string, label: string, placeholder: string) => `
+const numberField = (name: string, label: string, placeholder: string, step = "any") => `
   <div>
     <label for="${name}" class="mb-1 block text-sm font-medium text-gray-700">${label}</label>
     <input
@@ -11,7 +11,7 @@ const numberField = (name: string, label: string, placeholder: string) => `
       name="${name}"
       type="number"
       min="0"
-      step="any"
+      step="${step}"
       placeholder="${placeholder}"
       class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
     />
@@ -89,8 +89,8 @@ export const searchPage = `<!DOCTYPE html>
       </div>
 
       <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        ${numberField("minSizeSqm", "Min size (m²)", "0")}
-        ${numberField("maxSizeSqm", "Max size (m²)", "150")}
+        ${numberField("minSizeSqm", "Min size (m²)", "0", "1")}
+        ${numberField("maxSizeSqm", "Max size (m²)", "150", "1")}
         <div>
           <label for="availableFrom" class="mb-1 block text-sm font-medium text-gray-700">
             Available from

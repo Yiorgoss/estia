@@ -296,14 +296,3 @@ export type ListingSearchQuery = typeof ListingSearchQuery.Type;
 // Query parameters arrive as a string tree, so the schema is read through this
 // codec instead of its own encoded side.
 export const ListingSearchQueryCodec = Schema.toCodecStringTree(ListingSearchQuery);
-
-/*
- * The HTTP response keeps the model's page shape but encodes `nextCursor` with
- * the same opaque string a request carries, so the sort key never leaks into
- * the public surface.
- */
-export const ListingPageResponse = Schema.Struct({
-  items: Schema.Array(ListingSchema),
-  nextCursor: Schema.NullishOr(ListingCursorFromString),
-});
-export type ListingPageResponse = typeof ListingPageResponse.Type;
