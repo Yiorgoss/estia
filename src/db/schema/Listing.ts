@@ -237,8 +237,9 @@ export const ListingCursorFromString: Schema.Codec<typeof ListingCursor.Type, st
  * a string codec even though the decoded type stays the model's own. Bounds go
  * through the same non-blank finite codec as the room search, so a blank,
  * non-numeric, non-finite, negative, or fractional value is a bad request
- * rather than a filter that silently matches nothing. The limit keeps the model's default of
- * 20 and its cap of 50: a caller cannot ask for an unbounded page.
+ * rather than a filter that silently matches nothing. `limit` decodes through
+ * `ListingPageLimit`, so the default and the cap keep their one definition in
+ * the page request above.
  */
 const NonNegativeIntFromString = NonBlankFiniteFromString.check(
   Schema.isInt(),

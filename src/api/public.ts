@@ -60,7 +60,9 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
 /*
  * The feed is unauthenticated, so its wire shape is a projection of the listing
  * row, not the row itself: the owner's account id, the exact coordinates, and
- * the lifecycle timestamps stay behind the owner-scoped endpoints.
+ * the `status`/`updatedAt` bookkeeping stay behind the owner-scoped endpoints.
+ * `publishedAt` is the one timestamp the feed needs, because it is both the
+ * newest-first sort key and what a visitor reads as recency.
  */
 const PublicListingSchema = Schema.Struct({
   id: ListingSchema.fields.id,

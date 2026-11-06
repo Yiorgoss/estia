@@ -12,8 +12,8 @@ const htmlEscapes: Record<string, string> = {
   "'": "&#39;",
 };
 
-// Room listings are user input, so anything interpolated into server-rendered
-// HTML has to go through this first.
+// Listing and room content is user input, so anything interpolated into
+// server-rendered HTML has to go through this first.
 export const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => htmlEscapes[char] ?? char);
 
@@ -40,11 +40,11 @@ export const formatPriceMinor = (priceMinor: number) =>
   })}`;
 
 /*
- * The search form collects whole euros because that is what a visitor types,
- * while the listings API filters on minor units. Converting here keeps the
- * form's units a presentation concern and the API contract in one unit. A value
- * that is not a plain finite number is passed through unchanged, so the query
- * codec still rejects it instead of the conversion turning it into `0`.
+ * The search form collects euros, while the listings API filters on minor
+ * units. Converting here keeps the form's units a presentation concern and the
+ * API contract in one unit. A value that is not a plain finite number is passed
+ * through unchanged, so the query codec still rejects it instead of the
+ * conversion turning it into `0`.
  */
 export const withMinorUnitPrices = (
   params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
