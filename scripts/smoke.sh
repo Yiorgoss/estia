@@ -131,6 +131,28 @@ pass "room search with a non-matching bound is empty"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?furnished=yes")
 assert_status "$CODE" 400 "room search rejects an invalid boolean"
 
+# 5c. the htmx search page and its results fragment
+CODE=$(curl -s -o "$WORK/search-page" -w '%{http_code}' "${BASE_URL}/search")
+assert_status "$CODE" 200 "search page"
+grep -q 'hx-get="/search/results"' "$WORK/search-page" || fail "search page wires the form to the results fragment"
+pass "search page wires the form to the results fragment"
+
+CODE=$(curl -s -o "$WORK/search-fragment" -w '%{http_code}' \
+  "${BASE_URL}/search/results?minPrice=500&maxPrice=500&availableFrom=2000-01-01")
+assert_status "$CODE" 200 "search results fragment"
+grep -q "${ROOM_LOCATION}" "$WORK/search-fragment" || fail "search fragment rendered the seeded room"
+pass "search fragment rendered the seeded room"
+
+# Empty form fields must not narrow the results: `""` decodes to 0 otherwise.
+CODE=$(curl -s -o "$WORK/search-blank" -w '%{http_code}' \
+  "${BASE_URL}/search/results?minPrice=&maxPrice=&minSize=&maxSize=&availableFrom=")
+assert_status "$CODE" 200 "search fragment with blank fields"
+grep -q "${ROOM_LOCATION}" "$WORK/search-blank" || fail "blank fields filtered rooms out"
+pass "blank fields are treated as no filter"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/search/results?minPrice=abc")
+assert_status "$CODE" 400 "search fragment rejects an invalid filter"
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")
