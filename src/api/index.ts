@@ -15,6 +15,7 @@ import { AuthMiddleware } from "@/middleware/auth-mw";
 import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { RoomRepositoryLive } from "@/repos/room.repo";
+import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { RoomHandler } from "@/handlers/private/room.handler";
 import { RoomSearchServiceLive } from "@/services/room-search.service";
