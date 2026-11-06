@@ -116,6 +116,21 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/99999999" \
   -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 404 "unknown room rejected"
 
+# 5b. room search is public and must not be shadowed by /api/rooms/:id
+SEARCH_QUERY="minPrice=500&maxPrice=500&furnished=true&pets=true&availableFrom=2000-01-01T00:00:00.000Z"
+CODE=$(curl -s -o "$WORK/search" -w '%{http_code}' "${BASE_URL}/api/rooms/search?${SEARCH_QUERY}")
+assert_status "$CODE" 200 "room search"
+grep -q "\"id\":${ROOM_ID}" "$WORK/search" || fail "room search returned the seeded room"
+pass "room search returns the seeded room"
+
+CODE=$(curl -s -o "$WORK/search-empty" -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=999999999")
+assert_status "$CODE" 200 "room search with a non-matching bound"
+[ "$(cat "$WORK/search-empty")" = "[]" ] || fail "room search with a non-matching bound returned results"
+pass "room search with a non-matching bound is empty"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?furnished=yes")
+assert_status "$CODE" 400 "room search rejects an invalid boolean"
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")

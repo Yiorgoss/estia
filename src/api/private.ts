@@ -29,10 +29,10 @@ export const UserGroup = HttpApiGroup.make("user-group")
       error: [InternalError, UnauthorizedError],
     }),
   )
+  // A group prefix only applies to the endpoints added before it.
   .prefix("/users");
 
 export const RoomGroup = HttpApiGroup.make("room-group")
-  .prefix("/rooms")
   .add(
     HttpApiEndpoint.post("create", "/create", {
       payload: CreateRoomBodySchema,
@@ -48,9 +48,12 @@ export const RoomGroup = HttpApiGroup.make("room-group")
       success: RoomSchema,
       error: [InternalError, RoomNotFoundError],
     }),
-  );
+  )
+  // A group prefix only applies to the endpoints added before it.
+  .prefix("/rooms");
 
-export const PrivateApi = HttpApi.make("private-api").prefix("/api").add(UserGroup).add(RoomGroup);
+// The api prefix only applies to the groups added before it.
+export const PrivateApi = HttpApi.make("private-api").add(UserGroup).add(RoomGroup).prefix("/api");
 
 export const PrivateRoutes = HttpRouter.addAll([
   HttpRouter.route(

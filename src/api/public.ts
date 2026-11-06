@@ -8,10 +8,10 @@ import { loginPage } from "@/frontend/pages/login";
 import { registerPage } from "@/frontend/pages/register";
 import { mapDemo } from "@/frontend/map-demo";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
+import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
 import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
-  .prefix("/auth")
   .add(HttpApiEndpoint.post("test-post", "/test-post"))
   .add(
     HttpApiEndpoint.post("login", "/login", {
@@ -32,9 +32,21 @@ const AuthGroup = HttpApiGroup.make("auth")
       }),
       error: [InternalError],
     }),
-  );
+  )
+  // A group prefix only applies to the endpoints added before it.
+  .prefix("/auth");
 
-export const PublicApi = HttpApi.make("public").add(AuthGroup).prefix("/api");
+const RoomSearchGroup = HttpApiGroup.make("room-search")
+  .add(
+    HttpApiEndpoint.get("search", "/search", {
+      query: RoomSearchQuery,
+      success: Schema.Array(RoomSchema),
+      error: [InternalError],
+    }),
+  )
+  .prefix("/rooms");
+
+export const PublicApi = HttpApi.make("public").add(AuthGroup).add(RoomSearchGroup).prefix("/api");
 
 export const PublicRoutes = HttpRouter.addAll([
   HttpRouter.route(
