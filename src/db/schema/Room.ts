@@ -1,4 +1,5 @@
 import { ListerId, RoomId } from "@/db/schema/brands";
+import { BooleanFromString } from "@/db/schema/codecs";
 import { Schema, Struct } from "effect";
 
 export const RoomSchema = Schema.Struct({
@@ -45,6 +46,23 @@ export const RoomSearchFilters = Schema.Struct({
   smoking: Schema.optional(Schema.Boolean),
   pets: Schema.optional(Schema.Boolean),
   availableFrom: Schema.optional(Schema.Date),
+});
+
+// The same filters as they travel over HTTP: query parameters are strings, so
+// every field carries a string codec even though the decoded type stays
+// identical to `RoomSearchFilters`. `FiniteFromString` is used instead of
+// `NumberFromString` because the latter accepts `NaN` and `Infinity`, which
+// would silently turn a typo into a filter that matches nothing.
+export const RoomSearchQuery = Schema.Struct({
+  minPrice: Schema.optional(Schema.FiniteFromString),
+  maxPrice: Schema.optional(Schema.FiniteFromString),
+  minSize: Schema.optional(Schema.FiniteFromString),
+  maxSize: Schema.optional(Schema.FiniteFromString),
+  furnished: Schema.optional(BooleanFromString),
+  ensuite: Schema.optional(BooleanFromString),
+  smoking: Schema.optional(BooleanFromString),
+  pets: Schema.optional(BooleanFromString),
+  availableFrom: Schema.optional(Schema.DateFromString),
 });
 
 export const UpdateRoomSchema = RoomSchema.mapFields(

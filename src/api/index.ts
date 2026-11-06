@@ -8,6 +8,7 @@ import { RefreshTokenRepositoryLive } from "@/repos/refresh-token.repo";
 import { UserServiceLive } from "@/services/user.service";
 import { HasherServiceLive } from "@/services/hasher.service";
 import { PublicApiLive } from "@/handlers/public/auth-handler";
+import { RoomSearchHandler } from "@/handlers/public/room-search.handler";
 import { AuthServiceLive } from "@/services/auth.service";
 import { PrivateApi, PrivateRoutes } from "./private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
@@ -64,7 +65,7 @@ export const AppServicesLive = Layer.mergeAll(
  */
 
 export const PublicApiRouterLive = HttpApiBuilder.layer(PublicApi).pipe(
-  Layer.provide(PublicApiLive),
+  Layer.provide(Layer.mergeAll(PublicApiLive, RoomSearchHandler)),
 );
 
 export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes);
