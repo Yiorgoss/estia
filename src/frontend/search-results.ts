@@ -1,19 +1,7 @@
 import { RoomSchema } from "@/db/schema/Room";
-import { escapeHtml } from "@/utils";
+import { escapeHtml, formatDate, formatPrice } from "@/utils";
 
 type SearchRoom = typeof RoomSchema.Type;
-
-const formatPrice = (price: number) => `€${price.toLocaleString("en-GB")}`;
-
-const formatDate = (date: Date | null | undefined) =>
-  date == null
-    ? null
-    : date.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      });
 
 const flagsOf = (room: SearchRoom) =>
   [

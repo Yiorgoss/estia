@@ -52,6 +52,10 @@ export const RoomSearchQuery = Schema.Struct({
   availableFrom: Schema.optional(Schema.DateFromString),
 });
 
+// Query parameters arrive as a string tree, so the schema is read through this
+// codec instead of its own encoded side.
+export const RoomSearchQueryCodec = Schema.toCodecStringTree(RoomSearchQuery);
+
 export const UpdateRoomSchema = RoomSchema.mapFields(
   Struct.pick([
     "price",

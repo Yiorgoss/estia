@@ -10,8 +10,9 @@ import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
-import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
+import { RoomSchema, RoomSearchQuery, RoomSearchQueryCodec } from "@/db/schema/Room";
 import { RoomSearchService } from "@/services/room-search.service";
+import { omitEmptySearchParams } from "@/utils";
 import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
@@ -51,22 +52,6 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
 
 export const PublicApi = HttpApi.make("public").add(AuthGroup).add(RoomSearchGroup).prefix("/api");
 
-const SearchQueryCodec = Schema.toCodecStringTree(RoomSearchQuery);
-
-// An HTML form submits every named field, empty ones included, and `""` is a
-// valid number to the schema (it decodes to 0). Dropping empty values keeps an
-// untouched "max price" box from filtering every room out.
-const compactSearchParams = (
-  params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-) => {
-  const kept: Record<string, string | ReadonlyArray<string>> = {};
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === "") continue;
-    kept[key] = value;
-  }
-  return kept;
-};
-
 const searchResultsRoute = HttpRouter.route(
   "GET",
   "/search/results",
@@ -74,8 +59,8 @@ const searchResultsRoute = HttpRouter.route(
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const searchService = yield* RoomSearchService;
 
-    const filters = yield* Schema.decodeUnknownEffect(SearchQueryCodec)(
-      compactSearchParams(searchParams),
+    const filters = yield* Schema.decodeUnknownEffect(RoomSearchQueryCodec)(
+      omitEmptySearchParams(searchParams),
     );
     const rooms = yield* searchService.search(filters);
 
