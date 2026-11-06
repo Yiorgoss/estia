@@ -1,6 +1,5 @@
 import { UserCredentials } from "@/db/schema/User";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { BadRequest } from "effect/http-api/HttpApiError";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
@@ -46,7 +45,7 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
     HttpApiEndpoint.get("search", "/search", {
       query: RoomSearchQuery,
       success: Schema.Array(RoomSchema),
-      error: [BadRequest, InternalError],
+      error: [InternalError],
     }),
   )
   .prefix("/rooms");
