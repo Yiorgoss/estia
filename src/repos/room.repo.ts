@@ -1,7 +1,6 @@
 import { ListerId, RoomId } from "@/db/schema/brands";
 import {
   CreateRoomSchema,
-  RoomFilters,
   RoomSchema,
   RoomSearchFilters,
   UpdateRoomSchema,
@@ -26,9 +25,6 @@ export interface RoomRepository {
   readonly findByRoomId: (
     roomId: typeof RoomId.Type,
   ) => Effect.Effect<Option.Option<typeof RoomSchema.Type>, SqlError>;
-  readonly findWithFilters: (
-    filters: typeof RoomFilters.Type,
-  ) => Effect.Effect<ReadonlyArray<typeof RoomSchema.Type>, SqlError>;
   readonly search: (
     filters: typeof RoomSearchFilters.Type,
   ) => Effect.Effect<ReadonlyArray<typeof RoomSchema.Type>, SqlError>;
@@ -92,20 +88,6 @@ export const RoomRepositoryLive = Layer.effect(
           Effect.map(Option.fromNullishOr),
           Effect.map(Option.map(decodeRoom)),
         ),
-      findWithFilters: (filters) =>
-        sql<Record<string, unknown>>`
-            SELECT *
-              FROM rooms
-             WHERE 1=1
-                 ${filters.price != null ? sql`AND price = ${filters.price}` : sql``}
-                 ${filters.location != null ? sql`AND location = ${filters.location}` : sql``}
-                 ${filters.size != null ? sql`AND size = ${filters.size}` : sql``}
-                 ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
-                 ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
-                 ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
-                 ${filters.pets != null ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
-                 ${filters.availableFrom != null ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
-            `.pipe(Effect.map((rows) => rows.map(decodeRoom))),
       search: (filters) =>
         sql<Record<string, unknown>>`
             SELECT *
