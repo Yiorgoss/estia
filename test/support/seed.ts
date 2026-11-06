@@ -98,6 +98,63 @@ export const insertRoom = (
     );
   });
 
+export const insertListing = (
+  id: number,
+  ownerId: string,
+  options: {
+    readonly kind?: "room" | "whole_property" | "room_wanted";
+    readonly status?: "draft" | "published" | "unpublished";
+    readonly title?: string;
+    readonly description?: string | null;
+    readonly priceMinor?: number;
+    readonly regionCode?: string;
+    readonly lat?: number | null;
+    readonly lng?: number | null;
+    readonly sizeSqm?: number | null;
+    readonly availableFrom?: number | null;
+    readonly furnished?: boolean;
+    readonly ensuite?: boolean;
+    readonly smoking?: boolean;
+    readonly pets?: boolean;
+    readonly createdAt?: number;
+    readonly updatedAt?: number;
+    readonly publishedAt?: number | null;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const createdAt = options.createdAt ?? 1_700_000_000_000;
+    const status = options.status ?? "draft";
+    yield* sql.unsafe(
+      `INSERT INTO listings (id, kind, owner_id, status, title, description, price_minor, currency,
+                             region_code, lat, lng, size_sqm, available_from, furnished, ensuite,
+                             smoking, pets, created_at, updated_at, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        options.kind ?? "room",
+        ownerId,
+        status,
+        options.title ?? "A listing",
+        options.description ?? null,
+        options.priceMinor ?? 50_000,
+        "EUR",
+        options.regionCode ?? "attica",
+        options.lat ?? null,
+        options.lng ?? null,
+        options.sizeSqm ?? null,
+        options.availableFrom ?? null,
+        options.furnished === true ? 1 : 0,
+        options.ensuite === true ? 1 : 0,
+        options.smoking === true ? 1 : 0,
+        options.pets === true ? 1 : 0,
+        createdAt,
+        options.updatedAt ?? createdAt,
+        options.publishedAt ?? (status === "published" ? createdAt : null),
+      ],
+    );
+  });
+
 export const insertRefreshToken = (options: {
   readonly id?: string;
   readonly userId: string;
