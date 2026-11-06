@@ -19,7 +19,6 @@ import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { RoomHandler } from "@/handlers/private/room.handler";
 import { RoomSearchServiceLive } from "@/services/room-search.service";
-import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { ListingServiceLive } from "@/services/listing.service";
 import { ListingSearchHandler } from "@/handlers/public/listing-search.handler";
 

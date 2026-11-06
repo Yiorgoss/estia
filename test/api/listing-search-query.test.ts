@@ -123,11 +123,11 @@ describe("ListingSearchQuery", () => {
     assertRejected({ limit: "Infinity" });
   });
 
-  it("round-trips a cursor through its opaque string form", () => {
+  it("round-trips a cursor through its base64url string form", () => {
     const cursor = Schema.decodeSync(ListingCursor)({ createdAt: 1_700_000_000_123, id: 42 });
     const wire = Schema.encodeSync(ListingCursorFromString)(cursor);
 
-    // Opaque: the sort key is not readable and no offset is representable.
+    // The wire form is base64url and there is no offset parameter to page with.
     assert.strictEqual(wire, "MTcwMDAwMDAwMDEyMzo0Mg");
     assert.notInclude(wire, ":");
 
@@ -220,7 +220,7 @@ describe("ListingSearchQuery", () => {
 });
 
 describe("withMinorUnitPrices", () => {
-  it("converts whole-euro form prices to minor units", () => {
+  it("converts euro form prices to minor units", () => {
     assert.deepStrictEqual(withMinorUnitPrices({ minPrice: "500", maxPrice: "1500" }), {
       minPriceMinor: "50000",
       maxPriceMinor: "150000",

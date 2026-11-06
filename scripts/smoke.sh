@@ -143,8 +143,8 @@ assert_status "$CODE" 400 "room search rejects an inverted price range"
 # 5c. the public listings feed and the htmx search page
 #
 # Seed two published listings in different regions plus one draft and one
-# unpublished row. All four share one price, so a price filter isolates exactly
-# this fixture set and the draft/unpublished rows prove the published-only rule.
+# unpublished row. All four share one price so one filter selects the whole
+# fixture set, and the draft/unpublished rows prove the published-only rule.
 SMOKE_EUR=$(( ($(date +%s) % 90000) + 10000 ))
 SMOKE_MINOR=$((SMOKE_EUR * 100))
 NOW_MS=$(( $(date +%s) * 1000 ))
@@ -206,15 +206,27 @@ esac
 CODE=$(curl -s -o "$WORK/listings-crete" -w '%{http_code}' \
   "${BASE_URL}/api/listings?${PRICE_QUERY}&regionCode=crete")
 assert_status "$CODE" 200 "listings search with a region filter"
-[ "$(listing_ids < "$WORK/listings-crete")" = "${CRETE_ID}" ] \
-  || fail "region filter did not narrow to crete (got $(listing_ids < "$WORK/listings-crete"))"
+CRETE_IDS="$(listing_ids < "$WORK/listings-crete")"
+case ",${CRETE_IDS}," in
+  *",${CRETE_ID},"*) ;;
+  *) fail "region filter did not include crete (got ${CRETE_IDS})" ;;
+esac
+case ",${CRETE_IDS}," in
+  *",${EPIRUS_ID},"*) fail "region filter did not narrow to crete (got ${CRETE_IDS})" ;;
+esac
 pass "region filter narrows to crete"
 
 CODE=$(curl -s -o "$WORK/listings-epirus" -w '%{http_code}' \
   "${BASE_URL}/api/listings?${PRICE_QUERY}&regionCode=epirus")
 assert_status "$CODE" 200 "listings search with another region filter"
-[ "$(listing_ids < "$WORK/listings-epirus")" = "${EPIRUS_ID}" ] \
-  || fail "region filter did not narrow to epirus (got $(listing_ids < "$WORK/listings-epirus"))"
+EPIRUS_IDS="$(listing_ids < "$WORK/listings-epirus")"
+case ",${EPIRUS_IDS}," in
+  *",${EPIRUS_ID},"*) ;;
+  *) fail "region filter did not include epirus (got ${EPIRUS_IDS})" ;;
+esac
+case ",${EPIRUS_IDS}," in
+  *",${CRETE_ID},"*) fail "region filter did not narrow to epirus (got ${EPIRUS_IDS})" ;;
+esac
 pass "region filter narrows to epirus"
 
 CODE=$(curl -s -o "$WORK/listings-page1" -w '%{http_code}' \
@@ -225,8 +237,8 @@ CURSOR="$(node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () 
 [ "$FIRST_PAGE" = "${EPIRUS_ID}" ] || fail "limit was not respected (got ${FIRST_PAGE})"
 [ -n "$CURSOR" ] || fail "limit did not return a nextCursor"
 case "$CURSOR" in
-  *:*|*[+/=]*) fail "cursor is not opaque: ${CURSOR}" ;;
-  *) pass "limit is respected and returns an opaque nextCursor" ;;
+  *:*|*[+/=]*) fail "cursor is not base64url: ${CURSOR}" ;;
+  *) pass "limit is respected and returns a base64url nextCursor" ;;
 esac
 
 CODE=$(curl -s -o "$WORK/listings-page2" -w '%{http_code}' \

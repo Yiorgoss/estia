@@ -60,9 +60,11 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
 /*
  * The feed is unauthenticated, so its wire shape is a projection of the listing
  * row, not the row itself: the owner's account id, the exact coordinates, and
- * the `status`/`updatedAt` bookkeeping stay behind the owner-scoped endpoints.
- * `publishedAt` is the one timestamp the feed needs, because it is both the
- * newest-first sort key and what a visitor reads as recency.
+ * the `status`/`updatedAt` bookkeeping never reach the wire here. The projection
+ * is a wire concern only - `ListingService` keeps returning the full row for
+ * owner-scoped reads and mutations.
+ * `publishedAt` is the timestamp a visitor reads as recency; the newest-first
+ * sort key is `createdAt`, which only travels inside the encoded `nextCursor`.
  */
 const PublicListingSchema = Schema.Struct({
   id: ListingSchema.fields.id,
@@ -132,7 +134,8 @@ const searchResultsRoute = HttpRouter.route(
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const listingService = yield* ListingService;
 
-    // The form collects whole euros; the listings API takes minor units.
+    // The form collects euros; the listings API filters on minor units, so the
+    // helper converts and rounds before decoding.
     const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
       withMinorUnitPrices(searchParams),
     );

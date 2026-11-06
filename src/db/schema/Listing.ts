@@ -151,8 +151,8 @@ export type ListingSearchFilters = typeof ListingSearchFilters.Type;
 
 /*
  * Keyset cursor: the `(created_at, id)` of the last row a caller received. It is
- * opaque to clients at the HTTP boundary; the service and repository take the
- * struct so neither has to know the wire encoding.
+ * encoded at the HTTP boundary; the service and repository take the struct so
+ * neither has to know the wire encoding.
  */
 export const ListingCursor = Schema.Struct({
   createdAt: Schema.Number,
@@ -184,10 +184,11 @@ export const ListingPage = Schema.Struct({
 export type ListingPage = typeof ListingPage.Type;
 
 /*
- * The cursor is opaque on the wire: `base64url("<createdAt>:<id>")`. A caller
- * can only echo back the string the server handed out, never invent an offset
- * or read the sort key out of it as a number, so the HTTP boundary and the
- * model stay separated by one encoding.
+ * The cursor travels as `base64url("<createdAt>:<id>")`, so the sort key is not
+ * a JSON field and there is no offset parameter to page with. It is
+ * tamper-tolerant, not tamper-proof: a forged cursor is accepted, which is
+ * harmless because it only moves the keyset window while the published-only
+ * rule and every filter still apply.
  */
 const CURSOR_PATTERN = /^(\d+):(\d+)$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;

@@ -56,8 +56,8 @@ const listingCard = (listing: SearchListing) => {
 /*
  * Keyset paging only moves forwards, so there is a `Next page` control and no
  * previous-page one. The button re-sends the current form values plus the
- * cursor the server handed out; the cursor is opaque, so the browser only ever
- * echoes it back.
+ * cursor the server handed out; the page only re-encodes that cursor, never
+ * invents an offset.
  */
 const nextPageControl = (page: typeof ListingPage.Type) =>
   page.nextCursor == null
