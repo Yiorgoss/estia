@@ -18,6 +18,9 @@ dist-server/
 node_modules/
 /node_modules
 
+# vendored reference repos
+repos/
+
 .wrangler
 
 # env
