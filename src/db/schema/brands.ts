@@ -18,8 +18,6 @@ export const RefreshTokenId = Schema.String.pipe(Schema.brand("RefreshTokenId"))
 export const OwnershipEnum = Schema.Literals(["owner", "leaseholder"]);
 export const ListerId = Schema.Number.pipe(Schema.brand("ListerId"));
 
-export const RoomId = Schema.Number.pipe(Schema.brand("RoomId"));
-
 export const ListingId = Schema.Number.pipe(Schema.brand("ListingId"));
 
 export const SeekerId = Schema.Number.pipe(Schema.brand("SeekerID"));

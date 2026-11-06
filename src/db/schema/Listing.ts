@@ -5,7 +5,7 @@ import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 /*
  * One listing table covers all three kinds of ad, so every schema here is
  * kind-agnostic. Kind-specific attributes are not modeled yet: the four room
- * bits carry over unchanged and stay `false` for a room-wanted ad.
+ * bits stay `false` for a room-wanted ad.
  */
 
 export const ListingKind = Schema.Literals(["room", "whole_property", "room_wanted"]);
@@ -132,7 +132,7 @@ export type UpdateListingInput = typeof UpdateListingInput.Type;
  * Search filters. Price and size bounds are inclusive, the bit flags filter on
  * their exact value (a `false` flag is a real filter, not an absent one), and
  * `availableFrom` means "available on or after" - rows with no availability
- * date are excluded when it is set, exactly like the legacy room search.
+ * date are excluded when it is set.
  */
 export const ListingSearchFilters = Schema.Struct({
   kind: Schema.optional(ListingKind),
@@ -246,7 +246,7 @@ export const ListingCursorFromString: Schema.Codec<typeof ListingCursor.Type, st
 /*
  * Query parameters arrive as strings, so every field of the search query needs
  * a string codec even though the decoded type stays the model's own. Bounds go
- * through the same non-blank finite codec as the room search, so a blank,
+ * through the non-blank finite codec, so a blank,
  * non-numeric, non-finite, negative, or fractional value is a bad request
  * rather than a filter that silently matches nothing. `limit` decodes through
  * `ListingPageLimit`, so the default and the cap keep their one definition in

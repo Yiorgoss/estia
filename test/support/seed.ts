@@ -62,42 +62,6 @@ export const insertSeeker = (
     );
   });
 
-export const insertRoom = (
-  id: number,
-  listerId: number,
-  options: {
-    readonly price?: number;
-    readonly location?: string;
-    readonly description?: string | null;
-    readonly size?: number | null;
-    readonly furnished?: boolean;
-    readonly ensuite?: boolean;
-    readonly smoking?: boolean;
-    readonly pets?: boolean;
-    readonly availableFrom?: number | null;
-  } = {},
-) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql.unsafe(
-      `INSERT INTO rooms (id, lister_id, price, location, description, size, furnished, ensuite, smoking, pets, available_from)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        listerId,
-        options.price ?? 500,
-        options.location ?? "Athens",
-        options.description ?? null,
-        options.size ?? null,
-        options.furnished === true ? 1 : 0,
-        options.ensuite === true ? 1 : 0,
-        options.smoking === true ? 1 : 0,
-        options.pets === true ? 1 : 0,
-        options.availableFrom ?? null,
-      ],
-    );
-  });
-
 export const insertListing = (
   id: number,
   ownerId: string,

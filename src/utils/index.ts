@@ -12,8 +12,8 @@ const htmlEscapes: Record<string, string> = {
   "'": "&#39;",
 };
 
-// Listing and room content is user input, so anything interpolated into
-// server-rendered HTML has to go through this first.
+// Listing content is user input, so anything interpolated into server-rendered
+// HTML has to go through this first.
 export const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => htmlEscapes[char] ?? char);
 
