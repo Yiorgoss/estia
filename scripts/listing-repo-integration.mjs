@@ -174,8 +174,8 @@ const main = async () => {
     const seed = (id, status, extra = {}) =>
       insert(
         `INSERT INTO listings (id, kind, owner_id, status, title, price_minor, region_code,
-                               lat, lng, furnished, created_at, updated_at, published_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               lat, lng, furnished, size_sqm, created_at, updated_at, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         extra.kind ?? "room",
         extra.ownerId ?? "u-owner-1",
@@ -186,15 +186,17 @@ const main = async () => {
         extra.lat ?? null,
         extra.lng ?? null,
         extra.furnished ?? 0,
+        extra.sizeSqm ?? null,
         AT,
         AT,
         status === "published" ? AT : null,
       );
-    await seed(5001, "published", { priceMinor: 40_000 });
+    await seed(5001, "published", { priceMinor: 40_000, sizeSqm: 22 });
     await seed(5002, "published", {
       kind: "whole_property",
       regionCode: "crete",
       priceMinor: 90_000,
+      sizeSqm: 74,
     });
     await seed(5003, "published", { kind: "room_wanted", priceMinor: 65_000 });
     await seed(5004, "draft");
@@ -230,6 +232,15 @@ const main = async () => {
           ),
         ),
       ) === "[5002]",
+    );
+    check(
+      "search filters inclusive size bounds and excludes unknown sizes",
+      JSON.stringify(
+        ids(await run(withRepo((repo) => repo.search({ minSizeSqm: 30 }, { limit: 50 })))),
+      ) === "[5002]" &&
+        JSON.stringify(
+          ids(await run(withRepo((repo) => repo.search({ maxSizeSqm: 30 }, { limit: 50 })))),
+        ) === "[5001]",
     );
 
     // Scenario B: keyset paging with identical timestamps.

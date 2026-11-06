@@ -10,9 +10,16 @@ import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
-import { RoomSchema, RoomSearchQuery, RoomSearchQueryCodec } from "@/db/schema/Room";
-import { RoomSearchService } from "@/services/room-search.service";
-import { omitEmptySearchParams } from "@/utils";
+import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
+import {
+  ListingCursorFromString,
+  ListingPage,
+  ListingSchema,
+  ListingSearchQuery,
+  ListingSearchQueryCodec,
+} from "@/db/schema/Listing";
+import { ListingService } from "@/services/listing.service";
+import { withMinorUnitPrices } from "@/utils";
 import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
@@ -50,21 +57,89 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
   )
   .prefix("/rooms");
 
-export const PublicApi = HttpApi.make("public").add(AuthGroup).add(RoomSearchGroup).prefix("/api");
+/*
+ * The feed is unauthenticated, so its wire shape is a projection of the listing
+ * row, not the row itself: the owner's account id, the exact coordinates, and
+ * the `status`/`updatedAt` bookkeeping stay behind the owner-scoped endpoints.
+ * `publishedAt` is the one timestamp the feed needs, because it is both the
+ * newest-first sort key and what a visitor reads as recency.
+ */
+const PublicListingSchema = Schema.Struct({
+  id: ListingSchema.fields.id,
+  kind: ListingSchema.fields.kind,
+  title: ListingSchema.fields.title,
+  description: ListingSchema.fields.description,
+  priceMinor: ListingSchema.fields.priceMinor,
+  currency: ListingSchema.fields.currency,
+  regionCode: ListingSchema.fields.regionCode,
+  sizeSqm: ListingSchema.fields.sizeSqm,
+  furnished: ListingSchema.fields.furnished,
+  ensuite: ListingSchema.fields.ensuite,
+  smoking: ListingSchema.fields.smoking,
+  pets: ListingSchema.fields.pets,
+  availableFrom: ListingSchema.fields.availableFrom,
+  publishedAt: ListingSchema.fields.publishedAt,
+});
+
+export const PublicListingPageResponse = Schema.Struct({
+  items: Schema.Array(PublicListingSchema),
+  nextCursor: Schema.NullishOr(ListingCursorFromString),
+});
+export type PublicListingPageResponse = typeof PublicListingPageResponse.Type;
+
+export const toPublicListingPage = (
+  page: typeof ListingPage.Type,
+): typeof PublicListingPageResponse.Type => ({
+  items: page.items.map((listing) => ({
+    id: listing.id,
+    kind: listing.kind,
+    title: listing.title,
+    description: listing.description,
+    priceMinor: listing.priceMinor,
+    currency: listing.currency,
+    regionCode: listing.regionCode,
+    sizeSqm: listing.sizeSqm,
+    furnished: listing.furnished,
+    ensuite: listing.ensuite,
+    smoking: listing.smoking,
+    pets: listing.pets,
+    availableFrom: listing.availableFrom,
+    publishedAt: listing.publishedAt,
+  })),
+  nextCursor: page.nextCursor,
+});
+
+export const ListingsGroup = HttpApiGroup.make("listings")
+  .add(
+    HttpApiEndpoint.get("search", "/", {
+      query: ListingSearchQuery,
+      success: PublicListingPageResponse,
+      error: [InternalError],
+    }),
+  )
+  .prefix("/listings");
+
+export const PublicApi = HttpApi.make("public")
+  .add(AuthGroup)
+  .add(RoomSearchGroup)
+  .add(ListingsGroup)
+  .prefix("/api");
 
 const searchResultsRoute = HttpRouter.route(
   "GET",
   "/search/results",
   Effect.gen(function* () {
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
-    const searchService = yield* RoomSearchService;
+    const listingService = yield* ListingService;
 
-    const filters = yield* Schema.decodeUnknownEffect(RoomSearchQueryCodec)(
-      omitEmptySearchParams(searchParams),
+    // The form collects whole euros; the listings API takes minor units.
+    const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
+      withMinorUnitPrices(searchParams),
     );
-    const rooms = yield* searchService.search(filters);
+    const { limit, cursor, ...filters } = query;
+    const page = yield* listingService.search(filters, { limit, cursor });
 
-    return HttpServerResponse.html(searchResults(rooms));
+    return HttpServerResponse.html(searchResults(page));
   }).pipe(
     Effect.catchTags({
       // htmx only swaps 2xx responses by default, so a bad filter has to come
@@ -77,7 +152,7 @@ const searchResultsRoute = HttpRouter.route(
             contentType: "text/html",
           }),
         ),
-      SqlError: () =>
+      InternalError: () =>
         Effect.succeed(
           HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
             status: 500,

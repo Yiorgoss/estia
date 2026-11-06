@@ -19,7 +19,9 @@ import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { RoomHandler } from "@/handlers/private/room.handler";
 import { RoomSearchServiceLive } from "@/services/room-search.service";
+import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { ListingServiceLive } from "@/services/listing.service";
+import { ListingSearchHandler } from "@/handlers/public/listing-search.handler";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -69,7 +71,7 @@ export const AppServicesLive = Layer.mergeAll(
  */
 
 export const PublicApiRouterLive = HttpApiBuilder.layer(PublicApi).pipe(
-  Layer.provide(Layer.mergeAll(PublicApiLive, RoomSearchHandler)),
+  Layer.provide(Layer.mergeAll(PublicApiLive, RoomSearchHandler, ListingSearchHandler)),
 );
 
 export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes);

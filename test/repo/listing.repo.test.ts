@@ -133,6 +133,7 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
         smoking: false,
         pets: true,
         availableFrom: AT + 1_000,
+        sizeSqm: 22,
         createdAt: AT + 1_000,
       });
       yield* insertListing(4202, "u-listing-search", {
@@ -145,6 +146,7 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
         smoking: true,
         pets: false,
         availableFrom: AT + 2_000,
+        sizeSqm: 74,
         createdAt: AT + 2_000,
       });
       yield* insertListing(4203, "u-listing-search-other", {
@@ -214,6 +216,14 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
       assert.deepStrictEqual(
         ids(yield* repo.search({ availableFrom: new Date(AT + 2_000) }, page(50))),
         [4202],
+      );
+
+      // Size bounds are inclusive, and a row with no size cannot satisfy one.
+      assert.deepStrictEqual(ids(yield* repo.search({ minSizeSqm: 30 }, page(50))), [4202]);
+      assert.deepStrictEqual(ids(yield* repo.search({ maxSizeSqm: 30 }, page(50))), [4201]);
+      assert.deepStrictEqual(
+        ids(yield* repo.search({ minSizeSqm: 22, maxSizeSqm: 74 }, page(50))).sort(),
+        [4201, 4202],
       );
     }),
   );

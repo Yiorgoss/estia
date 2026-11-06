@@ -156,6 +156,8 @@ export const ListingRepositoryLive = Layer.effect(
                  ${filters.regionCode != null ? sql`AND region_code = ${filters.regionCode}` : sql``}
                  ${filters.minPriceMinor != null ? sql`AND price_minor >= ${filters.minPriceMinor}` : sql``}
                  ${filters.maxPriceMinor != null ? sql`AND price_minor <= ${filters.maxPriceMinor}` : sql``}
+                 ${filters.minSizeSqm != null ? sql`AND size_sqm >= ${filters.minSizeSqm}` : sql``}
+                 ${filters.maxSizeSqm != null ? sql`AND size_sqm <= ${filters.maxSizeSqm}` : sql``}
                  ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
                  ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
                  ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}

@@ -1,5 +1,6 @@
 import { ListingId, UserId } from "@/db/schema/brands";
-import { Effect, Schema, SchemaTransformation } from "effect";
+import { BooleanFromString, NonBlankFiniteFromString } from "@/db/schema/codecs";
+import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 
 /*
  * One listing table covers all three kinds of ad, so every schema here is
@@ -128,8 +129,8 @@ export const UpdateListingInput = Schema.Struct({
 export type UpdateListingInput = typeof UpdateListingInput.Type;
 
 /*
- * Search filters. Price bounds are inclusive, the bit flags filter on their
- * exact value (a `false` flag is a real filter, not an absent one), and
+ * Search filters. Price and size bounds are inclusive, the bit flags filter on
+ * their exact value (a `false` flag is a real filter, not an absent one), and
  * `availableFrom` means "available on or after" - rows with no availability
  * date are excluded when it is set, exactly like the legacy room search.
  */
@@ -138,6 +139,8 @@ export const ListingSearchFilters = Schema.Struct({
   regionCode: Schema.optional(GreekRegion),
   minPriceMinor: Schema.optional(Schema.Int),
   maxPriceMinor: Schema.optional(Schema.Int),
+  minSizeSqm: Schema.optional(Schema.Int),
+  maxSizeSqm: Schema.optional(Schema.Int),
   furnished: Schema.optional(Schema.BooleanFromBit),
   ensuite: Schema.optional(Schema.BooleanFromBit),
   smoking: Schema.optional(Schema.BooleanFromBit),
@@ -179,3 +182,128 @@ export const ListingPage = Schema.Struct({
   nextCursor: Schema.NullishOr(ListingCursor),
 });
 export type ListingPage = typeof ListingPage.Type;
+
+/*
+ * The cursor is opaque on the wire: `base64url("<createdAt>:<id>")`. A caller
+ * can only echo back the string the server handed out, never invent an offset
+ * or read the sort key out of it as a number, so the HTTP boundary and the
+ * model stay separated by one encoding.
+ */
+const CURSOR_PATTERN = /^(\d+):(\d+)$/;
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export const encodeListingCursor = (cursor: typeof ListingCursor.Encoded): string =>
+  btoa(`${cursor.createdAt}:${cursor.id}`)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const decodeListingCursor = (value: string): typeof ListingCursor.Encoded | undefined => {
+  // Only the base64url alphabet is accepted, so standard base64 (`+`, `/`, `=`)
+  // is a malformed cursor instead of being silently normalised.
+  if (!BASE64URL_PATTERN.test(value) || value.length % 4 === 1) return undefined;
+
+  let decoded: string;
+  try {
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+    decoded = atob(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "="));
+  } catch {
+    return undefined;
+  }
+
+  const match = CURSOR_PATTERN.exec(decoded);
+  if (match === null) return undefined;
+  const createdAt = Number(match[1]);
+  const id = Number(match[2]);
+  if (!Number.isSafeInteger(createdAt) || !Number.isSafeInteger(id)) return undefined;
+
+  // The `ListingId` brand is applied by the target schema's own decoding; the
+  // transformation only produces the cursor's encoded shape.
+  return { createdAt, id };
+};
+
+// The string form of a cursor. Decoding a malformed cursor fails the request
+// instead of dropping the filter and silently starting from the first page.
+export const ListingCursorFromString: Schema.Codec<typeof ListingCursor.Type, string> =
+  Schema.String.pipe(
+    Schema.decodeTo(
+      ListingCursor,
+      SchemaTransformation.transformEffect({
+        decode: (value, options) => {
+          const cursor = decodeListingCursor(value);
+          return cursor === undefined
+            ? Effect.fail(
+                new SchemaIssue.InvalidValue({ message: "Invalid cursor" }, value, options),
+              )
+            : Effect.succeed(cursor);
+        },
+        encode: (cursor) => Effect.succeed(encodeListingCursor(cursor)),
+      }),
+    ),
+  );
+
+/*
+ * Query parameters arrive as strings, so every field of the search query needs
+ * a string codec even though the decoded type stays the model's own. Bounds go
+ * through the same non-blank finite codec as the room search, so a blank,
+ * non-numeric, non-finite, negative, or fractional value is a bad request
+ * rather than a filter that silently matches nothing. `limit` decodes through
+ * `ListingPageLimit`, so the default and the cap keep their one definition in
+ * the page request above.
+ */
+const NonNegativeIntFromString = NonBlankFiniteFromString.check(
+  Schema.isInt(),
+  Schema.isGreaterThanOrEqualTo(0),
+);
+
+const ListingPageLimitFromString = NonBlankFiniteFromString.pipe(
+  Schema.decodeTo(ListingPageLimit, SchemaTransformation.passthrough()),
+);
+
+export const ListingSearchQuery = Schema.Struct({
+  kind: Schema.optional(ListingKind),
+  regionCode: Schema.optional(GreekRegion),
+  minPriceMinor: Schema.optional(NonNegativeIntFromString),
+  maxPriceMinor: Schema.optional(NonNegativeIntFromString),
+  minSizeSqm: Schema.optional(NonNegativeIntFromString),
+  maxSizeSqm: Schema.optional(NonNegativeIntFromString),
+  furnished: Schema.optional(BooleanFromString),
+  ensuite: Schema.optional(BooleanFromString),
+  smoking: Schema.optional(BooleanFromString),
+  pets: Schema.optional(BooleanFromString),
+  availableFrom: Schema.optional(Schema.DateFromString),
+  limit: ListingPageLimitFromString.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(LISTING_PAGE_DEFAULT_LIMIT)),
+  ),
+  cursor: Schema.optional(ListingCursorFromString),
+}).check(
+  Schema.makeFilter((query) => {
+    const issues: Array<Schema.FilterIssue> = [];
+    if (
+      query.minPriceMinor !== undefined &&
+      query.maxPriceMinor !== undefined &&
+      query.minPriceMinor > query.maxPriceMinor
+    ) {
+      issues.push({
+        path: ["minPriceMinor"],
+        issue: "minPriceMinor must not be greater than maxPriceMinor",
+      });
+    }
+    if (
+      query.minSizeSqm !== undefined &&
+      query.maxSizeSqm !== undefined &&
+      query.minSizeSqm > query.maxSizeSqm
+    ) {
+      issues.push({
+        path: ["minSizeSqm"],
+        issue: "minSizeSqm must not be greater than maxSizeSqm",
+      });
+    }
+    return issues;
+  }),
+);
+export type ListingSearchQuery = typeof ListingSearchQuery.Type;
+
+// Query parameters arrive as a string tree, so the schema is read through this
+// codec instead of its own encoded side.
+export const ListingSearchQueryCodec = Schema.toCodecStringTree(ListingSearchQuery);
