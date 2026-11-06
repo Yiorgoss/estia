@@ -15,9 +15,11 @@ import { AuthMiddleware } from "@/middleware/auth-mw";
 import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { RoomRepositoryLive } from "@/repos/room.repo";
+import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { RoomHandler } from "@/handlers/private/room.handler";
 import { RoomSearchServiceLive } from "@/services/room-search.service";
+import { ListingServiceLive } from "@/services/listing.service";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -26,6 +28,7 @@ export const RepositoriesLive = Layer.mergeAll(
   RefreshTokenRepositoryLive,
   UserRepositoryLive,
   RoomRepositoryLive,
+  ListingRepositoryLive,
 );
 
 // --- Low-level / infra services ---
@@ -36,6 +39,7 @@ export const DomainServicesLive = Layer.mergeAll(
   UserServiceLive,
   RefreshTokenServiceLive,
   RoomSearchServiceLive,
+  ListingServiceLive,
 );
 
 // --- Final app layer ---
