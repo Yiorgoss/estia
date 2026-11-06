@@ -70,7 +70,6 @@ const searchResultsRoute = HttpRouter.route(
       SchemaError: () =>
         Effect.succeed(
           HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
-            status: 400,
             contentType: "text/html",
           }),
         ),
