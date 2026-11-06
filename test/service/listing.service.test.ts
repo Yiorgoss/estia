@@ -236,11 +236,13 @@ layer(TestLive, { concurrent: false })("ListingService", (it) => {
       yield* insertListing(5402, "u-svc-feed", {
         status: "published",
         regionCode: "thessaly",
+        sizeSqm: 40,
         createdAt: AT + 2_000,
       });
       yield* insertListing(5403, "u-svc-feed-other", {
         status: "published",
         regionCode: "thessaly",
+        sizeSqm: 90,
         createdAt: AT + 3_000,
       });
 
@@ -256,6 +258,15 @@ layer(TestLive, { concurrent: false })("ListingService", (it) => {
       assert.deepStrictEqual(
         feed.items.map((item) => item.id),
         [5403, 5402],
+      );
+
+      const small = yield* service.search(
+        { regionCode: "thessaly", maxSizeSqm: 40 },
+        { limit: 50 },
+      );
+      assert.deepStrictEqual(
+        small.items.map((item) => item.id),
+        [5402],
       );
     }),
   );

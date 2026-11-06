@@ -140,36 +140,168 @@ assert_status "$CODE" 400 "room search rejects a negative bound"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=1000&maxPrice=500")
 assert_status "$CODE" 400 "room search rejects an inverted price range"
 
-# 5c. the htmx search page and its results fragment
+# 5c. the public listings feed and the htmx search page
+#
+# Seed two published listings in different regions plus one draft and one
+# unpublished row. All four share one price, so a price filter isolates exactly
+# this fixture set and the draft/unpublished rows prove the published-only rule.
+SMOKE_EUR=$(( ($(date +%s) % 90000) + 10000 ))
+SMOKE_MINOR=$((SMOKE_EUR * 100))
+NOW_MS=$(( $(date +%s) * 1000 ))
+SMOKE_TAG="$(date +%s)-${SMOKE_EUR}"
+CRETE_TITLE="Smoke crete listing ${SMOKE_TAG}"
+EPIRUS_TITLE="Smoke epirus listing ${SMOKE_TAG}"
+DRAFT_TITLE="Smoke draft listing ${SMOKE_TAG}"
+UNPUBLISHED_TITLE="Smoke unpublished listing ${SMOKE_TAG}"
+
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "INSERT INTO listings (kind, owner_id, status, title, description, price_minor, currency, region_code, size_sqm, available_from, furnished, ensuite, smoking, pets, created_at, updated_at, published_at) VALUES
+    ('room', '${USER_ID}', 'published', '${CRETE_TITLE}', 'A published room in Crete', ${SMOKE_MINOR}, 'EUR', 'crete', 30, 946684800000, 1, 0, 0, 1, ${NOW_MS}, ${NOW_MS}, ${NOW_MS}),
+    ('whole_property', '${USER_ID}', 'published', '${EPIRUS_TITLE}', 'A published property in Epirus', ${SMOKE_MINOR}, 'EUR', 'epirus', 90, NULL, 0, 0, 0, 0, $((NOW_MS + 1000)), $((NOW_MS + 1000)), $((NOW_MS + 1000))),
+    ('room', '${USER_ID}', 'draft', '${DRAFT_TITLE}', NULL, ${SMOKE_MINOR}, 'EUR', 'crete', 30, NULL, 0, 0, 0, 0, $((NOW_MS + 2000)), $((NOW_MS + 2000)), NULL),
+    ('room', '${USER_ID}', 'unpublished', '${UNPUBLISHED_TITLE}', NULL, ${SMOKE_MINOR}, 'EUR', 'crete', 30, NULL, 0, 0, 0, 0, $((NOW_MS + 3000)), $((NOW_MS + 3000)), $((NOW_MS + 3000)));" \
+  >/dev/null 2>&1 || fail "seed listings"
+pass "seed listings"
+
+listing_id() {
+  # $1: unique title
+  pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
+    --command "SELECT id FROM listings WHERE title='$1' ORDER BY id DESC LIMIT 1;" 2>/dev/null \
+    | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].id)))'
+}
+
+CRETE_ID="$(listing_id "$CRETE_TITLE")"
+EPIRUS_ID="$(listing_id "$EPIRUS_TITLE")"
+DRAFT_ID="$(listing_id "$DRAFT_TITLE")"
+UNPUBLISHED_ID="$(listing_id "$UNPUBLISHED_TITLE")"
+[ -n "$CRETE_ID" ] && [ -n "$EPIRUS_ID" ] && [ -n "$DRAFT_ID" ] && [ -n "$UNPUBLISHED_ID" ] \
+  || fail "listing ids"
+pass "listing ids"
+
+listing_ids() {
+  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const body = JSON.parse(s); process.stdout.write(body.items.map((item) => item.id).join(",")); })'
+}
+
+PRICE_QUERY="minPriceMinor=${SMOKE_MINOR}&maxPriceMinor=${SMOKE_MINOR}"
+
+CODE=$(curl -s -o "$WORK/listings" -w '%{http_code}' "${BASE_URL}/api/listings?${PRICE_QUERY}")
+assert_status "$CODE" 200 "listings search"
+LISTING_IDS="$(listing_ids < "$WORK/listings")"
+case ",${LISTING_IDS}," in
+  *",${EPIRUS_ID},"*) ;;
+  *) fail "listings search did not return the epirus row (got ${LISTING_IDS})" ;;
+esac
+case ",${LISTING_IDS}," in
+  *",${CRETE_ID},"*) ;;
+  *) fail "listings search did not return the crete row (got ${LISTING_IDS})" ;;
+esac
+[ "${LISTING_IDS%%,*}" = "${EPIRUS_ID}" ] \
+  || fail "listings search is not newest first (got ${LISTING_IDS})"
+pass "listings search returns published rows newest first"
+case ",${LISTING_IDS}," in
+  *",${DRAFT_ID},"*|*",${UNPUBLISHED_ID},"*) fail "listings search returned an unpublished row" ;;
+  *) pass "listings search excludes draft and unpublished rows" ;;
+esac
+
+CODE=$(curl -s -o "$WORK/listings-crete" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?${PRICE_QUERY}&regionCode=crete")
+assert_status "$CODE" 200 "listings search with a region filter"
+[ "$(listing_ids < "$WORK/listings-crete")" = "${CRETE_ID}" ] \
+  || fail "region filter did not narrow to crete (got $(listing_ids < "$WORK/listings-crete"))"
+pass "region filter narrows to crete"
+
+CODE=$(curl -s -o "$WORK/listings-epirus" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?${PRICE_QUERY}&regionCode=epirus")
+assert_status "$CODE" 200 "listings search with another region filter"
+[ "$(listing_ids < "$WORK/listings-epirus")" = "${EPIRUS_ID}" ] \
+  || fail "region filter did not narrow to epirus (got $(listing_ids < "$WORK/listings-epirus"))"
+pass "region filter narrows to epirus"
+
+CODE=$(curl -s -o "$WORK/listings-page1" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?${PRICE_QUERY}&limit=1")
+assert_status "$CODE" 200 "listings search with a limit"
+FIRST_PAGE="$(listing_ids < "$WORK/listings-page1")"
+CURSOR="$(node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const body = JSON.parse(s); process.stdout.write(body.nextCursor == null ? "" : String(body.nextCursor)); })' < "$WORK/listings-page1")"
+[ "$FIRST_PAGE" = "${EPIRUS_ID}" ] || fail "limit was not respected (got ${FIRST_PAGE})"
+[ -n "$CURSOR" ] || fail "limit did not return a nextCursor"
+case "$CURSOR" in
+  *:*|*[+/=]*) fail "cursor is not opaque: ${CURSOR}" ;;
+  *) pass "limit is respected and returns an opaque nextCursor" ;;
+esac
+
+CODE=$(curl -s -o "$WORK/listings-page2" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?${PRICE_QUERY}&limit=1&cursor=${CURSOR}")
+assert_status "$CODE" 200 "listings search second page"
+SECOND_PAGE="$(listing_ids < "$WORK/listings-page2")"
+[ -n "$SECOND_PAGE" ] || fail "second page is empty"
+[ "$SECOND_PAGE" != "$FIRST_PAGE" ] || fail "second page repeated the first page"
+pass "second page is non-empty and disjoint from the first"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings?cursor=not-a-cursor")
+assert_status "$CODE" 400 "listings search rejects a malformed cursor"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings?limit=51")
+assert_status "$CODE" 400 "listings search rejects a limit above the cap"
+
+# 5d. the htmx search page and its results fragment
 CODE=$(curl -s -o "$WORK/search-page" -w '%{http_code}' "${BASE_URL}/search")
 assert_status "$CODE" 200 "search page"
 grep -q 'hx-get="/search/results"' "$WORK/search-page" || fail "search page wires the form to the results fragment"
 pass "search page wires the form to the results fragment"
+grep -q 'name="regionCode"' "$WORK/search-page" || fail "search page has a region filter"
+grep -q '>Attica<' "$WORK/search-page" || fail "search page region options use human labels"
+pass "search page has a region filter with human labels"
+grep -q 'name="kind"' "$WORK/search-page" || fail "search page has a kind filter"
+grep -q '>Whole property<' "$WORK/search-page" || fail "search page kind options use human labels"
+pass "search page has a kind filter with human labels"
 
+FRAGMENT_QUERY="minPrice=${SMOKE_EUR}&maxPrice=${SMOKE_EUR}"
 CODE=$(curl -s -o "$WORK/search-fragment" -w '%{http_code}' \
-  "${BASE_URL}/search/results?minPrice=500&maxPrice=500&availableFrom=2000-01-01")
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}")
 assert_status "$CODE" 200 "search results fragment"
-grep -q "${ROOM_LOCATION}" "$WORK/search-fragment" || fail "search fragment rendered the seeded room"
-pass "search fragment rendered the seeded room"
+grep -q "${CRETE_TITLE}" "$WORK/search-fragment" || fail "search fragment rendered the crete listing"
+grep -q "${EPIRUS_TITLE}" "$WORK/search-fragment" || fail "search fragment rendered the epirus listing"
+grep -q "Crete" "$WORK/search-fragment" || fail "search fragment rendered the region label"
+pass "search fragment rendered the seeded listings"
+
+CODE=$(curl -s -o "$WORK/search-region" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}&regionCode=crete")
+assert_status "$CODE" 200 "search fragment with a region filter"
+grep -q "${CRETE_TITLE}" "$WORK/search-region" || fail "region filter dropped the crete listing"
+if grep -q "${EPIRUS_TITLE}" "$WORK/search-region"; then
+  fail "region filter did not narrow the fragment"
+fi
+pass "search fragment narrows by region"
+
+CODE=$(curl -s -o "$WORK/search-next" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}&limit=1")
+assert_status "$CODE" 200 "search fragment with a limit"
+grep -q 'Next page' "$WORK/search-next" || fail "search fragment did not offer a next page"
+pass "search fragment offers a next page when more results exist"
 
 # Empty form fields must not narrow the results: the fragment drops them
 # before decoding, since a blank numeric bound is not a valid filter.
 CODE=$(curl -s -o "$WORK/search-blank" -w '%{http_code}' \
-  "${BASE_URL}/search/results?minPrice=&maxPrice=&minSize=&maxSize=&availableFrom=")
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}&minSizeSqm=&maxSizeSqm=&availableFrom=&regionCode=&kind=")
 assert_status "$CODE" 200 "search fragment with blank fields"
-grep -q "${ROOM_LOCATION}" "$WORK/search-blank" || fail "blank fields filtered rooms out"
+grep -q "${CRETE_TITLE}" "$WORK/search-blank" || fail "blank fields filtered listings out"
 pass "blank fields are treated as no filter"
 
 CODE=$(curl -s -o "$WORK/search-invalid" -w '%{http_code}' "${BASE_URL}/search/results?minPrice=abc")
-assert_status "$CODE" 200 "search fragment reports an invalid filter"
+assert_status "$CODE" 200 "search fragment invalid filter returns 200"
 grep -q 'Those filters could not be read' "$WORK/search-invalid" || fail "search fragment did not report the invalid filter"
 pass "search fragment reports an invalid filter"
 
 CODE=$(curl -s -o "$WORK/search-inverted" -w '%{http_code}' \
-  "${BASE_URL}/search/results?minPrice=1000&maxPrice=500")
-assert_status "$CODE" 200 "search fragment reports an inverted range"
+  "${BASE_URL}/search/results?minPrice=2000&maxPrice=500")
+assert_status "$CODE" 200 "search fragment inverted range returns 200"
 grep -q 'Those filters could not be read' "$WORK/search-inverted" || fail "search fragment did not report the inverted range"
 pass "search fragment reports an inverted range"
+
+CODE=$(curl -s -o "$WORK/search-cursor" -w '%{http_code}' "${BASE_URL}/search/results?cursor=not-a-cursor")
+assert_status "$CODE" 200 "search fragment malformed cursor returns 200"
+grep -q 'Those filters could not be read' "$WORK/search-cursor" || fail "search fragment did not report the malformed cursor"
+pass "search fragment reports a malformed cursor"
 
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \

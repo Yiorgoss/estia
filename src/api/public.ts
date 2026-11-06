@@ -10,9 +10,14 @@ import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
-import { RoomSchema, RoomSearchQuery, RoomSearchQueryCodec } from "@/db/schema/Room";
-import { RoomSearchService } from "@/services/room-search.service";
-import { omitEmptySearchParams } from "@/utils";
+import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
+import {
+  ListingPageResponse,
+  ListingSearchQuery,
+  ListingSearchQueryCodec,
+} from "@/db/schema/Listing";
+import { ListingService } from "@/services/listing.service";
+import { withMinorUnitPrices } from "@/utils";
 import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
@@ -50,21 +55,37 @@ const RoomSearchGroup = HttpApiGroup.make("room-search")
   )
   .prefix("/rooms");
 
-export const PublicApi = HttpApi.make("public").add(AuthGroup).add(RoomSearchGroup).prefix("/api");
+const ListingsGroup = HttpApiGroup.make("listings")
+  .add(
+    HttpApiEndpoint.get("search", "/", {
+      query: ListingSearchQuery,
+      success: ListingPageResponse,
+      error: [InternalError],
+    }),
+  )
+  .prefix("/listings");
+
+export const PublicApi = HttpApi.make("public")
+  .add(AuthGroup)
+  .add(RoomSearchGroup)
+  .add(ListingsGroup)
+  .prefix("/api");
 
 const searchResultsRoute = HttpRouter.route(
   "GET",
   "/search/results",
   Effect.gen(function* () {
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
-    const searchService = yield* RoomSearchService;
+    const listingService = yield* ListingService;
 
-    const filters = yield* Schema.decodeUnknownEffect(RoomSearchQueryCodec)(
-      omitEmptySearchParams(searchParams),
+    // The form collects whole euros; the listings API takes minor units.
+    const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
+      withMinorUnitPrices(searchParams),
     );
-    const rooms = yield* searchService.search(filters);
+    const { limit, cursor, ...filters } = query;
+    const page = yield* listingService.search(filters, { limit, cursor });
 
-    return HttpServerResponse.html(searchResults(rooms));
+    return HttpServerResponse.html(searchResults(page));
   }).pipe(
     Effect.catchTags({
       // htmx only swaps 2xx responses by default, so a bad filter has to come
@@ -77,7 +98,7 @@ const searchResultsRoute = HttpRouter.route(
             contentType: "text/html",
           }),
         ),
-      SqlError: () =>
+      InternalError: () =>
         Effect.succeed(
           HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
             status: 500,

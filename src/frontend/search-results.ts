@@ -1,32 +1,38 @@
-import { RoomSchema } from "@/db/schema/Room";
-import { escapeHtml, formatDate, formatPrice } from "@/utils";
+import { encodeListingCursor, ListingPage } from "@/db/schema/Listing";
+import { kindLabels, regionLabels } from "@/frontend/listing-labels";
+import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 
-type SearchRoom = typeof RoomSchema.Type;
+type SearchListing = (typeof ListingPage.Type)["items"][number];
 
-const flagsOf = (room: SearchRoom) =>
+const flagsOf = (listing: SearchListing) =>
   [
-    room.furnished ? "Furnished" : undefined,
-    room.ensuite ? "Ensuite" : undefined,
-    room.smoking ? "Smoking allowed" : undefined,
-    room.pets ? "Pets allowed" : undefined,
+    listing.furnished ? "Furnished" : undefined,
+    listing.ensuite ? "Ensuite" : undefined,
+    listing.smoking ? "Smoking allowed" : undefined,
+    listing.pets ? "Pets allowed" : undefined,
   ].filter((flag) => flag !== undefined);
 
-const roomCard = (room: SearchRoom) => {
-  const flags = flagsOf(room);
-  const available = formatDate(room.availableFrom);
+const listingCard = (listing: SearchListing) => {
+  const flags = flagsOf(listing);
+  const available = formatDate(listing.availableFrom);
 
   return `
     <article class="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
       <header class="flex items-start justify-between gap-3">
-        <h2 class="min-w-0 break-words text-base font-semibold text-gray-900">${escapeHtml(room.location)}</h2>
+        <div class="min-w-0">
+          <h2 class="break-words text-base font-semibold text-gray-900">${escapeHtml(listing.title)}</h2>
+          <p class="mt-0.5 text-xs font-medium uppercase tracking-wide text-gray-500">
+            ${escapeHtml(regionLabels[listing.regionCode])} &middot; ${escapeHtml(kindLabels[listing.kind])}
+          </p>
+        </div>
         <p class="shrink-0 text-lg font-semibold text-blue-700">
-          ${formatPrice(room.price)}<span class="text-xs font-normal text-gray-500">/mo</span>
+          ${formatPriceMinor(listing.priceMinor)}<span class="text-xs font-normal text-gray-500">/mo</span>
         </p>
       </header>
       ${
-        room.description == null
+        listing.description == null
           ? ""
-          : `<p class="text-sm text-gray-600">${escapeHtml(room.description)}</p>`
+          : `<p class="text-sm text-gray-600">${escapeHtml(listing.description)}</p>`
       }
       ${
         flags.length === 0
@@ -41,23 +47,52 @@ const roomCard = (room: SearchRoom) => {
             </ul>`
       }
       <footer class="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-xs text-gray-500">
-        <span>${room.size == null ? "Size unknown" : `${room.size} m²`}</span>
+        <span>${listing.sizeSqm == null ? "Size unknown" : `${listing.sizeSqm} m²`}</span>
         <span>${available == null ? "Availability unknown" : `Available ${available}`}</span>
       </footer>
     </article>`;
 };
 
-export const searchResults = (rooms: ReadonlyArray<SearchRoom>) => `
+/*
+ * Keyset paging only moves forwards, so there is a `Next page` control and no
+ * previous-page one. The button re-sends the current form values plus the
+ * cursor the server handed out; the cursor is opaque, so the browser only ever
+ * echoes it back.
+ */
+const nextPageControl = (page: typeof ListingPage.Type) =>
+  page.nextCursor == null
+    ? ""
+    : `<div class="flex justify-center">
+        <button
+          type="button"
+          hx-get="/search/results"
+          hx-include="#search-form"
+          hx-vals='{"cursor":"${encodeListingCursor(page.nextCursor)}"}'
+          hx-target="#results"
+          hx-swap="innerHTML"
+          class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 [.htmx-request_&]:cursor-progress [.htmx-request_&]:opacity-60"
+        >
+          Next page
+        </button>
+      </div>`;
+
+// There is no total count with a keyset cursor, so the label only ever claims
+// what this page actually shows.
+const countLabel = (count: number) =>
+  `<p class="text-sm text-gray-600">
+     Showing ${count} ${count === 1 ? "listing" : "listings"}, newest first
+   </p>`;
+
+export const searchResults = (page: typeof ListingPage.Type) => `
   <div class="space-y-4" aria-live="polite">
     ${
-      rooms.length === 0
+      page.items.length === 0
         ? `<p class="rounded-lg border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">
-             No rooms match these filters.
+             No listings match these filters.
            </p>`
-        : `<p class="text-sm text-gray-600">
-             ${rooms.length === 1 ? "1 room found" : `${rooms.length} rooms found`}
-           </p>
-           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">${rooms.map(roomCard).join("")}</div>`
+        : `${countLabel(page.items.length)}
+           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">${page.items.map(listingCard).join("")}</div>
+           ${nextPageControl(page)}`
     }
   </div>`;
 
