@@ -3,8 +3,7 @@
 # Deterministic end-to-end test entrypoint for estia (`pnpm test:e2e`).
 #
 # 1. Applies the local D1 migrations.
-# 2. Runs the rooms and listings repository integration tests against a real
-#    D1 engine.
+# 2. Runs the listings repository integration test against a real D1 engine.
 # 3. Boots the real Vite/Cloudflare dev server, verifies the Tailscale
 #    hostname passes Vite's host validation, and runs the HTTP smoke
 #    checklist end to end.
@@ -35,9 +34,6 @@ trap cleanup EXIT INT TERM
 
 echo "==> applying local D1 migrations"
 pnpm exec wrangler d1 migrations apply DB --local >/dev/null
-
-echo "==> rooms repository integration test"
-node scripts/room-repo-integration.mjs
 
 echo "==> listings repository integration test"
 node scripts/listing-repo-integration.mjs

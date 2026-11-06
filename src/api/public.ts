@@ -10,7 +10,6 @@ import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
-import { RoomSchema, RoomSearchQuery } from "@/db/schema/Room";
 import {
   ListingCursorFromString,
   ListingPage,
@@ -46,16 +45,6 @@ const AuthGroup = HttpApiGroup.make("auth")
   )
   // A group prefix only applies to the endpoints added before it.
   .prefix("/auth");
-
-const RoomSearchGroup = HttpApiGroup.make("room-search")
-  .add(
-    HttpApiEndpoint.get("search", "/search", {
-      query: RoomSearchQuery,
-      success: Schema.Array(RoomSchema),
-      error: [InternalError],
-    }),
-  )
-  .prefix("/rooms");
 
 /*
  * The feed is unauthenticated, so its wire shape is a projection of the listing
@@ -121,11 +110,7 @@ export const ListingsGroup = HttpApiGroup.make("listings")
   )
   .prefix("/listings");
 
-export const PublicApi = HttpApi.make("public")
-  .add(AuthGroup)
-  .add(RoomSearchGroup)
-  .add(ListingsGroup)
-  .prefix("/api");
+export const PublicApi = HttpApi.make("public").add(AuthGroup).add(ListingsGroup).prefix("/api");
 
 const searchResultsRoute = HttpRouter.route(
   "GET",

@@ -8,17 +8,13 @@ import { RefreshTokenRepositoryLive } from "@/repos/refresh-token.repo";
 import { UserServiceLive } from "@/services/user.service";
 import { HasherServiceLive } from "@/services/hasher.service";
 import { PublicApiLive } from "@/handlers/public/auth-handler";
-import { RoomSearchHandler } from "@/handlers/public/room-search.handler";
 import { AuthServiceLive } from "@/services/auth.service";
 import { PrivateApi, PrivateRoutes } from "./private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
 import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
-import { RoomRepositoryLive } from "@/repos/room.repo";
 import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
-import { RoomHandler } from "@/handlers/private/room.handler";
-import { RoomSearchServiceLive } from "@/services/room-search.service";
 import { ListingServiceLive } from "@/services/listing.service";
 import { ListingSearchHandler } from "@/handlers/public/listing-search.handler";
 
@@ -28,7 +24,6 @@ export const RepositoriesLive = Layer.mergeAll(
   SeekerRepositoryLive,
   RefreshTokenRepositoryLive,
   UserRepositoryLive,
-  RoomRepositoryLive,
   ListingRepositoryLive,
 );
 
@@ -39,7 +34,6 @@ export const InfraServicesLive = Layer.mergeAll(HasherServiceLive, JWTServiceLiv
 export const DomainServicesLive = Layer.mergeAll(
   UserServiceLive,
   RefreshTokenServiceLive,
-  RoomSearchServiceLive,
   ListingServiceLive,
 );
 
@@ -70,7 +64,7 @@ export const AppServicesLive = Layer.mergeAll(
  */
 
 export const PublicApiRouterLive = HttpApiBuilder.layer(PublicApi).pipe(
-  Layer.provide(Layer.mergeAll(PublicApiLive, RoomSearchHandler, ListingSearchHandler)),
+  Layer.provide(Layer.mergeAll(PublicApiLive, ListingSearchHandler)),
 );
 
 export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes);
@@ -80,7 +74,7 @@ export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes
  */
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
-  Layer.provide(Layer.mergeAll(UserHandler, RoomHandler)),
+  Layer.provide(UserHandler),
 );
 
 export const PrivateRouterLive = Layer.mergeAll(PrivateApiRouterLive, PrivateRoutes).pipe(

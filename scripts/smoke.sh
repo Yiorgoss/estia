@@ -94,53 +94,7 @@ assert_status "$CODE" 200 "current-user /api/users/me"
 grep -q '"userProfile"' "$WORK/me" || fail "current-user response has userProfile"
 pass "current-user response shape"
 
-# 5. rooms round-trip: seed a lister + room, then read it back through the API
-ROOM_LOCATION="Smokeville-$(date +%s)"
-pnpm exec wrangler d1 execute "$DB_BINDING" --local \
-  --command "INSERT OR IGNORE INTO listers (user_id, name, ownership) VALUES ('${USER_ID}', 'Smoke Lister', 'owner'); INSERT INTO rooms (lister_id, price, location, description, size, furnished, ensuite, smoking, pets, available_from) SELECT id, 500, '${ROOM_LOCATION}', 'smoke room', 20, 1, 0, 0, 1, 946684800000 FROM listers WHERE user_id='${USER_ID}';" \
-  >/dev/null 2>&1 || fail "seed room"
-pass "seed room"
-
-ROOM_ID="$(pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
-  --command "SELECT id FROM rooms WHERE location='${ROOM_LOCATION}' ORDER BY id DESC LIMIT 1;" 2>/dev/null \
-  | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].id)))')"
-[ -n "$ROOM_ID" ] || fail "room id"
-
-CODE=$(curl -s -o "$WORK/room" -w '%{http_code}' "${BASE_URL}/api/rooms/${ROOM_ID}" \
-  -H "Cookie: access_token=${ACCESS}")
-assert_status "$CODE" 200 "get room by id"
-grep -q "\"location\":\"${ROOM_LOCATION}\"" "$WORK/room" || fail "room response has the seeded location"
-pass "room response shape"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/99999999" \
-  -H "Cookie: access_token=${ACCESS}")
-assert_status "$CODE" 404 "unknown room rejected"
-
-# 5b. room search is public and must not be shadowed by /api/rooms/:id
-SEARCH_QUERY="minPrice=500&maxPrice=500&furnished=true&pets=true&availableFrom=2000-01-01T00:00:00.000Z"
-CODE=$(curl -s -o "$WORK/search" -w '%{http_code}' "${BASE_URL}/api/rooms/search?${SEARCH_QUERY}")
-assert_status "$CODE" 200 "room search"
-grep -q "\"id\":${ROOM_ID}" "$WORK/search" || fail "room search returned the seeded room"
-pass "room search returns the seeded room"
-
-CODE=$(curl -s -o "$WORK/search-empty" -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=999999999")
-assert_status "$CODE" 200 "room search with a non-matching bound"
-[ "$(cat "$WORK/search-empty")" = "[]" ] || fail "room search with a non-matching bound returned results"
-pass "room search with a non-matching bound is empty"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?furnished=yes")
-assert_status "$CODE" 400 "room search rejects an invalid boolean"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minSize=large")
-assert_status "$CODE" 400 "room search rejects an invalid number"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=-1")
-assert_status "$CODE" 400 "room search rejects a negative bound"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/rooms/search?minPrice=1000&maxPrice=500")
-assert_status "$CODE" 400 "room search rejects an inverted price range"
-
-# 5c. the public listings feed and the htmx search page
+# 5. the public listings feed and the htmx search page
 #
 # Seed two published listings in different regions plus one draft and one
 # unpublished row. All four share one price so one filter selects the whole
@@ -255,7 +209,7 @@ assert_status "$CODE" 400 "listings search rejects a malformed cursor"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings?limit=51")
 assert_status "$CODE" 400 "listings search rejects a limit above the cap"
 
-# 5d. the htmx search page and its results fragment
+# 5b. the htmx search page and its results fragment
 CODE=$(curl -s -o "$WORK/search-page" -w '%{http_code}' "${BASE_URL}/search")
 assert_status "$CODE" 200 "search page"
 grep -q 'hx-get="/search/results"' "$WORK/search-page" || fail "search page wires the form to the results fragment"
