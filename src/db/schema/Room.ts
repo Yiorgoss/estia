@@ -44,10 +44,10 @@ const NonNegativeFiniteFromString = NonBlankFiniteFromString.check(
 // The same filters as they travel over HTTP: query parameters are strings, so
 // every field carries a string codec even though the decoded type stays
 // identical to `RoomSearchFilters`. Numeric bounds go through
-// `NonBlankFiniteFromString` so a blank, non-numeric, or non-finite value is a
-// bad request instead of a filter that silently matches nothing, and a range
-// whose minimum is above its maximum is a bad request rather than a query that
-// happens to match nothing.
+// `NonNegativeFiniteFromString` so a blank, non-numeric, non-finite, or
+// negative value is a bad request instead of a filter that silently matches
+// nothing, and a range whose minimum is above its maximum is a bad request
+// rather than a query that happens to match nothing.
 export const RoomSearchQuery = Schema.Struct({
   minPrice: Schema.optional(NonNegativeFiniteFromString),
   maxPrice: Schema.optional(NonNegativeFiniteFromString),
