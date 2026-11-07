@@ -3,9 +3,9 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
-import { InternalError } from "@/services/user.service";
-import { loginPage } from "@/frontend/pages/login";
-import { registerPage } from "@/frontend/pages/register";
+import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
+import { loginPage, registerPage } from "@/frontend/pages/auth";
+import { AuthPageRoutes } from "@/handlers/public/auth-pages";
 import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
@@ -46,7 +46,9 @@ const AuthGroup = HttpApiGroup.make("auth")
         accessToken: JWTSchema,
         refreshToken: RefreshTokenValue,
       }),
-      error: [InternalError],
+      // A duplicate email is a client mistake with an action attached - sign in
+      // instead, or use another address - so it is a 409, not a server error.
+      error: [UserAlreadyExistsError, InternalError],
     }),
   )
   // A group prefix only applies to the endpoints added before it.
@@ -227,8 +229,9 @@ export const PublicRoutes = HttpRouter.addAll([
       `),
     ),
   ),
-  HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage))),
-  HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage))),
+  HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage()))),
+  HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage()))),
+  ...AuthPageRoutes,
   HttpRouter.route("GET", "/map", Effect.succeed(HttpServerResponse.html(mapDemo))),
   HttpRouter.route(
     "GET",

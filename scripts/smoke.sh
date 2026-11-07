@@ -73,6 +73,106 @@ ACCESS="$(cookie_value "$WORK/register.h" access_token)"
 REFRESH="$(cookie_value "$WORK/register.h" refresh_token)"
 [ -n "$ACCESS" ] && [ -n "$REFRESH" ] || fail "register cookies present"
 
+# 2b. the browser form paths
+#
+# The sign-in and register pages are plain forms, so a browser posts
+# `application/x-www-form-urlencoded` to the page's own route. That route signs
+# the person in and redirects to the feed, and a refused submit comes back with a
+# readable page and an honest status. The JSON endpoints above keep working for
+# API clients, including the duplicate-email 409 they used to answer with 500.
+header_value() {
+  # $1: header file, $2: header name
+  { grep -i "^$2:" "$1" || true; } | head -1 | tr -d '\r' | cut -d' ' -f2-
+}
+
+CODE=$(curl -s -o "$WORK/login-page" -w '%{http_code}' "${BASE_URL}/login")
+assert_status "$CODE" 200 "login page"
+grep -q 'action="/login"' "$WORK/login-page" || fail "login page does not post to /login"
+grep -q '>Sign in</button>' "$WORK/login-page" || fail "login page button is not labelled Sign in"
+grep -q '</head>' "$WORK/login-page" || fail "login page has no closing head tag"
+if grep -q '/api/auth/' "$WORK/login-page"; then fail "login page still posts into the JSON API"; fi
+pass "login page posts its form to /login"
+
+CODE=$(curl -s -o "$WORK/register-page" -w '%{http_code}' "${BASE_URL}/register")
+assert_status "$CODE" 200 "register page"
+grep -q 'action="/register"' "$WORK/register-page" || fail "register page does not post to /register"
+grep -q 'name="repeat_password"' "$WORK/register-page" || fail "register page has no repeat-password box"
+grep -q '>Create account</button>' "$WORK/register-page" || fail "register button is not labelled Create account"
+grep -q '</head>' "$WORK/register-page" || fail "register page has no closing head tag"
+pass "register page posts its form to /register"
+
+FORM_EMAIL="smoke-form-$(date +%s)@test.local"
+CODE=$(curl -s -D "$WORK/form-register.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/register" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}" \
+  --data-urlencode "repeat_password=${PASSWORD}")
+assert_status "$CODE" 303 "form register"
+FORM_LOCATION="$(header_value "$WORK/form-register.h" location)"
+[ "$FORM_LOCATION" = "/search" ] \
+  || fail "form register did not redirect to the feed (got ${FORM_LOCATION:-no Location header})"
+pass "form register redirects to the feed"
+FORM_ACCESS="$(cookie_value "$WORK/form-register.h" access_token)"
+FORM_REFRESH="$(cookie_value "$WORK/form-register.h" refresh_token)"
+[ -n "$FORM_ACCESS" ] && [ -n "$FORM_REFRESH" ] || fail "form register set the session cookies"
+pass "form register sets the session cookies"
+
+CODE=$(curl -s -o "$WORK/form-duplicate" -w '%{http_code}' \
+  -X POST "${BASE_URL}/register" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}" \
+  --data-urlencode "repeat_password=${PASSWORD}")
+assert_status "$CODE" 409 "form register rejects a duplicate email"
+grep -q 'already exists' "$WORK/form-duplicate" \
+  || fail "form register duplicate email has no readable message"
+pass "form register duplicate email explains what to do"
+
+CODE=$(curl -s -o "$WORK/json-duplicate" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${FORM_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+assert_status "$CODE" 409 "json register rejects a duplicate email"
+grep -q 'UserAlreadyExistsError' "$WORK/json-duplicate" \
+  || fail "json register duplicate email did not report UserAlreadyExistsError"
+pass "json register duplicate email is a 409"
+
+MISMATCH_EMAIL="smoke-mismatch-$(date +%s)@test.local"
+CODE=$(curl -s -o "$WORK/form-mismatch" -w '%{http_code}' \
+  -X POST "${BASE_URL}/register" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "email=${MISMATCH_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}" \
+  --data-urlencode "repeat_password=${PASSWORD}!")
+assert_status "$CODE" 400 "form register rejects a mismatched repeat password"
+grep -q 'do not match' "$WORK/form-mismatch" \
+  || fail "mismatched repeat password has no readable message"
+pass "mismatched repeat password is explained"
+
+CODE=$(curl -s -o "$WORK/form-login-bad" -w '%{http_code}' \
+  -X POST "${BASE_URL}/login" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode 'password=not the password')
+assert_status "$CODE" 401 "form login rejects a wrong password"
+grep -q 'That email and password do not match' "$WORK/form-login-bad" \
+  || fail "wrong password has no readable message"
+pass "wrong password is explained"
+
+CODE=$(curl -s -D "$WORK/form-login.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/login" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}")
+assert_status "$CODE" 303 "form login"
+FORM_LOGIN_LOCATION="$(header_value "$WORK/form-login.h" location)"
+[ "$FORM_LOGIN_LOCATION" = "/search" ] \
+  || fail "form login did not redirect to the feed (got ${FORM_LOGIN_LOCATION:-no Location header})"
+[ -n "$(cookie_value "$WORK/form-login.h" access_token)" ] \
+  || fail "form login did not set the access cookie"
+pass "form login redirects to the feed with a session"
+
 # 3. unauthenticated rejection
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me")
 assert_status "$CODE" 401 "unauthenticated /api/users/me rejected"

@@ -59,6 +59,7 @@ export interface TestResponse {
   readonly body: string;
   readonly json: unknown;
   readonly cookies: Readonly<Record<string, string>>;
+  readonly location: string | null;
 }
 
 export const call = (path: string, init?: RequestInit): Effect.Effect<TestResponse> =>
@@ -77,7 +78,13 @@ export const call = (path: string, init?: RequestInit): Effect.Effect<TestRespon
     } catch {
       json = undefined;
     }
-    return { status: response.status, body, json, cookies };
+    return {
+      status: response.status,
+      body,
+      json,
+      cookies,
+      location: response.headers.get("location"),
+    };
   });
 
 export interface TestUser {
@@ -91,6 +98,20 @@ export const json = (init: RequestInit, payload?: unknown): RequestInit => ({
   ...init,
   headers: { "content-type": "application/json", "user-agent": "estia-tests", ...init.headers },
   ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+});
+
+/*
+ * What a browser sends when it submits one of the server-rendered forms: the
+ * declared form content type, with the fields URL-encoded in the body.
+ */
+export const form = (init: RequestInit, fields: Readonly<Record<string, string>>): RequestInit => ({
+  ...init,
+  headers: {
+    "content-type": "application/x-www-form-urlencoded",
+    "user-agent": "estia-tests",
+    ...init.headers,
+  },
+  body: new URLSearchParams(fields).toString(),
 });
 
 export const send = (
