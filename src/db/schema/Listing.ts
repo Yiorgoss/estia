@@ -49,10 +49,10 @@ export type Currency = typeof Currency.Type;
  * gate. `packages/map/greece.json` is deliberately not wired into production
  * code (it accepts Izmir and Sarande and rejects Kastellorizo).
  *
- * The request schemas take any number and leave the box to
- * `ListingService.assertLocation`, whose tagged error is the 422 a caller sees;
- * a bound in the schema would reject the same point as a generic 400 first. The
- * database CHECK is the last line of defence.
+ * The request schemas take any number and leave the box to `assertLocation` in
+ * `src/services/listing.service.ts`, whose tagged error is the 422 a caller
+ * sees; a bound in the schema would reject the same point as a generic 400
+ * first. The database CHECK is the last line of defence.
  */
 export const GREEK_LATITUDE_RANGE = { minimum: 34.0, maximum: 42.5 } as const;
 export const GREEK_LONGITUDE_RANGE = { minimum: 19.0, maximum: 30.5 } as const;

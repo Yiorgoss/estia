@@ -68,8 +68,8 @@ const numberInput = (
       class="${inputClass}"
     />`;
 
-// A size is a whole number of square metres above zero, and the service enforces
-// the same rule.
+// A size is a whole number of square metres above zero, and the shared size
+// schema forbids the same values.
 const optionalNumber = (name: string, value: string, placeholder: string) =>
   numberInput(name, { value, min: "0", step: "1", placeholder });
 
