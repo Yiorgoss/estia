@@ -487,8 +487,24 @@ describe("GET /listings/mine page", () => {
         const response = yield* send("GET", path);
         assert.strictEqual(response.status, 401, path);
         assert.notInclude(response.body, "UnauthorizedError", path);
-        assert.include(response.body, 'href="/login"', path);
+        assert.include(
+          response.body,
+          "You need to be signed in to see your listings and manage them.",
+          path,
+        );
       }
+    }),
+  );
+
+  it.effect("renders the default page size whatever limit the link carries", () =>
+    Effect.gen(function* () {
+      const user = yield* register("mine-page-limit");
+      yield* createDraft(user, { title: "First listing on the mine page" });
+      yield* createDraft(user, { title: "Second listing on the mine page" });
+
+      const response = yield* send("GET", "/listings/mine?limit=1", { cookie: user.cookie });
+      assert.strictEqual(response.status, 200, response.body);
+      assert.include(response.body, "Showing 2 listings, newest first");
     }),
   );
 

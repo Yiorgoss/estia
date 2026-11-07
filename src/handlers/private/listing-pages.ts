@@ -158,7 +158,7 @@ const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
     const query = yield* Schema.decodeUnknownEffect(ListingMineQueryCodec)(searchParams);
     const ownerId = yield* callerId(request);
     const listingService = yield* ListingService;
-    const page = yield* listingService.listMine(ownerId, query);
+    const page = yield* listingService.listMine(ownerId, minePageRequest(query.cursor));
     return respond(myListingsPage(page, { selfHref: mineHrefFor(query.cursor) }), 200);
   }).pipe(
     Effect.catchTag("SchemaError", () =>

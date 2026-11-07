@@ -396,12 +396,12 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/mine")
 assert_status "$CODE" 401 "the mine feed rejects an unauthenticated caller"
 CODE=$(curl -s -o "$WORK/mine-unauth" -w '%{http_code}' "${BASE_URL}/listings/mine")
 assert_status "$CODE" 401 "the mine page rejects an unauthenticated caller"
-grep -q 'href="/login"' "$WORK/mine-unauth" \
-  || fail "the signed-out mine page does not offer a sign-in link"
+grep -q "You need to be signed in to see your listings and manage them." "$WORK/mine-unauth" \
+  || fail "the signed-out mine page did not render the sign-in prompt"
 if grep -q 'UnauthorizedError' "$WORK/mine-unauth"; then
   fail "the signed-out mine page answered with a bare 401 body"
 fi
-pass "the signed-out mine page offers a sign-in link"
+pass "the signed-out mine page renders the sign-in prompt"
 
 id_before() {
   # $1: id expected earlier, $2: id expected later, stdin: mine feed JSON
