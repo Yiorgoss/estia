@@ -2,7 +2,7 @@ import { Option, Context, Effect, Layer, Schema, Clock } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { NewRefreshToken, RefreshToken, RefreshTokenSchema } from "@/db/schema/RefreshToken";
-import { RefreshTokenHash } from "@/db/schema/brands";
+import { RefreshTokenHash, UserId } from "@/db/schema/brands";
 
 export class RefreshTokenNotFoundError extends Schema.TaggedError<RefreshTokenNotFoundError>()(
   "RefreshTokenNotFoundError",
@@ -10,7 +10,9 @@ export class RefreshTokenNotFoundError extends Schema.TaggedError<RefreshTokenNo
 ) {}
 
 export interface RefreshTokenRepository {
-  readonly findValidByUserID: (id: number) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
+  readonly findValidByUserID: (
+    id: typeof UserId.Type,
+  ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
   readonly findValidByHash: (
     hash: typeof RefreshTokenHash.Type,
   ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;

@@ -24,11 +24,12 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       assert.strictEqual(user.passwordHash, password("hash-insert"));
       assert.strictEqual(user.role, "user");
       assert.isTrue(user.id.length > 0);
-      // `user.repo.ts` maps raw rows without decoding through `UserSchema`, so
-      // the timestamp columns arrive as epoch millis even though the type is
-      // `Date`.
-      assert.strictEqual(typeof user.createdAt, "number");
-      assert.strictEqual(typeof user.updatedAt, "number");
+      // Rows are decoded through `UserSchema`, so the `DateFromMillis` columns
+      // arrive as real `Date`s rather than raw epoch millis.
+      assert.isTrue(user.createdAt instanceof Date);
+      assert.isTrue(user.updatedAt instanceof Date);
+      assert.isFalse(Number.isNaN(user.createdAt.getTime()));
+      assert.isFalse(Number.isNaN(user.updatedAt.getTime()));
 
       // The repository and the raw client share one in-memory database.
       const sql = yield* SqlClient.SqlClient;
@@ -51,6 +52,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       const found = yield* repo.findByEmail("lookup@test.local");
       assert.isTrue(Option.isSome(found));
       assert.strictEqual(Option.getOrThrow(found).email, "lookup@test.local");
+      assert.isTrue(Option.getOrThrow(found).createdAt instanceof Date);
 
       const missing = yield* repo.findByEmail("missing@test.local");
       assert.isTrue(Option.isNone(missing));
@@ -70,6 +72,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       const found = yield* repo.findById(inserted.id);
       assert.isTrue(Option.isSome(found));
       assert.strictEqual(Option.getOrThrow(found).id, inserted.id);
+      assert.isTrue(Option.getOrThrow(found).updatedAt instanceof Date);
 
       const missing = yield* repo.findById(userId("00000000000000000000000000000000"));
       assert.isTrue(Option.isNone(missing));
@@ -89,6 +92,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       const updated = yield* repo.updateRole(inserted.id, "admin");
       assert.isTrue(Option.isSome(updated));
       assert.strictEqual(Option.getOrThrow(updated).role, "admin");
+      assert.isTrue(Option.getOrThrow(updated).updatedAt instanceof Date);
 
       const reread = Option.getOrThrow(yield* repo.findById(inserted.id));
       assert.strictEqual(reread.role, "admin");

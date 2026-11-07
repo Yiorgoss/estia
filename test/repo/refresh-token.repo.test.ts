@@ -8,11 +8,6 @@ import { insertRefreshToken, insertUser } from "../support/seed";
 const userId = (value: string) => Schema.decodeSync(UserId)(value);
 const tokenHash = (value: string) => Schema.decodeSync(RefreshTokenHash)(value);
 
-// `findValidByUserID` is declared with `id: number`, but `refresh_tokens.user_id`
-// is TEXT and real user ids are strings. Pass a real string id, as production
-// does, without changing production code.
-const userKey = (value: string) => value as unknown as number;
-
 // `revoke`, `findValidByHash` and `findValidByUserID` compare against the
 // Effect clock. `it.effect` starts that clock at 0, so a positive `expiresAt`
 // is valid and a negative one is already expired.
@@ -94,12 +89,12 @@ layer(TestLive, { concurrent: false })("RefreshTokenRepository", (it) => {
       });
 
       const repo = yield* RefreshTokenRepository;
-      const valid = yield* repo.findValidByUserID(userKey("u-rt-user-valid"));
+      const valid = yield* repo.findValidByUserID(userId("u-rt-user-valid"));
       assert.isTrue(Option.isSome(valid));
       assert.strictEqual(Option.getOrThrow(valid).tokenHash, "hash-u-valid");
 
-      assert.isTrue(Option.isNone(yield* repo.findValidByUserID(userKey("u-rt-user-revoked"))));
-      assert.isTrue(Option.isNone(yield* repo.findValidByUserID(userKey("u-rt-user-empty"))));
+      assert.isTrue(Option.isNone(yield* repo.findValidByUserID(userId("u-rt-user-revoked"))));
+      assert.isTrue(Option.isNone(yield* repo.findValidByUserID(userId("u-rt-user-empty"))));
     }),
   );
 
