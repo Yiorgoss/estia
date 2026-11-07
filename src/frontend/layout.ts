@@ -3,9 +3,11 @@ import { header } from "@/frontend/header";
 import { escapeHtml } from "@/utils";
 
 /*
- * The shell every page shares: one column, the site header, and the pieces a
- * rejected action needs to explain itself. The create/edit pages, the mine page,
- * and the sign-in prompt render through it, so those pages cannot drift apart.
+ * The shell the owner-facing listing pages share: one column, the site header,
+ * and the pieces a rejected action needs to explain itself. The create/edit
+ * pages, the mine page, and the sign-in prompt render through it, so those pages
+ * cannot drift apart. The public detail page keeps its own shell because it also
+ * emits per-listing share metadata.
  */
 
 export const primaryButtonClass =
