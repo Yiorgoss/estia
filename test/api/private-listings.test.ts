@@ -4,11 +4,10 @@ import { Effect } from "effect";
 
 /*
  * These tests drive the real private router - `AuthMiddleware`, the listing
- * handlers, `ListingService`, and the repository - over the in-memory D1-shaped
- * database from `test/support/sql.ts`. The only thing they fake is the network:
- * a `Request` goes in and a `Response` comes out. Users are registered through
- * the public auth endpoint, so the cookies these tests present are the same
- * signed access tokens the app issues.
+ * handlers, `ListingService`, and the repository - through the shared harness
+ * in `test/support/api.ts`, which owns how the app is assembled and called.
+ * Users are registered through the public auth endpoint, so the cookies these
+ * tests present are the same signed access tokens the app issues.
  */
 
 // Registered once per file; every test then creates the listings it needs.
@@ -37,7 +36,10 @@ const listingPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const createDraft = (user: { readonly id: string; readonly cookie: string }, overrides: Record<string, unknown> = {}) =>
+const createDraft = (
+  user: { readonly id: string; readonly cookie: string },
+  overrides: Record<string, unknown> = {},
+) =>
   Effect.gen(function* () {
     const response = yield* send("POST", "/api/listings", {
       cookie: user.cookie,
