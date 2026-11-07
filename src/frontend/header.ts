@@ -1,3 +1,8 @@
+/*
+ * The same navigation for every visitor, signed in or not. The private links are
+ * deliberately not gated: a signed-out visitor who follows one lands on the
+ * sign-in prompt page, not a bare 401.
+ */
 export const header = `
   <nav class="w-full border-b border-gray-200 bg-white">
     <div class="mx-auto min-h-16 container flex items-center justify-end px-4 py-2 sm:px-6 lg:px-8">

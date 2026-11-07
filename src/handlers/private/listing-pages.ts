@@ -130,7 +130,8 @@ const getNewListingPage = HttpRouter.route(
  * The owner's own feed. The cursor is the model's opaque token, so paging is a
  * link carrying it and a malformed one is a readable 400 rather than a silent
  * first page. The page size stays the model's default: the page is not a place
- * to ask for an arbitrary slice.
+ * to ask for an arbitrary slice, so a `limit` in the link is decoded with the
+ * shared query codec but never used.
  */
 const mineHref = (cursor?: string): string =>
   cursor === undefined ? "/listings/mine" : `/listings/mine?cursor=${cursor}`;
@@ -168,8 +169,9 @@ const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
 );
 
 /*
- * A draft is created here and the owner lands on its edit page, which is where
- * publish lives.
+ * A draft is created here and the owner lands on its edit page. Its publish and
+ * unlist controls live there and on the mine page; both post to the transition
+ * routes below.
  */
 const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
   Effect.gen(function* () {

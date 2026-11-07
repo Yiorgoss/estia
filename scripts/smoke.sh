@@ -416,7 +416,7 @@ pass "unlisted detail page shows the not-found state with a way back"
 #
 # Two independent users, each posting a fresh draft: every "mine" feed contains
 # only its own rows - drafts included - while the public feed still hides those
-# drafts. Publish and unlist from the page itself are exercised end to end.
+# drafts. Publishing from the page itself is exercised end to end.
 SECOND_EMAIL="smoke-second-$(date +%s)@test.local"
 CODE=$(curl -s -D "$WORK/register-second.h" -o /dev/null -w '%{http_code}' \
   -X POST "${BASE_URL}/api/auth/register" \
