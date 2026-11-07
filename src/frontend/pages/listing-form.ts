@@ -272,10 +272,14 @@ const statusBadgeClass = {
   unpublished: "bg-amber-100 text-amber-800",
 } as const;
 
+// What each status means to a visitor, since publishing now opens a page as well
+// as a search result.
 const statusNotes = {
-  draft: "Only you can see a draft. Publish it to put it in public search.",
-  published: "This listing is published and appears in public search.",
-  unpublished: "This listing is unlisted: hidden from public search, with all its details kept.",
+  draft:
+    "Only you can see a draft. Publish it to show it in public search and give it a public page.",
+  published: "This listing is published: it appears in public search and has its own public page.",
+  unpublished:
+    "This listing is unlisted: it is hidden from public search and its public page, with all its details kept.",
 } as const;
 
 const transitionControls = (listing: typeof ListingSchema.Type) => {

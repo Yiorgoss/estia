@@ -1,0 +1,31 @@
+import { PublicApi, toPublicListing, toPublicListingPage } from "@/api/public";
+import { ListingService } from "@/services/listing.service";
+import { HttpApiBuilder } from "effect/http-api";
+import { Effect } from "effect";
+
+/*
+ * The unauthenticated listing reads: the search feed and one listing. Both map
+ * the row through the public projection in `@/api/public` before it leaves, and
+ * neither carries an identity: `getPublic` owns the published-only rule and
+ * answers the same 404 for a draft, an unlisted listing, and an unknown id.
+ */
+export const ListingHandler = HttpApiBuilder.group(PublicApi, "listings", (handlers) =>
+  handlers
+    .handle("search", ({ query }) =>
+      Effect.gen(function* () {
+        const listingService = yield* ListingService;
+        // The query schema decodes the wire form into the model's own filters
+        // and page request; the service owns the visibility, ordering, and limit
+        // rules, so the handler only splits them apart.
+        const { limit, cursor, ...filters } = query;
+        const page = yield* listingService.search(filters, { limit, cursor });
+        return toPublicListingPage(page);
+      }),
+    )
+    .handle("detail", ({ params }) =>
+      Effect.gen(function* () {
+        const listingService = yield* ListingService;
+        return toPublicListing(yield* listingService.getPublic(params.id));
+      }),
+    ),
+);

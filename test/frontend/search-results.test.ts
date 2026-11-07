@@ -51,6 +51,13 @@ describe("searchResults", () => {
     assert.notInclude(html, "Smoking allowed");
   });
 
+  it("links each card to the listing's public page", () => {
+    const html = searchResults(page([listing(), listing({ id: Schema.decodeSync(ListingId)(2) })]));
+
+    assert.include(html, 'href="/listings/1"');
+    assert.include(html, 'href="/listings/2"');
+  });
+
   it("labels the count as what this page shows, never as a total", () => {
     assert.include(searchResults(page([listing()])), "Showing 1 listing, newest first");
     assert.include(
