@@ -394,8 +394,14 @@ pass "two users each posted a draft"
 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/mine")
 assert_status "$CODE" 401 "the mine feed rejects an unauthenticated caller"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/listings/mine")
+CODE=$(curl -s -o "$WORK/mine-unauth" -w '%{http_code}' "${BASE_URL}/listings/mine")
 assert_status "$CODE" 401 "the mine page rejects an unauthenticated caller"
+grep -q 'href="/login"' "$WORK/mine-unauth" \
+  || fail "the signed-out mine page does not offer a sign-in link"
+if grep -q 'UnauthorizedError' "$WORK/mine-unauth"; then
+  fail "the signed-out mine page answered with a bare 401 body"
+fi
+pass "the signed-out mine page offers a sign-in link"
 
 id_before() {
   # $1: id expected earlier, $2: id expected later, stdin: mine feed JSON
@@ -472,7 +478,8 @@ CODE=$(curl -s -o "$WORK/mine-page" -w '%{http_code}' "${BASE_URL}/listings/mine
 assert_status "$CODE" 200 "mine page"
 grep -q "${MINE_TITLE_2}" "$WORK/mine-page" || fail "mine page rendered the owner's listing"
 grep -q 'Draft' "$WORK/mine-page" || fail "mine page shows a status badge"
-grep -q "My listings" "$WORK/mine-page" || fail "mine page heading"
+grep -Eq 'Showing [0-9]+ listings?, newest first' "$WORK/mine-page" \
+  || fail "mine page did not render the owner's feed count"
 grep -q "action=\"/listings/${MINE_ID}/publish\"" "$WORK/mine-page" || fail "mine page offers publish on a draft"
 grep -q 'name="returnTo" value="/listings/mine"' "$WORK/mine-page" || fail "mine page actions name the page to return to"
 pass "mine page renders drafts with a status badge and a publish action"
@@ -503,7 +510,10 @@ CODE=$(curl -s -o "$WORK/mine-rejected" -w '%{http_code}' \
 assert_status "$CODE" 409 "publishing twice from the mine page is rejected"
 grep -q "This listing is already published." "$WORK/mine-rejected" \
   || fail "the mine page did not explain the rejected transition"
-grep -q "My listings" "$WORK/mine-rejected" || fail "the rejection did not re-render the mine page"
+grep -q "${MINE_TITLE_2}" "$WORK/mine-rejected" \
+  || fail "the rejection did not re-render the owner's feed"
+grep -Eq 'Showing [0-9]+ listings?, newest first' "$WORK/mine-rejected" \
+  || fail "the rejection did not re-render the owner's feed count"
 pass "a rejected transition is explained on the mine page"
 
 # 6. refresh rotation via a route that does not re-read the access token

@@ -479,3 +479,30 @@ describe("GET /api/listings/mine", () => {
     }),
   );
 });
+
+describe("GET /listings/mine page", () => {
+  it.effect("answers a signed-out visitor with a sign-in prompt, not a bare 401", () =>
+    Effect.gen(function* () {
+      for (const path of ["/listings/mine", "/listings/new"]) {
+        const response = yield* send("GET", path);
+        assert.strictEqual(response.status, 401, path);
+        assert.notInclude(response.body, "UnauthorizedError", path);
+        assert.include(response.body, 'href="/login"', path);
+      }
+    }),
+  );
+
+  it.effect("renders the signed-in owner's feed", () =>
+    Effect.gen(function* () {
+      const user = yield* register("mine-page");
+      const listing = yield* createDraft(user, { title: "A draft on the mine page" });
+
+      const response = yield* send("GET", "/listings/mine", { cookie: user.cookie });
+      assert.strictEqual(response.status, 200, response.body);
+      assert.include(response.body, "A draft on the mine page");
+      assert.include(response.body, "Showing 1 listing, newest first");
+      assert.include(response.body, 'name="returnTo" value="/listings/mine"');
+      assert.include(response.body, `action="/listings/${listing.id}/publish"`);
+    }),
+  );
+});
