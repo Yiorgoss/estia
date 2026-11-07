@@ -1,5 +1,5 @@
-import { ListingId } from "@/db/schema/brands";
 import {
+  decodeListingId,
   encodeListingCursor,
   LISTING_PAGE_DEFAULT_LIMIT,
   ListingCursor,
@@ -119,15 +119,6 @@ const missingListingResponse = (): HttpServerResponse.HttpServerResponse =>
 // is a defect rather than something the pages explain.
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
-
-// "new" is not an id, so anything that is not a positive integer is treated as
-// a listing that does not exist rather than reaching the database.
-const decodeListingId = (raw: string | undefined): typeof ListingId.Type | undefined => {
-  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
-  const id = Number(raw);
-  if (!Number.isSafeInteger(id) || id <= 0) return undefined;
-  return Schema.decodeSync(ListingId)(id);
-};
 
 const getNewListingPage = HttpRouter.route(
   "GET",

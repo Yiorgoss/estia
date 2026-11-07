@@ -27,6 +27,24 @@ export const kindLabels = {
   room_wanted: "Room wanted",
 } as const satisfies Record<ListingKind, string>;
 
+/*
+ * The flags a visitor reads. Search cards and the public detail page show the
+ * same subset in the same order, so the true flags live in one place and a
+ * `false` flag is simply absent.
+ */
+export const listingFlags = (listing: {
+  readonly furnished: boolean;
+  readonly ensuite: boolean;
+  readonly smoking: boolean;
+  readonly pets: boolean;
+}): ReadonlyArray<string> =>
+  [
+    listing.furnished ? "Furnished" : undefined,
+    listing.ensuite ? "Ensuite" : undefined,
+    listing.smoking ? "Smoking allowed" : undefined,
+    listing.pets ? "Pets allowed" : undefined,
+  ].filter((flag) => flag !== undefined);
+
 // "unpublished" is the database word; an owner reading the page sees "Unlisted".
 export const statusLabels = {
   draft: "Draft",

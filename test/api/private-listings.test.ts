@@ -1,127 +1,15 @@
-import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
-import { StorageRepository } from "@/repos/storage.repo";
+import { asObject, register, send } from "../support/api";
+import type { TestUser } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
-import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect";
-import { Etag, HttpPlatform, HttpRouter } from "effect/http";
-import { TestSqlLive } from "../support/sql";
+import { Effect } from "effect";
 
 /*
  * These tests drive the real private router - `AuthMiddleware`, the listing
- * handlers, `ListingService`, and the repository - over the in-memory D1-shaped
- * database from `test/support/sql.ts`. The only thing they fake is the network:
- * a `Request` goes in and a `Response` comes out. Users are registered through
- * the public auth endpoint, so the cookies these tests present are the same
- * signed access tokens the app issues.
+ * handlers, `ListingService`, and the repository - through the shared harness
+ * in `test/support/api.ts`, which owns how the app is assembled and called.
+ * Users are registered through the public auth endpoint, so the cookies these
+ * tests present are the same signed access tokens the app issues.
  */
-
-/*
- * workerd, where the app actually runs, implements `Uint8Array.prototype.toHex`,
- * which the refresh-token service uses to mint a token. Node 22, where these
- * tests run, does not, so registering a user would fail here for a reason that
- * exists only in the test runtime. Supplying the primitive keeps the tests on
- * the same code path the deployed runtime takes.
- */
-const uint8ArrayPrototype = Uint8Array.prototype as unknown as { toHex?: () => string };
-uint8ArrayPrototype.toHex ??= function (this: Uint8Array) {
-  return Array.from(this, (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
-
-const DOMAIN = "http://listings.test";
-const JWT_SECRET = "listings-test-secret-listings-test-secret";
-
-// The multipart upload endpoint on the public router is the only consumer of R2;
-// these tests never touch it, but the router's request services still name it.
-const StorageRepositoryStub = Layer.succeed(StorageRepository, {
-  put: () => Effect.die("storage is not used by the listing tests"),
-  newMultipart: () => Effect.die("storage is not used by the listing tests"),
-});
-
-const ConfigLive = ConfigProvider.layer(
-  ConfigProvider.fromUnknown({ DOMAIN, JWT_SECRET, ENVIRONMENT: "local" }),
-);
-
-const AppLayer = Layer.mergeAll(PublicRouterLive, PrivateRouterLive).pipe(
-  Layer.provide(Etag.layer),
-  Layer.provide(HttpPlatform.layer),
-  Layer.provide(Path.layer),
-  Layer.provide(FileSystem.layerNoop({})),
-  Layer.provide(AppServicesLive),
-  Layer.provide(StorageRepositoryStub),
-  HttpRouter.provideRequest(AppServicesLive),
-  HttpRouter.provideRequest(StorageRepositoryStub),
-  Layer.provide(TestSqlLive),
-  Layer.provide(ConfigLive),
-);
-
-const app = HttpRouter.toWebHandler(AppLayer, { disableLogger: true });
-
-interface TestResponse {
-  readonly status: number;
-  readonly body: string;
-  readonly json: unknown;
-  readonly cookies: Readonly<Record<string, string>>;
-}
-
-const call = (path: string, init?: RequestInit): Effect.Effect<TestResponse> =>
-  Effect.promise(async () => {
-    const response = await app.handler(new Request(`http://localhost${path}`, init));
-    const body = await response.text();
-    const cookies: Record<string, string> = {};
-    for (const header of response.headers.getSetCookie()) {
-      const [pair = ""] = header.split(";");
-      const index = pair.indexOf("=");
-      cookies[pair.slice(0, index)] = pair.slice(index + 1);
-    }
-    let json: unknown;
-    try {
-      json = JSON.parse(body);
-    } catch {
-      json = undefined;
-    }
-    return { status: response.status, body, json, cookies };
-  });
-
-interface TestUser {
-  readonly id: string;
-  readonly cookie: string;
-}
-
-// A browser always sends a user agent, and the refresh-token record stores it,
-// so the requests here carry one too.
-const json = (init: RequestInit, payload?: unknown): RequestInit => ({
-  ...init,
-  headers: { "content-type": "application/json", "user-agent": "estia-tests", ...init.headers },
-  ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-});
-
-const send = (
-  method: string,
-  path: string,
-  options: { readonly cookie?: string; readonly payload?: unknown } = {},
-) =>
-  call(
-    path,
-    json(
-      {
-        method,
-        ...(options.cookie === undefined ? {} : { headers: { cookie: options.cookie } }),
-      },
-      options.payload,
-    ),
-  );
-
-const register = (label: string): Effect.Effect<TestUser> =>
-  Effect.gen(function* () {
-    const email = `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@test.local`;
-    const response = yield* send("POST", "/api/auth/register", {
-      payload: { email, password: "correct horse battery staple" },
-    });
-    assert.strictEqual(response.status, 200, `register ${label}: ${response.body}`);
-    const accessToken = response.cookies["access_token"];
-    assert.isString(accessToken);
-    const claims = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
-    return { id: String(claims.id), cookie: `access_token=${accessToken}` };
-  });
 
 // Registered once per file; every test then creates the listings it needs.
 const users = await Effect.runPromise(
@@ -131,11 +19,6 @@ const users = await Effect.runPromise(
     return { owner, other };
   }),
 );
-
-const asListing = (value: unknown): Record<string, unknown> => {
-  assert.isObject(value);
-  return value as Record<string, unknown>;
-};
 
 let priceCounter = 0;
 const uniquePriceMinor = () => 100_000 + (priceCounter += 1) * 111;
@@ -154,14 +37,17 @@ const listingPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const createDraft = (user: TestUser, overrides: Record<string, unknown> = {}) =>
+const createDraft = (
+  user: { readonly id: string; readonly cookie: string },
+  overrides: Record<string, unknown> = {},
+) =>
   Effect.gen(function* () {
     const response = yield* send("POST", "/api/listings", {
       cookie: user.cookie,
       payload: listingPayload(overrides),
     });
     assert.strictEqual(response.status, 200, `create draft: ${response.body}`);
-    return asListing(response.json);
+    return asObject(response.json);
   });
 
 describe("POST /api/listings", () => {
@@ -242,7 +128,7 @@ describe("PATCH /api/listings/:id", () => {
         payload: { title: "Renamed room", priceMinor: 62_000 },
       });
       assert.strictEqual(response.status, 200, response.body);
-      const updated = asListing(response.json);
+      const updated = asObject(response.json);
       assert.strictEqual(updated.title, "Renamed room");
       assert.strictEqual(updated.priceMinor, 62_000);
       // Untouched fields keep their stored values.
@@ -311,7 +197,7 @@ describe("POST /api/listings/:id/publish and /unlist", () => {
         cookie: users.owner.cookie,
       });
       assert.strictEqual(published.status, 200, published.body);
-      const publishedBody = asListing(published.json);
+      const publishedBody = asObject(published.json);
       assert.strictEqual(publishedBody.status, "published");
       assert.isNumber(publishedBody.publishedAt);
 
@@ -319,14 +205,14 @@ describe("POST /api/listings/:id/publish and /unlist", () => {
         cookie: users.owner.cookie,
       });
       assert.strictEqual(unlisted.status, 200, unlisted.body);
-      assert.strictEqual(asListing(unlisted.json).status, "unpublished");
+      assert.strictEqual(asObject(unlisted.json).status, "unpublished");
 
       // Unlisting is reversible and keeps the listing.
       const relisted = yield* send("POST", `/api/listings/${id}/publish`, {
         cookie: users.owner.cookie,
       });
       assert.strictEqual(relisted.status, 200, relisted.body);
-      assert.strictEqual(asListing(relisted.json).status, "published");
+      assert.strictEqual(asObject(relisted.json).status, "published");
     }),
   );
 

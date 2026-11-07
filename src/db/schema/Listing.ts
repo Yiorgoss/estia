@@ -11,6 +11,18 @@ import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 export const ListingKind = Schema.Literals(["room", "whole_property", "room_wanted"]);
 export type ListingKind = typeof ListingKind.Type;
 
+/*
+ * A path segment is not an id until it is a positive safe integer, so "new" or
+ * "1.5" reads as "no such listing" instead of reaching the database. Every page
+ * that shows one listing decodes its path through this.
+ */
+export const decodeListingId = (raw: string | undefined): typeof ListingId.Type | undefined => {
+  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+  return Schema.decodeSync(ListingId)(id);
+};
+
 export const ListingStatus = Schema.Literals(["draft", "published", "unpublished"]);
 export type ListingStatus = typeof ListingStatus.Type;
 
@@ -189,8 +201,9 @@ export type ListingPage = typeof ListingPage.Type;
  * The cursor travels as `base64url("<createdAt>:<id>")`, so the sort key is not
  * a JSON field and there is no offset parameter to page with. It is
  * tamper-tolerant, not tamper-proof: a forged cursor is accepted, which is
- * harmless because it only moves the keyset window while the published-only
- * rule and every filter still apply.
+ * harmless because it only moves the keyset window - each feed still decides
+ * which rows exist for it, the published-only rule and the filters on public
+ * search, the owner scope on the owner's own feed.
  */
 const CURSOR_PATTERN = /^(\d+):(\d+)$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;

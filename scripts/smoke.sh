@@ -230,6 +230,11 @@ grep -q "${EPIRUS_TITLE}" "$WORK/search-fragment" || fail "search fragment rende
 grep -q "Crete" "$WORK/search-fragment" || fail "search fragment rendered the region label"
 pass "search fragment rendered the seeded listings"
 
+# A result is a door: the whole card links to the listing's public page.
+grep -q "href=\"/listings/${CRETE_ID}\"" "$WORK/search-fragment" \
+  || fail "search results do not link to the detail page"
+pass "search result cards link to the detail page"
+
 CODE=$(curl -s -o "$WORK/search-region" -w '%{http_code}' \
   "${BASE_URL}/search/results?${FRAGMENT_QUERY}&regionCode=crete")
 assert_status "$CODE" 200 "search fragment with a region filter"
@@ -336,6 +341,50 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 409 "api listing publish rejects republishing"
 
+# 5d. the public read surface: a published listing opens through the API and
+# the page, with only the public fields on the wire. The same 404 answers for a
+# draft, an unlisted listing, and an unknown id, so ids cannot be probed.
+CODE=$(curl -s -o "$WORK/api-detail" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/${API_ID}")
+assert_status "$CODE" 200 "public listing detail API"
+[ "$(json_field id < "$WORK/api-detail")" = "${API_ID}" ] \
+  || fail "public listing detail returned the wrong id"
+[ "$(json_field title < "$WORK/api-detail")" = "${API_EDITED_TITLE}" ] \
+  || fail "public listing detail returned the wrong title"
+for KEY in ownerId status lat lng createdAt updatedAt; do
+  if grep -q "\"${KEY}\"" "$WORK/api-detail"; then
+    fail "public listing detail exposed ${KEY}"
+  fi
+done
+pass "public listing detail returns only the public fields"
+
+CODE=$(curl -s -o "$WORK/api-detail-draft" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/${DRAFT_ID}")
+assert_status "$CODE" 404 "public listing detail hides a draft"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/${UNPUBLISHED_ID}")
+assert_status "$CODE" 404 "public listing detail hides an unlisted listing"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/999999999")
+assert_status "$CODE" 404 "public listing detail hides an unknown id"
+
+CODE=$(curl -s -o "$WORK/detail-page" -w '%{http_code}' "${BASE_URL}/listings/${API_ID}")
+assert_status "$CODE" 200 "public listing detail page"
+grep -q "${API_EDITED_TITLE}" "$WORK/detail-page" || fail "detail page did not render the title"
+grep -q 'Crete' "$WORK/detail-page" || fail "detail page did not render the region"
+grep -q '<title>' "$WORK/detail-page" || fail "detail page has no title metadata"
+grep -q 'name="description"' "$WORK/detail-page" || fail "detail page has no description metadata"
+grep -q 'href="/search"' "$WORK/detail-page" || fail "detail page has no back-to-search link"
+pass "public listing detail page renders the listing with metadata and a way back"
+
+CODE=$(curl -s -o "$WORK/detail-page-draft" -w '%{http_code}' "${BASE_URL}/listings/${DRAFT_ID}")
+assert_status "$CODE" 404 "public listing detail page hides a draft"
+grep -q 'Listing not found' "$WORK/detail-page-draft" \
+  || fail "detail page did not render the not-found state"
+grep -q 'href="/search"' "$WORK/detail-page-draft" \
+  || fail "not-found page has no way back to search"
+pass "draft detail page shows the not-found state with a way back"
+
 CODE=$(curl -s -o "$WORK/api-unlist" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/listings/${API_ID}/unlist" \
   -H "Cookie: access_token=${ACCESS}")
@@ -350,7 +399,20 @@ case ",$(listing_ids < "$WORK/api-feed-unlisted")," in
   *) pass "an unlisted listing is gone from the public feed" ;;
 esac
 
-# 5d. the owner's own feed (GET /api/listings/mine and /listings/mine)
+# The same listing that opened a moment ago is now a 404 on both surfaces, and
+# its page shows the not-found state instead of a stack trace or a blank body.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/${API_ID}")
+assert_status "$CODE" 404 "public listing detail is 404 once unlisted"
+
+CODE=$(curl -s -o "$WORK/detail-page-unlisted" -w '%{http_code}' "${BASE_URL}/listings/${API_ID}")
+assert_status "$CODE" 404 "public listing detail page is 404 once unlisted"
+grep -q 'Listing not found' "$WORK/detail-page-unlisted" \
+  || fail "unlisted detail page did not render the not-found state"
+grep -q 'href="/search"' "$WORK/detail-page-unlisted" \
+  || fail "unlisted not-found page has no way back to search"
+pass "unlisted detail page shows the not-found state with a way back"
+
+# 5e. the owner's own feed (GET /api/listings/mine and /listings/mine)
 #
 # Two independent users, each posting a fresh draft: every "mine" feed contains
 # only its own rows - drafts included - while the public feed still hides those

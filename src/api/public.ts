@@ -9,15 +9,21 @@ import { registerPage } from "@/frontend/pages/register";
 import { mapDemo } from "@/frontend/map-demo";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
-import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
+import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
 import {
+  decodeListingId,
   ListingCursorFromString,
   ListingPage,
   ListingSchema,
   ListingSearchQuery,
   ListingSearchQueryCodec,
 } from "@/db/schema/Listing";
-import { ListingService } from "@/services/listing.service";
+import { ListingNotFoundError, ListingService } from "@/services/listing.service";
+import {
+  listingDetailPage,
+  listingNotFoundPage,
+  listingUnavailablePage,
+} from "@/frontend/pages/listing-detail";
 import { withMinorUnitPrices } from "@/utils";
 import { head } from "@/frontend/head";
 
@@ -47,11 +53,12 @@ const AuthGroup = HttpApiGroup.make("auth")
   .prefix("/auth");
 
 /*
- * The feed is unauthenticated, so its wire shape is a projection of the listing
- * row, not the row itself: the owner's account id, the exact coordinates, and
- * the `status`/`updatedAt` bookkeeping never reach the wire here. The projection
- * is a wire concern only - `ListingService` keeps returning the full row for
- * owner-scoped reads and mutations.
+ * The feed and the single-listing endpoint are unauthenticated, so their wire
+ * shape is a projection of the listing row, not the row itself: the owner's
+ * account id, the exact coordinates, and the `status`/`updatedAt` bookkeeping
+ * never reach the wire here. The projection is a wire concern only -
+ * `ListingService` keeps returning the full row for owner-scoped reads and
+ * mutations, and every public surface maps through `toPublicListing`.
  * `publishedAt` is the timestamp a visitor reads as recency; the newest-first
  * sort key is `createdAt`, which only travels inside the encoded `nextCursor`.
  */
@@ -71,6 +78,26 @@ const PublicListingSchema = Schema.Struct({
   availableFrom: ListingSchema.fields.availableFrom,
   publishedAt: ListingSchema.fields.publishedAt,
 });
+export type PublicListing = typeof PublicListingSchema.Type;
+
+export const toPublicListing = (
+  listing: typeof ListingSchema.Type,
+): typeof PublicListingSchema.Type => ({
+  id: listing.id,
+  kind: listing.kind,
+  title: listing.title,
+  description: listing.description,
+  priceMinor: listing.priceMinor,
+  currency: listing.currency,
+  regionCode: listing.regionCode,
+  sizeSqm: listing.sizeSqm,
+  furnished: listing.furnished,
+  ensuite: listing.ensuite,
+  smoking: listing.smoking,
+  pets: listing.pets,
+  availableFrom: listing.availableFrom,
+  publishedAt: listing.publishedAt,
+});
 
 export const PublicListingPageResponse = Schema.Struct({
   items: Schema.Array(PublicListingSchema),
@@ -81,31 +108,31 @@ export type PublicListingPageResponse = typeof PublicListingPageResponse.Type;
 export const toPublicListingPage = (
   page: typeof ListingPage.Type,
 ): typeof PublicListingPageResponse.Type => ({
-  items: page.items.map((listing) => ({
-    id: listing.id,
-    kind: listing.kind,
-    title: listing.title,
-    description: listing.description,
-    priceMinor: listing.priceMinor,
-    currency: listing.currency,
-    regionCode: listing.regionCode,
-    sizeSqm: listing.sizeSqm,
-    furnished: listing.furnished,
-    ensuite: listing.ensuite,
-    smoking: listing.smoking,
-    pets: listing.pets,
-    availableFrom: listing.availableFrom,
-    publishedAt: listing.publishedAt,
-  })),
+  items: page.items.map(toPublicListing),
   nextCursor: page.nextCursor,
 });
 
+/*
+ * `search` is the bare `/` under the `/listings` prefix and `detail` is
+ * `/:id`, so the two can never shadow each other: the search route has no
+ * second segment to capture, and the router prefers the registered literal
+ * `/listings/new` over `/:id`.
+ */
 export const ListingsGroup = HttpApiGroup.make("listings")
   .add(
     HttpApiEndpoint.get("search", "/", {
       query: ListingSearchQuery,
       success: PublicListingPageResponse,
       error: [InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("detail", "/:id", {
+      params: { id: ListingId },
+      success: PublicListingSchema,
+      // A draft or unlisted listing answers the same 404 as an unknown id, so a
+      // visitor cannot probe which ids exist.
+      error: [ListingNotFoundError, InternalError],
     }),
   )
   .prefix("/listings");
@@ -151,8 +178,40 @@ const searchResultsRoute = HttpRouter.route(
   ),
 );
 
+/*
+ * The public page for one listing. It answers the same 404 page for an unknown
+ * id, a draft, and an unlisted listing, because `getPublic` already collapses
+ * those into one error and the page must not reveal which case it was. A path
+ * segment that is not an id never reaches the service.
+ */
+const notFoundResponse = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.text(listingNotFoundPage(), { status: 404, contentType: "text/html" });
+
+const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
+  Effect.gen(function* () {
+    const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
+    if (id === undefined) return notFoundResponse();
+
+    const listingService = yield* ListingService;
+    const listing = yield* listingService.getPublic(id);
+    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing)));
+  }).pipe(
+    Effect.catchTags({
+      ListingNotFoundError: () => Effect.succeed(notFoundResponse()),
+      InternalError: () =>
+        Effect.succeed(
+          HttpServerResponse.text(listingUnavailablePage(), {
+            status: 500,
+            contentType: "text/html",
+          }),
+        ),
+    }),
+  ),
+);
+
 export const PublicRoutes = HttpRouter.addAll([
   searchResultsRoute,
+  listingDetailRoute,
   HttpRouter.route("GET", "/search", Effect.succeed(HttpServerResponse.html(searchPage))),
   HttpRouter.route(
     "GET",

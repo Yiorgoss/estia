@@ -1,7 +1,7 @@
 import { ListingsGroup } from "@/api/public";
 import { ListingId, UserId } from "@/db/schema/brands";
 import { ListingCursor, ListingPage } from "@/db/schema/Listing";
-import { ListingSearchHandler } from "@/handlers/public/listing-search.handler";
+import { ListingHandler } from "@/handlers/public/listing.handler";
 import { ListingService } from "@/services/listing.service";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Schema } from "effect";
@@ -78,7 +78,7 @@ const search = (result: typeof ListingPage.Type) =>
     Effect.sync(() =>
       HttpRouter.toWebHandler(
         HttpApiBuilder.layer(TestApi).pipe(
-          Layer.provide(ListingSearchHandler),
+          Layer.provide(ListingHandler),
           HttpRouter.provideRequest(Layer.succeed(ListingService, service(result))),
           Layer.provide(Etag.layer),
           Layer.provide(HttpPlatform.layer),
