@@ -1,4 +1,4 @@
-import { ListingId } from "@/db/schema/brands";
+import { decodeListingId } from "@/db/schema/Listing";
 import { callerId } from "@/handlers/private/caller";
 import {
   decodeCreateListingForm,
@@ -19,7 +19,7 @@ import {
 } from "@/services/listing.service";
 import type { InternalError } from "@/services/user.service";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 
 /*
  * Owner-facing listing pages. They live on the private router, so `AuthMiddleware`
@@ -111,15 +111,6 @@ const missingListingResponse = (): HttpServerResponse.HttpServerResponse =>
 // is a defect rather than something the pages explain.
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
-
-// "new" is not an id, so anything that is not a positive integer is treated as
-// a listing that does not exist rather than reaching the database.
-const decodeListingId = (raw: string | undefined): typeof ListingId.Type | undefined => {
-  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
-  const id = Number(raw);
-  if (!Number.isSafeInteger(id) || id <= 0) return undefined;
-  return Schema.decodeSync(ListingId)(id);
-};
 
 const getNewListingPage = HttpRouter.route(
   "GET",

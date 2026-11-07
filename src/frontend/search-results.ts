@@ -1,26 +1,25 @@
 import { encodeListingCursor, ListingPage } from "@/db/schema/Listing";
-import { kindLabels, regionLabels } from "@/frontend/listing-labels";
+import { kindLabels, listingFlags, regionLabels } from "@/frontend/listing-labels";
 import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 
 type SearchListing = (typeof ListingPage.Type)["items"][number];
 
-const flagsOf = (listing: SearchListing) =>
-  [
-    listing.furnished ? "Furnished" : undefined,
-    listing.ensuite ? "Ensuite" : undefined,
-    listing.smoking ? "Smoking allowed" : undefined,
-    listing.pets ? "Pets allowed" : undefined,
-  ].filter((flag) => flag !== undefined);
-
+/*
+ * The whole card is the link to the listing's public page: a visitor reads a
+ * result and opens it, and nothing inside a card is a separate action.
+ */
 const listingCard = (listing: SearchListing) => {
-  const flags = flagsOf(listing);
+  const flags = listingFlags(listing);
   const available = formatDate(listing.availableFrom);
 
   return `
-    <article class="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <a
+      href="/listings/${listing.id}"
+      class="group flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition-colors hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+    >
       <header class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h2 class="break-words text-base font-semibold text-gray-900">${escapeHtml(listing.title)}</h2>
+          <h2 class="break-words text-base font-semibold text-gray-900 group-hover:text-blue-700">${escapeHtml(listing.title)}</h2>
           <p class="mt-0.5 text-xs font-medium uppercase tracking-wide text-gray-500">
             ${escapeHtml(regionLabels[listing.regionCode])} &middot; ${escapeHtml(kindLabels[listing.kind])}
           </p>
@@ -50,7 +49,7 @@ const listingCard = (listing: SearchListing) => {
         <span>${listing.sizeSqm == null ? "Size unknown" : `${listing.sizeSqm} m²`}</span>
         <span>${available == null ? "Availability unknown" : `Available ${available}`}</span>
       </footer>
-    </article>`;
+    </a>`;
 };
 
 /*

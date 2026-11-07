@@ -11,6 +11,18 @@ import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 export const ListingKind = Schema.Literals(["room", "whole_property", "room_wanted"]);
 export type ListingKind = typeof ListingKind.Type;
 
+/*
+ * A path segment is not an id until it is a positive safe integer, so "new" or
+ * "1.5" reads as "no such listing" instead of reaching the database. Every page
+ * that shows one listing decodes its path through this.
+ */
+export const decodeListingId = (raw: string | undefined): typeof ListingId.Type | undefined => {
+  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+  return Schema.decodeSync(ListingId)(id);
+};
+
 export const ListingStatus = Schema.Literals(["draft", "published", "unpublished"]);
 export type ListingStatus = typeof ListingStatus.Type;
 
