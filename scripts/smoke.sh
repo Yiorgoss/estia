@@ -173,6 +173,17 @@ FORM_LOGIN_LOCATION="$(header_value "$WORK/form-login.h" location)"
   || fail "form login did not set the access cookie"
 pass "form login redirects to the feed with a session"
 
+CODE=$(curl -s -D "$WORK/form-login-origin.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/login" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H "Origin: ${BASE_URL}" \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}")
+assert_status "$CODE" 303 "form login from the page's own origin"
+[ -n "$(cookie_value "$WORK/form-login-origin.h" access_token)" ] \
+  || fail "same-origin form login did not set the access cookie"
+pass "form login from the page's own origin sets a session"
+
 CODE=$(curl -s -D "$WORK/form-cross-site.h" -o /dev/null -w '%{http_code}' \
   -X POST "${BASE_URL}/login" \
   -H 'Content-Type: application/x-www-form-urlencoded' \

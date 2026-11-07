@@ -1,4 +1,4 @@
-import { asObject, call, form, send } from "../support/api";
+import { asObject, call, callWithConfig, form, send, testOrigin } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
@@ -22,8 +22,6 @@ const uniqueEmail = (label: string) =>
 
 const submit = (path: string, fields: Readonly<Record<string, string>>) =>
   call(path, form({ method: "POST" }, fields));
-
-const APP_ORIGIN = "http://listings.test";
 
 const submitFrom = (
   path: string,
@@ -168,7 +166,7 @@ describe("form posts from another site", () => {
     Effect.gen(function* () {
       const email = uniqueEmail("same-origin");
       const registered = yield* submitFrom("/register", jobForm(email), {
-        origin: APP_ORIGIN,
+        origin: testOrigin,
         "sec-fetch-site": "same-origin",
       });
       assert.strictEqual(registered.status, 303, registered.body);
@@ -179,6 +177,28 @@ describe("form posts from another site", () => {
       });
       assert.strictEqual(signedIn.status, 303, signedIn.body);
       assert.isString(signedIn.cookies["access_token"]);
+    }),
+  );
+
+  it.effect("accepts a submit from the host the request reached, not just DOMAIN", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("request-host");
+      const response = yield* submitFrom("/register", jobForm(email), { origin: testOrigin });
+      assert.strictEqual(response.status, 303, response.body);
+      assert.isString(response.cookies["access_token"]);
+    }),
+  );
+
+  it.effect("still accepts a submit when DOMAIN is not a URL", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("scheme-less-domain");
+      const response = yield* callWithConfig(
+        { DOMAIN: "localhost:5173" },
+        "/register",
+        form({ method: "POST", headers: { origin: testOrigin } }, jobForm(email)),
+      );
+      assert.strictEqual(response.status, 303, response.body);
+      assert.isString(response.cookies["access_token"]);
     }),
   );
 
@@ -242,7 +262,7 @@ describe("form posts from another site", () => {
       assert.isUndefined(fromElsewhere.cookies["access_token"]);
 
       const fromApp = yield* submitFrom("/register", jobForm(email), {
-        referer: `${APP_ORIGIN}/register`,
+        referer: `${testOrigin}/register`,
       });
       assert.strictEqual(fromApp.status, 303, fromApp.body);
       assert.isString(fromApp.cookies["access_token"]);

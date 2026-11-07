@@ -18,7 +18,6 @@ import { UserHandler } from "@/handlers/private/user.handler";
 import { ListingHandler as PrivateListingHandler } from "@/handlers/private/listing.handler";
 import { ListingServiceLive } from "@/services/listing.service";
 import { ListingHandler as PublicListingHandler } from "@/handlers/public/listing.handler";
-import { AppOriginLive } from "@/services/app-origin.service";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -30,7 +29,7 @@ export const RepositoriesLive = Layer.mergeAll(
 );
 
 // --- Low-level / infra services ---
-export const InfraServicesLive = Layer.mergeAll(HasherServiceLive, JWTServiceLive, AppOriginLive);
+export const InfraServicesLive = Layer.mergeAll(HasherServiceLive, JWTServiceLive);
 
 // --- Domain services (depend on repos + infra) ---
 export const DomainServicesLive = Layer.mergeAll(
