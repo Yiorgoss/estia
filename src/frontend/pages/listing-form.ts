@@ -190,11 +190,11 @@ export const listingFields = (
       numberInput("price", {
         value: values.priceEuros,
         min: "0",
-        step: "1",
+        step: "0.01",
         placeholder: "750",
         required: true,
       }),
-      "Whole euros per month.",
+      "Euros per month, up to two decimal places.",
     )}
     ${field("sizeSqm", "Size (m²)", optionalNumber("sizeSqm", values.sizeSqm, "35"))}
     ${field(
@@ -327,7 +327,7 @@ export const editListingPage = (
       action="/listings/${listing.id}/edit"
       class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
     >
-      ${listingFields(values, { kindLocked: true })}
+      ${listingFields({ ...values, kind: listing.kind }, { kindLocked: true })}
 
       <div class="mt-6 flex flex-wrap items-center gap-3">
         <button type="submit" class="${primaryButtonClass}">Save changes</button>

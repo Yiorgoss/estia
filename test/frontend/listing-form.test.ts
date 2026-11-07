@@ -72,12 +72,28 @@ describe("decodeCreateListingForm", () => {
     }
   });
 
-  it("rejects a price that is not whole euros, or is negative", () => {
-    for (const price of ["", "abc", "-5", "12.5"]) {
+  it("accepts up to two decimal places and converts them exactly to minor units", () => {
+    const cases: ReadonlyArray<readonly [string, number]> = [
+      ["750", 75_000],
+      ["45.5", 4_550],
+      ["45.50", 4_550],
+      ["0.05", 5],
+      ["12.34", 1_234],
+    ];
+    for (const [price, expected] of cases) {
+      const result = decodeCreateListingForm(form({ price }));
+      assert.isTrue(result.ok, price);
+      if (!result.ok) return;
+      assert.strictEqual(result.input.priceMinor, expected, price);
+    }
+  });
+
+  it("rejects a blank, non-numeric, negative, or over-precise price", () => {
+    for (const price of ["", "abc", "-5", "12.", ".5", "12.345"]) {
       const result = decodeCreateListingForm(form({ price }));
       assert.isFalse(result.ok, `price ${JSON.stringify(price)}`);
       if (result.ok) return;
-      assert.match(result.message, /euros/i);
+      assert.match(result.message, /price|euros/i);
     }
   });
 
@@ -156,6 +172,43 @@ describe("listing pages", () => {
     assert.strictEqual(values.availableFrom, "2026-03-01");
     assert.isTrue(values.furnished);
     assert.strictEqual(values.lat, "35.34");
+  });
+
+  it("round-trips a stored price with cents through the edit form unchanged", () => {
+    const values = listingFormValuesFor(listing({ priceMinor: 4_550 }));
+    assert.strictEqual(values.priceEuros, "45.50");
+
+    const result = decodeUpdateListingForm({
+      title: values.title,
+      description: values.description,
+      price: values.priceEuros,
+      regionCode: values.regionCode,
+      sizeSqm: values.sizeSqm,
+      availableFrom: values.availableFrom,
+      furnished: values.furnished ? "true" : "",
+      ensuite: values.ensuite ? "true" : "",
+      smoking: values.smoking ? "true" : "",
+      pets: values.pets ? "true" : "",
+      lat: values.lat,
+      lng: values.lng,
+    });
+    assert.isTrue(result.ok);
+    if (!result.ok) return;
+    assert.strictEqual(result.input.priceMinor, 4_550);
+  });
+
+  it("shows the stored kind when an edit is rejected without a kind field", () => {
+    const stored = listing({ kind: "whole_property" });
+    const submitted = listingFormValues({ title: "Renamed", price: "950" });
+    assert.strictEqual(submitted.kind, "");
+
+    const page = editListingPage(
+      stored,
+      submitted,
+      "The title must be between 1 and 120 characters.",
+    );
+    assert.include(page, "Whole property");
+    assert.include(page, "The title must be between 1 and 120 characters.");
   });
 
   it("escapes submitted values instead of rendering them as markup", () => {

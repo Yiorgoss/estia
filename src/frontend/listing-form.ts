@@ -79,9 +79,14 @@ export const listingFormValues = (params: ListingFormParams): ListingFormValues 
   lng: text(params, "lng"),
 });
 
-// The edit page shows the stored price exactly (a row with cents reads "45.5"),
-// while the form asks for whole euros: nothing is silently rounded away.
-const eurosOf = (priceMinor: number): string => String(priceMinor / 100);
+// The edit page shows the stored price exactly, so a row with cents reads
+// "45.50" and saves back to the same minor units: nothing is silently rounded
+// away.
+const eurosOf = (priceMinor: number): string => {
+  const euros = Math.trunc(priceMinor / 100);
+  const cents = priceMinor % 100;
+  return cents === 0 ? String(euros) : `${euros}.${String(cents).padStart(2, "0")}`;
+};
 
 const dateValue = (date: Date | null | undefined): string =>
   date == null ? "" : date.toISOString().slice(0, 10);
@@ -108,16 +113,23 @@ interface FormFailure {
 
 const invalid = (message: string): FormFailure => ({ message });
 
-const wholeEurosToMinor = (raw: string): Result.Result<number, FormFailure> => {
+// Euros are read as decimal text and converted by composing the minor units from
+// the digits, so "45.5" and "45.50" both become 4550 without a float round trip.
+const eurosToMinor = (raw: string): Result.Result<number, FormFailure> => {
   const trimmed = raw.trim();
-  if (!/^\d+$/.test(trimmed)) {
-    return Result.fail(invalid("Enter the price in whole euros, for example 750."));
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+    return Result.fail(
+      invalid(
+        "Enter the price in euros with at most two decimal places, for example 750 or 45.50.",
+      ),
+    );
   }
-  const euros = Number(trimmed);
-  if (!Number.isSafeInteger(euros * 100)) {
+  const [euros = "", cents = ""] = trimmed.split(".");
+  const priceMinor = Number(euros) * 100 + Number(cents.padEnd(2, "0"));
+  if (!Number.isSafeInteger(priceMinor)) {
     return Result.fail(invalid("That price is too large."));
   }
-  return Result.succeed(euros * 100);
+  return Result.succeed(priceMinor);
 };
 
 const sizeFrom = (raw: string): Result.Result<number | null, FormFailure> => {
@@ -187,7 +199,7 @@ const fieldMessages: Record<string, string> = {
   kind: "Choose what kind of listing this is.",
   title: "The title must be between 1 and 120 characters.",
   description: "Keep the description to 5000 characters or fewer.",
-  priceMinor: "Enter the price in whole euros, for example 750.",
+  priceMinor: "Enter the price in euros with at most two decimal places, for example 750 or 45.50.",
   regionCode: "Choose one of the 13 Greek regions.",
   sizeSqm: "The size must be a whole number of square metres above zero.",
   availableFrom: "Enter the availability date as a calendar date.",
@@ -217,7 +229,7 @@ const sharedFields = (
   params: ListingFormParams,
 ): Result.Result<Record<string, unknown>, FormFailure> =>
   Result.gen(function* () {
-    const priceMinor = yield* wholeEurosToMinor(text(params, "price"));
+    const priceMinor = yield* eurosToMinor(text(params, "price"));
     const sizeSqm = yield* sizeFrom(text(params, "sizeSqm"));
     const availableFrom = yield* availableFromMillis(text(params, "availableFrom"));
     const location = yield* coordinates(text(params, "lat"), text(params, "lng"));
