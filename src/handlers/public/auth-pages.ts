@@ -12,8 +12,7 @@ import { Effect, Result } from "effect";
  * JSON API: the form posts `application/x-www-form-urlencoded`, the route runs the
  * same `AuthService`/`UserService` the API handlers run, and every submit is
  * answered with a page - a redirect to the feed on success, the same page with a
- * readable reason on failure. The JSON endpoints keep decoding JSON only, so an
- * API client sees no change.
+ * readable reason on failure. The JSON endpoints keep decoding JSON only.
  */
 
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";

@@ -10,7 +10,7 @@ import { header } from "../header";
  * They are not htmx forms. The `/api/auth` endpoints are a JSON API, and htmx
  * posts form-encoded bodies by default, so a page pointed at them cannot work;
  * the pages therefore talk to their own form routes, the same way the listing
- * pages do. That keeps the JSON API's contract exactly as API clients see it.
+ * pages do, so the JSON API only ever decodes JSON.
  *
  * Nothing here is user input except the address echoed back into a rejected
  * form, which is escaped.
