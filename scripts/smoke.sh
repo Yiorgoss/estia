@@ -269,6 +269,87 @@ assert_status "$CODE" 200 "search fragment malformed cursor returns 200"
 grep -q 'Those filters could not be read' "$WORK/search-cursor" || fail "search fragment did not report the malformed cursor"
 pass "search fragment reports a malformed cursor"
 
+# 5c. the authenticated listing lifecycle through the API:
+#
+# create a draft, correct it, publish it, find it in the public feed, then unlist
+# it and confirm it disappears again. The title and price are unique to this run so
+# the public-feed checks can only match this listing.
+json_field() {
+  # $1: field name, stdin: JSON body
+  node -e 'let s=""; process.stdin.on("data", (d) => s += d).on("end", () => { const value = JSON.parse(s)[process.argv[1]]; process.stdout.write(value == null ? "" : String(value)); })' "$1"
+}
+
+API_EUR=$(( ($(date +%s) % 9000) + 31000 ))
+API_MINOR=$((API_EUR * 100))
+API_TITLE="Smoke API draft ${SMOKE_TAG}"
+API_EDITED_TITLE="Smoke API draft ${SMOKE_TAG} edited"
+API_QUERY="minPriceMinor=${API_MINOR}&maxPriceMinor=${API_MINOR}"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"kind\":\"room\",\"title\":\"${API_TITLE}\",\"priceMinor\":${API_MINOR},\"regionCode\":\"crete\"}")
+assert_status "$CODE" 401 "api listing create rejects an unauthenticated caller"
+
+CODE=$(curl -s -o "$WORK/api-create" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d "{\"kind\":\"room\",\"title\":\"${API_TITLE}\",\"description\":\"Created through the API\",\"priceMinor\":${API_MINOR},\"regionCode\":\"crete\",\"sizeSqm\":25,\"furnished\":1,\"ensuite\":0,\"smoking\":0,\"pets\":1}")
+assert_status "$CODE" 200 "api listing create"
+API_ID="$(json_field id < "$WORK/api-create")"
+[ -n "$API_ID" ] || fail "api listing create returned an id"
+[ "$(json_field status < "$WORK/api-create")" = "draft" ] || fail "api listing create did not create a draft"
+pass "api listing create returns a draft"
+
+CODE=$(curl -s -o "$WORK/api-feed-draft" -w '%{http_code}' "${BASE_URL}/api/listings?${API_QUERY}")
+assert_status "$CODE" 200 "api feed before publish"
+case ",$(listing_ids < "$WORK/api-feed-draft")," in
+  *",${API_ID},"*) fail "a draft reached the public feed" ;;
+  *) pass "a draft is not in the public feed" ;;
+esac
+CODE=$(curl -s -o "$WORK/api-update" -w '%{http_code}' \
+  -X PATCH "${BASE_URL}/api/listings/${API_ID}" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d "{\"title\":\"${API_EDITED_TITLE}\",\"sizeSqm\":30}")
+assert_status "$CODE" 200 "api listing update"
+[ "$(json_field title < "$WORK/api-update")" = "${API_EDITED_TITLE}" ] || fail "api listing update did not change the title"
+[ "$(json_field sizeSqm < "$WORK/api-update")" = "30" ] || fail "api listing update did not change the size"
+pass "api listing update changes the listing"
+
+CODE=$(curl -s -o "$WORK/api-publish" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${API_ID}/publish" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "api listing publish"
+[ "$(json_field status < "$WORK/api-publish")" = "published" ] || fail "api listing publish did not publish"
+pass "api listing publish returns a published listing"
+
+CODE=$(curl -s -o "$WORK/api-feed-published" -w '%{http_code}' "${BASE_URL}/api/listings?${API_QUERY}")
+assert_status "$CODE" 200 "api feed after publish"
+case ",$(listing_ids < "$WORK/api-feed-published")," in
+  *",${API_ID},"*) pass "the published listing is in the public feed" ;;
+  *) fail "the published listing is missing from the public feed" ;;
+esac
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${API_ID}/publish" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 409 "api listing publish rejects republishing"
+
+CODE=$(curl -s -o "$WORK/api-unlist" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${API_ID}/unlist" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "api listing unlist"
+[ "$(json_field status < "$WORK/api-unlist")" = "unpublished" ] || fail "api listing unlist did not unlist"
+pass "api listing unlist returns an unlisted listing"
+
+CODE=$(curl -s -o "$WORK/api-feed-unlisted" -w '%{http_code}' "${BASE_URL}/api/listings?${API_QUERY}")
+assert_status "$CODE" 200 "api feed after unlist"
+case ",$(listing_ids < "$WORK/api-feed-unlisted")," in
+  *",${API_ID},"*) fail "an unlisted listing stayed in the public feed" ;;
+  *) pass "an unlisted listing is gone from the public feed" ;;
+esac
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")

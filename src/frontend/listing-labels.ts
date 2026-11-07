@@ -1,4 +1,4 @@
-import type { GreekRegionCode, ListingKind } from "@/db/schema/Listing";
+import type { GreekRegionCode, ListingKind, ListingStatus } from "@/db/schema/Listing";
 
 /*
  * Human-readable names for the controlled region set. The `satisfies` keeps the
@@ -26,3 +26,10 @@ export const kindLabels = {
   whole_property: "Whole property",
   room_wanted: "Room wanted",
 } as const satisfies Record<ListingKind, string>;
+
+// "unpublished" is the database word; an owner reading the page sees "Unlisted".
+export const statusLabels = {
+  draft: "Draft",
+  published: "Published",
+  unpublished: "Unlisted",
+} as const satisfies Record<ListingStatus, string>;

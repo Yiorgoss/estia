@@ -48,12 +48,14 @@ export type Currency = typeof Currency.Type;
  * a coarse sanity box around Greece; the required region is the real location
  * gate. `packages/map/greece.json` is deliberately not wired into production
  * code (it accepts Izmir and Sarande and rejects Kastellorizo).
+ *
+ * The request schemas take any number and leave the box to
+ * `ListingService.assertLocation`, whose tagged error is the 422 a caller sees;
+ * a bound in the schema would reject the same point as a generic 400 first. The
+ * database CHECK is the last line of defence.
  */
 export const GREEK_LATITUDE_RANGE = { minimum: 34.0, maximum: 42.5 } as const;
 export const GREEK_LONGITUDE_RANGE = { minimum: 19.0, maximum: 30.5 } as const;
-
-const Latitude = Schema.Number.check(Schema.isBetween(GREEK_LATITUDE_RANGE));
-const Longitude = Schema.Number.check(Schema.isBetween(GREEK_LONGITUDE_RANGE));
 
 // A title is trimmed before it is bounded, so a padded title is stored trimmed
 // and a whitespace-only title is rejected instead of reaching the database.
@@ -100,8 +102,8 @@ export const CreateListingInput = Schema.Struct({
   description: Schema.optional(Schema.NullishOr(ListingDescription)),
   priceMinor: PriceMinor,
   regionCode: GreekRegion,
-  lat: Schema.optional(Schema.NullishOr(Latitude)),
-  lng: Schema.optional(Schema.NullishOr(Longitude)),
+  lat: Schema.optional(Schema.NullishOr(Schema.Number)),
+  lng: Schema.optional(Schema.NullishOr(Schema.Number)),
   sizeSqm: Schema.optional(Schema.NullishOr(SizeSqm)),
   availableFrom: Schema.optional(Schema.NullishOr(Schema.DateFromMillis)),
   furnished: Schema.optional(Schema.BooleanFromBit),
@@ -117,8 +119,8 @@ export const UpdateListingInput = Schema.Struct({
   description: Schema.optional(Schema.NullishOr(ListingDescription)),
   priceMinor: Schema.optional(PriceMinor),
   regionCode: Schema.optional(GreekRegion),
-  lat: Schema.optional(Schema.NullishOr(Latitude)),
-  lng: Schema.optional(Schema.NullishOr(Longitude)),
+  lat: Schema.optional(Schema.NullishOr(Schema.Number)),
+  lng: Schema.optional(Schema.NullishOr(Schema.Number)),
   sizeSqm: Schema.optional(Schema.NullishOr(SizeSqm)),
   availableFrom: Schema.optional(Schema.NullishOr(Schema.DateFromMillis)),
   furnished: Schema.optional(Schema.BooleanFromBit),

@@ -1,0 +1,196 @@
+import { ListingId, UserId } from "@/db/schema/brands";
+import { ListingSchema } from "@/db/schema/Listing";
+import {
+  decodeCreateListingForm,
+  decodeUpdateListingForm,
+  listingFormValues,
+  listingFormValuesFor,
+} from "@/frontend/listing-form";
+import { editListingPage, newListingPage } from "@/frontend/pages/listing-form";
+import { assert, describe, it } from "@effect/vitest";
+import { Schema } from "effect";
+
+/*
+ * The form decoder is the bridge between what a browser submits (strings) and
+ * what the listing service takes (minor units, millis, bit flags). These tests
+ * pin that conversion, the readable rejection messages, and the fact that the
+ * pages only offer a status change that is legal from the current one.
+ */
+
+const form = (overrides: Record<string, string> = {}): Record<string, string> => ({
+  kind: "room",
+  title: "Sunny room near the port",
+  description: "A quiet room with a balcony",
+  price: "750",
+  regionCode: "attica",
+  sizeSqm: "30",
+  availableFrom: "2026-03-01",
+  furnished: "true",
+  pets: "true",
+  lat: "37.98",
+  lng: "23.72",
+  ...overrides,
+});
+
+describe("decodeCreateListingForm", () => {
+  it("converts euros to minor units, keeps the date at UTC midnight, and turns flags into bits", () => {
+    const result = decodeCreateListingForm(form());
+    assert.isTrue(result.ok);
+    if (!result.ok) return;
+
+    assert.strictEqual(result.input.priceMinor, 75_000);
+    assert.strictEqual(result.input.kind, "room");
+    assert.strictEqual(result.input.regionCode, "attica");
+    assert.strictEqual(result.input.sizeSqm, 30);
+    assert.strictEqual(result.input.availableFrom?.getTime(), Date.UTC(2026, 2, 1));
+    assert.strictEqual(result.input.furnished, true);
+    assert.strictEqual(result.input.ensuite, false);
+    assert.strictEqual(result.input.pets, true);
+    assert.strictEqual(result.input.lat, 37.98);
+  });
+
+  it("treats blank optional fields as absent", () => {
+    const result = decodeCreateListingForm(
+      form({ description: "  ", sizeSqm: "", availableFrom: "", lat: "", lng: "" }),
+    );
+    assert.isTrue(result.ok);
+    if (!result.ok) return;
+
+    assert.isNull(result.input.description);
+    assert.isNull(result.input.sizeSqm);
+    assert.isNull(result.input.availableFrom);
+    assert.isNull(result.input.lat);
+    assert.isNull(result.input.lng);
+  });
+
+  it("rejects a blank and an oversized title with a readable message", () => {
+    for (const title of ["   ", "x".repeat(121)]) {
+      const result = decodeCreateListingForm(form({ title }));
+      assert.isFalse(result.ok);
+      if (result.ok) return;
+      assert.match(result.message, /title/i);
+    }
+  });
+
+  it("rejects a price that is not whole euros, or is negative", () => {
+    for (const price of ["", "abc", "-5", "12.5"]) {
+      const result = decodeCreateListingForm(form({ price }));
+      assert.isFalse(result.ok, `price ${JSON.stringify(price)}`);
+      if (result.ok) return;
+      assert.match(result.message, /euros/i);
+    }
+  });
+
+  it("rejects half a coordinate pair", () => {
+    for (const half of [{ lng: "" }, { lat: "" }]) {
+      const result = decodeCreateListingForm(form(half));
+      assert.isFalse(result.ok);
+      if (result.ok) return;
+      assert.match(result.message, /both latitude and longitude/);
+    }
+  });
+
+  it("passes coordinates outside Greece through, so the service reports the 422", () => {
+    const result = decodeCreateListingForm(form({ lat: "39.47", lng: "-0.38" }));
+    assert.isTrue(result.ok);
+    if (!result.ok) return;
+    assert.strictEqual(result.input.lat, 39.47);
+    assert.strictEqual(result.input.lng, -0.38);
+  });
+
+  it("rejects an unavailable region or kind", () => {
+    const badRegion = decodeCreateListingForm(form({ regionCode: "atlantis" }));
+    assert.isFalse(badRegion.ok);
+    const badKind = decodeCreateListingForm(form({ kind: "castle" }));
+    assert.isFalse(badKind.ok);
+  });
+});
+
+describe("decodeUpdateListingForm", () => {
+  it("sends every field so a cleared box clears the stored value", () => {
+    const result = decodeUpdateListingForm(
+      form({ description: "", sizeSqm: "", availableFrom: "", lat: "", lng: "" }),
+    );
+    assert.isTrue(result.ok);
+    if (!result.ok) return;
+
+    assert.strictEqual(result.input.description, null);
+    assert.strictEqual(result.input.sizeSqm, null);
+    assert.strictEqual(result.input.availableFrom, null);
+    assert.strictEqual(result.input.lat, null);
+    assert.strictEqual(result.input.lng, null);
+    assert.strictEqual(result.input.priceMinor, 75_000);
+  });
+});
+
+const listing = (overrides: Partial<typeof ListingSchema.Type>) => ({
+  id: Schema.decodeSync(ListingId)(12),
+  kind: "whole_property" as const,
+  ownerId: Schema.decodeSync(UserId)("u-page-owner"),
+  status: "draft" as const,
+  title: "Two bedroom flat",
+  description: "Sea view",
+  priceMinor: 95_000,
+  currency: "EUR" as const,
+  regionCode: "crete" as const,
+  lat: 35.34,
+  lng: 25.13,
+  sizeSqm: 74,
+  availableFrom: new Date("2026-03-01T00:00:00.000Z"),
+  furnished: true,
+  ensuite: false,
+  smoking: false,
+  pets: true,
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+  publishedAt: null,
+  ...overrides,
+});
+
+describe("listing pages", () => {
+  it("prefills the edit form from the stored listing", () => {
+    const values = listingFormValuesFor(listing({}));
+    assert.strictEqual(values.kind, "whole_property");
+    assert.strictEqual(values.priceEuros, "950");
+    assert.strictEqual(values.sizeSqm, "74");
+    assert.strictEqual(values.availableFrom, "2026-03-01");
+    assert.isTrue(values.furnished);
+    assert.strictEqual(values.lat, "35.34");
+  });
+
+  it("escapes submitted values instead of rendering them as markup", () => {
+    const page = newListingPage(listingFormValues(form({ title: "<script>x</script>" })));
+    assert.notInclude(page, "<script>x</script>");
+    assert.include(page, "&lt;script&gt;x&lt;/script&gt;");
+  });
+
+  it("offers only the legal status change for each status", () => {
+    const draft = editListingPage(listing({ status: "draft" }), listingFormValuesFor(listing({})));
+    assert.include(draft, "/listings/12/publish");
+    assert.notInclude(draft, "/listings/12/unlist");
+
+    const published = editListingPage(
+      listing({ status: "published" }),
+      listingFormValuesFor(listing({})),
+    );
+    assert.notInclude(published, "/listings/12/publish");
+    assert.include(published, "/listings/12/unlist");
+
+    const unpublished = editListingPage(
+      listing({ status: "unpublished" }),
+      listingFormValuesFor(listing({})),
+    );
+    assert.include(unpublished, "/listings/12/publish");
+    assert.notInclude(unpublished, "/listings/12/unlist");
+  });
+
+  it("shows the status and the reason a submit was rejected", () => {
+    const page = editListingPage(
+      listing({ status: "published" }),
+      listingFormValuesFor(listing({})),
+      "Those coordinates are outside Greece.",
+    );
+    assert.include(page, "Published");
+    assert.include(page, "Those coordinates are outside Greece.");
+  });
+});
