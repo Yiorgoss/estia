@@ -1,14 +1,17 @@
-import { Option, Context, Effect, Layer } from "effect";
-import type { User } from "@/db/schema/User";
+import { Option, Context, Effect, Layer, Schema } from "effect";
+import { UserSchema, type User } from "@/db/schema/User";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { UserId, UserPasswordHash, UserRoles } from "@/db/schema/brands";
 
+// The driver returns raw rows (`created_at`/`updated_at` as epoch millis), so
+// every row is decoded through `UserSchema` to yield the declared `Date`s.
+const decodeUser = (row: Record<string, unknown>): User =>
+  Schema.decodeUnknownSync(UserSchema)(row);
+
 export interface UserRepository {
   readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, SqlError>;
-  readonly findById: (
-    id: number | typeof UserId.Type,
-  ) => Effect.Effect<Option.Option<User>, SqlError>;
+  readonly findById: (id: typeof UserId.Type) => Effect.Effect<Option.Option<User>, SqlError>;
   readonly insert: (creds: {
     email: string;
     password: typeof UserPasswordHash.Type;
@@ -29,39 +32,43 @@ export const UserRepositoryLive = Layer.effect(
 
     return {
       findByEmail: (email: string) =>
-        sql<User>`
+        sql<Record<string, unknown>>`
             SELECT *
               FROM users
              WHERE email=${email}
             `.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
+          Effect.map(Option.map(decodeUser)),
         ),
       findById: (id) =>
-        sql<User>`
+        sql<Record<string, unknown>>`
             SELECT *
               FROM users
              WHERE id=${id}
             `.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
+          Effect.map(Option.map(decodeUser)),
         ),
       insert: ({ email, password }) =>
-        sql<User>`
+        sql<Record<string, unknown>>`
           INSERT INTO users (email, password_hash)
                VALUES (${email}, ${password})
             RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
+          Effect.map(Option.map(decodeUser)),
         ),
       updateRole: (id, role) =>
-        sql<User>`
+        sql<Record<string, unknown>>`
               UPDATE users
                  SET role=${role}
                WHERE id=${id}
            RETURNING *;`.pipe(
           Effect.map((row) => row[0]),
           Effect.map(Option.fromNullishOr),
+          Effect.map(Option.map(decodeUser)),
         ),
       updateAvatar: (id, avatar) =>
         sql<typeof UserId.Type>`
