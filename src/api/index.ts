@@ -15,6 +15,7 @@ import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
+import { ListingHandler } from "@/handlers/private/listing.handler";
 import { ListingServiceLive } from "@/services/listing.service";
 import { ListingSearchHandler } from "@/handlers/public/listing-search.handler";
 
@@ -74,7 +75,7 @@ export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes
  */
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
-  Layer.provide(UserHandler),
+  Layer.provide(Layer.mergeAll(UserHandler, ListingHandler)),
 );
 
 export const PrivateRouterLive = Layer.mergeAll(PrivateApiRouterLive, PrivateRoutes).pipe(
