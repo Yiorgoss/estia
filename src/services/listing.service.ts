@@ -68,6 +68,13 @@ const allowedTransitions: Record<
   unpublished: ["published"],
 };
 
+// The status machine is exposed so a surface can offer only the moves that are
+// legal right now instead of restating the table and drifting from it.
+export const canTransition = (
+  from: typeof ListingStatus.Type,
+  to: typeof ListingStatus.Type,
+): boolean => allowedTransitions[from].includes(to);
+
 /*
  * The coarse Greek bounding box. It is a sanity check, not a boundary: it
  * rejects a point in Valencia and accepts one in Istanbul, so the required
@@ -209,7 +216,7 @@ export const ListingServiceLive = Layer.effect(
     ) =>
       Effect.gen(function* () {
         const current = yield* loadOwned(ownerId, id);
-        if (!allowedTransitions[current.status].includes(to)) {
+        if (!canTransition(current.status, to)) {
           return yield* Effect.fail(
             new InvalidListingTransitionError({ id, from: current.status, to }),
           );
