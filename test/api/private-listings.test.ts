@@ -376,3 +376,106 @@ describe("POST /api/listings/:id/publish and /unlist", () => {
     }),
   );
 });
+
+interface MyListingsPage {
+  readonly items: ReadonlyArray<Record<string, unknown>>;
+  readonly nextCursor: string | null;
+}
+
+const myListingsPageOf = (value: unknown): MyListingsPage => {
+  assert.isObject(value);
+  const body = value as Record<string, unknown>;
+  assert.isArray(body.items);
+  return {
+    items: body.items as ReadonlyArray<Record<string, unknown>>,
+    nextCursor: (body.nextCursor ?? null) as string | null,
+  };
+};
+
+const idsOf = (page: MyListingsPage) => page.items.map((item) => item.id);
+
+describe("GET /api/listings/mine", () => {
+  const mine = (user: TestUser | undefined, query = "") =>
+    send("GET", `/api/listings/mine${query}`, user === undefined ? {} : { cookie: user.cookie });
+
+  it.effect("returns every status of the caller's own listings and nobody else's", () =>
+    Effect.gen(function* () {
+      const owner = yield* register("mine-owner");
+      const other = yield* register("mine-other");
+
+      const draft = yield* createDraft(owner, { title: "A draft only its owner sees" });
+
+      const published = yield* createDraft(owner, { title: "A published listing" });
+      const publishedResponse = yield* send("POST", `/api/listings/${published.id}/publish`, {
+        cookie: owner.cookie,
+      });
+      assert.strictEqual(publishedResponse.status, 200, publishedResponse.body);
+
+      const unlisted = yield* createDraft(owner, { title: "An unlisted listing" });
+      yield* send("POST", `/api/listings/${unlisted.id}/publish`, { cookie: owner.cookie });
+      const unlistedResponse = yield* send("POST", `/api/listings/${unlisted.id}/unlist`, {
+        cookie: owner.cookie,
+      });
+      assert.strictEqual(unlistedResponse.status, 200, unlistedResponse.body);
+
+      const foreign = yield* createDraft(other, { title: "Another account's draft" });
+
+      const response = yield* mine(owner);
+      assert.strictEqual(response.status, 200, response.body);
+      const page = myListingsPageOf(response.json);
+
+      // Newest first, and a draft and an unlisted row are both visible to their
+      // owner even though public search hides them.
+      assert.deepStrictEqual(idsOf(page), [unlisted.id, published.id, draft.id]);
+      assert.deepStrictEqual(
+        page.items.map((item) => item.status),
+        ["unpublished", "published", "draft"],
+      );
+      assert.isTrue(page.items.every((item) => item.ownerId === owner.id));
+      assert.notInclude(idsOf(page), foreign.id);
+      assert.isNull(page.nextCursor);
+    }),
+  );
+
+  it.effect("pages newest first with an opaque cursor", () =>
+    Effect.gen(function* () {
+      const user = yield* register("mine-paging");
+      const firstCreated = yield* createDraft(user, { title: "First created" });
+      const secondCreated = yield* createDraft(user, { title: "Second created" });
+      const thirdCreated = yield* createDraft(user, { title: "Third created" });
+
+      const pageOne = yield* mine(user, "?limit=2");
+      assert.strictEqual(pageOne.status, 200, pageOne.body);
+      const firstPage = myListingsPageOf(pageOne.json);
+      assert.deepStrictEqual(idsOf(firstPage), [thirdCreated.id, secondCreated.id]);
+
+      const cursor = firstPage.nextCursor;
+      if (cursor === null) throw new Error("expected a next cursor");
+      // The cursor is opaque: base64url, never the sort key in the clear.
+      assert.match(cursor, /^[A-Za-z0-9_-]+$/);
+
+      const pageTwo = yield* mine(user, `?limit=2&cursor=${cursor}`);
+      assert.strictEqual(pageTwo.status, 200, pageTwo.body);
+      const secondPage = myListingsPageOf(pageTwo.json);
+      assert.deepStrictEqual(idsOf(secondPage), [firstCreated.id]);
+      assert.isNull(secondPage.nextCursor);
+    }),
+  );
+
+  it.effect("keeps the paging contract and rejects an unauthenticated caller", () =>
+    Effect.gen(function* () {
+      const user = yield* register("mine-contract");
+
+      for (const query of ["?limit=0", "?limit=51", "?limit=abc", "?cursor=not-a-cursor"]) {
+        const response = yield* mine(user, query);
+        assert.strictEqual(response.status, 400, query);
+      }
+
+      const anonymous = yield* mine(undefined);
+      assert.strictEqual(anonymous.status, 401);
+
+      const anonymousPaged = yield* mine(undefined, "?limit=2");
+      assert.strictEqual(anonymousPaged.status, 401);
+    }),
+  );
+});
