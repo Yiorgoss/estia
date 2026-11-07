@@ -3,9 +3,9 @@ import { header } from "@/frontend/header";
 import { escapeHtml } from "@/utils";
 
 /*
- * The shell every owner-facing page shares: one column, the site header, and the
- * pieces a rejected action needs to explain itself. The create/edit pages and
- * the mine page render through it, so those pages cannot drift apart.
+ * The shell every page shares: one column, the site header, and the pieces a
+ * rejected action needs to explain itself. The create/edit pages, the mine page,
+ * and the sign-in prompt render through it, so those pages cannot drift apart.
  */
 
 export const primaryButtonClass =

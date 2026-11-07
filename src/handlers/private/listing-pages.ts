@@ -31,10 +31,10 @@ import { Effect, Option, Schema } from "effect";
 
 /*
  * Owner-facing listing pages. They live on the private router, so `AuthMiddleware`
- * gates them the same way it gates the JSON API, and the caller's id reaches
- * `ListingService` as the owner exactly as in the API handlers. Every submit is
- * answered with a page, so a rejected form shows its reason instead of an empty
- * document.
+ * gates them, answering a signed-out visitor with the sign-in prompt page rather
+ * than the JSON API's 401 body, and the caller's id reaches `ListingService` as
+ * the owner exactly as in the API handlers. Every submit is answered with a page,
+ * so a rejected form shows its reason instead of an empty document.
  */
 
 type ListingPageError =
