@@ -173,6 +173,17 @@ FORM_LOGIN_LOCATION="$(header_value "$WORK/form-login.h" location)"
   || fail "form login did not set the access cookie"
 pass "form login redirects to the feed with a session"
 
+CODE=$(curl -s -D "$WORK/form-cross-site.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/login" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'Origin: https://evil.example' \
+  --data-urlencode "email=${FORM_EMAIL}" \
+  --data-urlencode "password=${PASSWORD}")
+assert_status "$CODE" 403 "form login rejects a cross-site submit"
+[ -z "$(cookie_value "$WORK/form-cross-site.h" access_token)" ] \
+  || fail "cross-site form login set a session cookie"
+pass "cross-site form login sets no session"
+
 # 3. unauthenticated rejection
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me")
 assert_status "$CODE" 401 "unauthenticated /api/users/me rejected"

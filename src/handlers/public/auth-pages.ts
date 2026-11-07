@@ -1,11 +1,12 @@
 import { authFormEmail, decodeLoginForm, decodeRegisterForm } from "@/frontend/auth-form";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
+import { AppOrigin } from "@/services/app-origin.service";
 import { AuthService, type AuthTokens } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { UserService } from "@/services/user.service";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 
 /*
  * Browser-facing sign-in and registration. These are page routes, not part of the
@@ -25,6 +26,34 @@ const unsupportedBodyMessage = "This page expects a form submission, not a raw r
 
 const isFormPost = (request: HttpServerRequest.HttpServerRequest): boolean =>
   (request.headers["content-type"] ?? "").toLowerCase().startsWith(FORM_CONTENT_TYPE);
+
+const crossSiteMessage =
+  "This form can only be submitted from this site's own page. Open the page and try again.";
+
+const originOf = (value: string): string | undefined => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+};
+
+// A form post is a simple request, so CORS never sees it, and the cookies a
+// cross-site submit would receive would sign the visitor in as the submitter.
+// Browsers label their own posts; a client sending none of these headers is not
+// a browser, so it keeps the access the JSON API already gives it.
+const isSameOriginFormPost = (
+  request: HttpServerRequest.HttpServerRequest,
+  appOrigin: string,
+): boolean => {
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite !== undefined) return fetchSite === "same-origin" || fetchSite === "none";
+
+  const source = request.headers["origin"] ?? request.headers["referer"];
+  if (source === undefined) return true;
+
+  return originOf(source) === appOrigin;
+};
 
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(request.urlParamsBody, UrlParams.toRecord).pipe(Effect.orDie);
@@ -52,6 +81,11 @@ const signedInResponse = (tokens: AuthTokens) =>
 
 const login = HttpRouter.route("POST", "/login", (request) =>
   Effect.gen(function* () {
+    const { origin: appOrigin } = yield* AppOrigin;
+    if (!isSameOriginFormPost(request, appOrigin)) {
+      return respond(loginPage({ message: crossSiteMessage }), 403);
+    }
+
     if (!isFormPost(request)) {
       return respond(loginPage({ message: unsupportedBodyMessage }), 415);
     }
@@ -93,6 +127,11 @@ const login = HttpRouter.route("POST", "/login", (request) =>
 
 const register = HttpRouter.route("POST", "/register", (request) =>
   Effect.gen(function* () {
+    const { origin: appOrigin } = yield* AppOrigin;
+    if (!isSameOriginFormPost(request, appOrigin)) {
+      return respond(registerPage({ message: crossSiteMessage }), 403);
+    }
+
     if (!isFormPost(request)) {
       return respond(registerPage({ message: unsupportedBodyMessage }), 415);
     }
@@ -107,44 +146,47 @@ const register = HttpRouter.route("POST", "/register", (request) =>
     const authService = yield* AuthService;
     const userAgent = userAgentOf(request);
 
-    return yield* userService.registerUser(decoded.input, userAgent).pipe(
-      // Registering signs the person in, so they land on the feed instead of
-      // being asked for the password they just chose.
-      Effect.flatMap(() => authService.authenticate(decoded.input, userAgent)),
+    const registration = yield* Effect.result(userService.registerUser(decoded.input, userAgent));
+
+    if (Result.isFailure(registration)) {
+      // Only a duplicate leaves an account behind; every other failure is a
+      // refused registration, so the account does not exist.
+      return registration.failure._tag === "UserAlreadyExistsError"
+        ? respond(
+            registerPage({
+              email: decoded.input.email,
+              message:
+                "An account already exists for that email address. Sign in instead, or register with a different address.",
+            }),
+            409,
+          )
+        : respond(
+            registerPage({
+              email: decoded.input.email,
+              message:
+                "Creating an account is not possible just now. Please try again in a moment.",
+            }),
+            500,
+          );
+    }
+
+    // The account exists from here on, so auto-signing in must never be reported
+    // as a failed registration. Registering signs the person in, so they land on
+    // the feed instead of being asked for the password they just chose.
+    const accountCreated = () =>
+      respond(
+        registerPage({
+          email: decoded.input.email,
+          message: "The account was created, but signing in did not work. Try signing in.",
+        }),
+        500,
+      );
+
+    return yield* authService.authenticate(decoded.input, userAgent).pipe(
       Effect.flatMap(signedInResponse),
       Effect.catchTags({
-        UserAlreadyExistsError: () =>
-          Effect.succeed(
-            respond(
-              registerPage({
-                email: decoded.input.email,
-                message:
-                  "An account already exists for that email address. Sign in instead, or register with a different address.",
-              }),
-              409,
-            ),
-          ),
-        InvalidCredentialsError: () =>
-          Effect.succeed(
-            respond(
-              registerPage({
-                email: decoded.input.email,
-                message: "The account was created, but signing in did not work. Try signing in.",
-              }),
-              500,
-            ),
-          ),
-        InternalError: () =>
-          Effect.succeed(
-            respond(
-              registerPage({
-                email: decoded.input.email,
-                message:
-                  "Creating an account is not possible just now. Please try again in a moment.",
-              }),
-              500,
-            ),
-          ),
+        InvalidCredentialsError: () => Effect.succeed(accountCreated()),
+        InternalError: () => Effect.succeed(accountCreated()),
       }),
     );
   }),

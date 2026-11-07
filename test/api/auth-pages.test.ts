@@ -23,6 +23,14 @@ const uniqueEmail = (label: string) =>
 const submit = (path: string, fields: Readonly<Record<string, string>>) =>
   call(path, form({ method: "POST" }, fields));
 
+const APP_ORIGIN = "http://listings.test";
+
+const submitFrom = (
+  path: string,
+  fields: Readonly<Record<string, string>>,
+  headers: Readonly<Record<string, string>>,
+) => call(path, form({ method: "POST", headers }, fields));
+
 const credentials = (email: string, password = PASSWORD) => ({ email, password });
 
 const jobForm = (email: string, password = PASSWORD, repeated = password) => ({
@@ -145,6 +153,99 @@ describe("POST /login", () => {
       });
       assert.strictEqual(response.status, 400);
       assert.include(response.body, "Enter your password.");
+    }),
+  );
+});
+
+/*
+ * A form post is a simple request, so the browser sends it cross-site without
+ * asking the server first. These tests drive a submit that the browser labels as
+ * coming from another site, and check it is refused before it can plant a
+ * session for the wrong account.
+ */
+describe("form posts from another site", () => {
+  it.effect("accepts a submit the browser marks as same-origin or user-initiated", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("same-origin");
+      const registered = yield* submitFrom("/register", jobForm(email), {
+        origin: APP_ORIGIN,
+        "sec-fetch-site": "same-origin",
+      });
+      assert.strictEqual(registered.status, 303, registered.body);
+      assert.isString(registered.cookies["access_token"]);
+
+      const signedIn = yield* submitFrom("/login", credentials(email), {
+        "sec-fetch-site": "none",
+      });
+      assert.strictEqual(signedIn.status, 303, signedIn.body);
+      assert.isString(signedIn.cookies["access_token"]);
+    }),
+  );
+
+  it.effect("accepts a submit that carries none of the browser origin headers", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("headerless");
+      const response = yield* submit("/register", jobForm(email));
+      assert.strictEqual(response.status, 303, response.body);
+      assert.isString(response.cookies["access_token"]);
+    }),
+  );
+
+  it.effect("rejects a cross-origin register without a session or an account", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("cross-origin-register");
+      const rejected = yield* submitFrom("/register", jobForm(email), {
+        origin: "https://evil.example",
+      });
+      assert.strictEqual(rejected.status, 403, rejected.body);
+      assert.isUndefined(rejected.cookies["access_token"]);
+      assert.isUndefined(rejected.cookies["refresh_token"]);
+
+      // The refused submit created nothing, so the address is still free.
+      const accepted = yield* submit("/register", jobForm(email));
+      assert.strictEqual(accepted.status, 303, accepted.body);
+    }),
+  );
+
+  it.effect("rejects a cross-origin sign-in without a session", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("cross-origin-login");
+      yield* submit("/register", jobForm(email));
+
+      const rejected = yield* submitFrom("/login", credentials(email), {
+        origin: "https://evil.example",
+      });
+      assert.strictEqual(rejected.status, 403, rejected.body);
+      assert.isUndefined(rejected.cookies["access_token"]);
+      assert.isUndefined(rejected.cookies["refresh_token"]);
+    }),
+  );
+
+  it.effect("rejects a submit the browser marks as cross-site", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("cross-site-fetch");
+      const rejected = yield* submitFrom("/register", jobForm(email), {
+        "sec-fetch-site": "cross-site",
+      });
+      assert.strictEqual(rejected.status, 403, rejected.body);
+      assert.isUndefined(rejected.cookies["access_token"]);
+    }),
+  );
+
+  it.effect("falls back to the Referer when there is no Origin", () =>
+    Effect.gen(function* () {
+      const email = uniqueEmail("referer");
+      const fromElsewhere = yield* submitFrom("/register", jobForm(email), {
+        referer: "https://evil.example/register",
+      });
+      assert.strictEqual(fromElsewhere.status, 403, fromElsewhere.body);
+      assert.isUndefined(fromElsewhere.cookies["access_token"]);
+
+      const fromApp = yield* submitFrom("/register", jobForm(email), {
+        referer: `${APP_ORIGIN}/register`,
+      });
+      assert.strictEqual(fromApp.status, 303, fromApp.body);
+      assert.isString(fromApp.cookies["access_token"]);
     }),
   );
 });
