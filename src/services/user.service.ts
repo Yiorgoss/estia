@@ -22,20 +22,13 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
 export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {}
 
 /*
- * A role switch is only honest when the target profile exists afterwards, so a
- * switch whose target can neither be found nor opened is refused rather than
- * leaving the account with a role that points at nothing. Both profiles are
- * provisioned at registration, so this is the last resort rather than the normal
- * answer: a stored role whose profile row is missing heals instead. Admins and
- * unassigned accounts hold no profile to switch between, so they are refused
- * rather than guessed at.
+ * Both profiles are provisioned at registration, so a role switch is a flip
+ * between two rows that already exist. An account created before that - or one
+ * whose profile row went missing - gets the missing row opened from the user id
+ * alone, which the nullable columns in 0006 allow, so no account is ever left
+ * with a role that points at nothing. Admins and unassigned accounts hold no
+ * profile to switch between, so they are refused rather than guessed at.
  */
-export class SeekerProfileRequiredError extends Schema.TaggedError<SeekerProfileRequiredError>()(
-  "SeekerProfileRequiredError",
-  { message: Schema.String },
-  { httpApiStatus: 409 },
-) {}
-
 export class AdminRoleSwitchError extends Schema.TaggedError<AdminRoleSwitchError>()(
   "AdminRoleSwitchError",
   { message: Schema.String },
@@ -52,8 +45,10 @@ export type UserProfile = typeof SeekerSchema.Type | typeof ListerSchema.Type;
 
 export interface UserService {
   /*
-   * Create the account and every profile it needs: one row per role, in a fixed
-   * order, so no account exists without a seeker and a lister profile.
+   * Create the account and every profile it needs: one row per role, so no
+   * account exists without a seeker and a lister profile. A profile that cannot
+   * be opened takes the new account with it, so a failed registration leaves
+   * nothing behind.
    */
   registerUser: (
     credentials: typeof UserCredentials.Type,
@@ -69,7 +64,7 @@ export interface UserService {
     id: typeof UserId.Type,
   ) => Effect.Effect<
     UserProfile,
-    SeekerProfileRequiredError | AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError
+    AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError
   >;
 }
 
@@ -114,9 +109,8 @@ export const UserServiceLive = Layer.effect(
 
             // Switching to listing: both profiles exist from registration
             // onward, so this is a plain flip. The profile is still asked for
-            // first, and created if it is missing, so a legacy account - or a
-            // half-applied registration - never gets a role pointing at a
-            // profile that does not exist.
+            // first, and created if it is missing, so a legacy account never
+            // gets a role pointing at a profile that does not exist.
             case "seeker": {
               const lister = yield* listerRepo.createForUser(id);
               yield* userRepo
@@ -136,30 +130,14 @@ export const UserServiceLive = Layer.effect(
               }
 
               // The seeking profile was provisioned at registration, so it is
-              // normally already there and the flip is all that is left. A
-              // legacy account that predates that gets a blank profile opened
-              // from the user id alone, which the nullable columns in 0006
-              // allow. An account whose profile can neither be found nor opened
-              // is refused and keeps its stored role.
-              const seeker = yield* seekerRepo.findByUserId(id).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onSome: (found) => Effect.succeed(Option.some(found)),
-                    onNone: () => seekerRepo.createForUser(id),
-                  }),
-                ),
-              );
-              if (Option.isNone(seeker)) {
-                return yield* Effect.fail(
-                  new SeekerProfileRequiredError({
-                    message: "A seeker profile could not be opened for this account.",
-                  }),
-                );
-              }
+              // normally already there and the flip is all that is left. Asking
+              // for it anyway opens it for a legacy account, and answers with the
+              // existing row for everyone else.
+              const seeker = yield* seekerRepo.createForUser(id);
               yield* userRepo
                 .updateRole(id, "seeker")
                 .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
-              return seeker.value;
+              return seeker;
             }
           }
         }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
@@ -190,16 +168,17 @@ export const UserServiceLive = Layer.effect(
             ),
           );
 
-          // D1 has no interactive transactions, so the profiles are opened as
-          // two single statements in a fixed order instead of pretending the
-          // registration is atomic. A failure between them leaves an account
-          // that the self-heal path in `switchRoles` repairs on its next
-          // request; a duplicate email, the failure worth reporting, happens
-          // before any of this.
-          yield* seekerRepo
-            .createForUser(user.id)
-            .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
-          yield* listerRepo.createForUser(user.id);
+          // The account row is written first because the profile rows point at
+          // it, and the two profile rows follow. D1's atomic batch is only on the
+          // D1-specific client, which these `SqlClient` repositories are not
+          // written against, so a profile that cannot be opened removes the
+          // account it just created - its profile rows cascade with it - and a
+          // registration that reports a failure leaves nothing behind for the
+          // retry to collide with.
+          yield* Effect.gen(function* () {
+            yield* seekerRepo.createForUser(user.id);
+            yield* listerRepo.createForUser(user.id);
+          }).pipe(Effect.onError(() => userRepo.deleteById(user.id).pipe(Effect.ignore)));
 
           return user;
           // const accessToken = yield* jwtService.signUser(user)

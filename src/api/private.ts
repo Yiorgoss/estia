@@ -13,7 +13,6 @@ import { UnauthorizedError } from "@/services/auth.service";
 import {
   AdminRoleSwitchError,
   InternalError,
-  SeekerProfileRequiredError,
   UnassignedRoleSwitchError,
 } from "@/services/user.service";
 import {
@@ -34,8 +33,8 @@ export const UserGroup = HttpApiGroup.make("user-group")
       success: Schema.Struct({
         user: CurrentUser,
         // An account whose role has no profile row yet is a normal state, not a
-        // failure: a legacy account, or a registration interrupted between its
-        // two profile rows, is exactly that.
+        // failure: an account created before registration provisioned profiles
+        // is exactly that.
         userProfile: Schema.NullOr(Schema.Union([SeekerSchema, ListerSchema])),
       }),
       error: [InternalError, UnauthorizedError],
@@ -46,12 +45,9 @@ export const UserGroup = HttpApiGroup.make("user-group")
       success: Schema.Struct({
         newProfile: Schema.Union([SeekerSchema, ListerSchema]),
       }),
-      // A switch whose target profile can neither be found nor opened is
-      // refused rather than half-applied, and an admin or unassigned account has
-      // no profile to switch between, so those refusals are part of the
-      // endpoint's contract.
+      // An admin or unassigned account has no profile to switch between, so
+      // those refusals are part of the endpoint's contract.
       error: [
-        SeekerProfileRequiredError,
         AdminRoleSwitchError,
         UnassignedRoleSwitchError,
         InternalError,

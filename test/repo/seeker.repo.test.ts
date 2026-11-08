@@ -46,10 +46,8 @@ layer(TestLive, { concurrent: false })("SeekerRepository", (it) => {
       yield* insertUser("u-seeker-create", "seeker-create@test.local", "seeker");
 
       const repo = yield* SeekerRepository;
-      const created = yield* repo.createForUser(userId("u-seeker-create"));
+      const seeker = yield* repo.createForUser(userId("u-seeker-create"));
 
-      assert.isTrue(Option.isSome(created));
-      const seeker = Option.getOrThrow(created);
       assert.strictEqual(seeker.userId, "u-seeker-create");
       // Migration 0006 made the fields a person fills in themselves optional, so
       // the profile exists before anyone has typed a name.
@@ -62,16 +60,15 @@ layer(TestLive, { concurrent: false })("SeekerRepository", (it) => {
     }),
   );
 
-  // A double click, a retry, or the heal of a half-applied registration asks
-  // again for the same profile. The second ask is the same row, not a uniqueness
-  // failure.
+  // A double click, a retry, or the heal of a legacy account asks again for the
+  // same profile. The second ask is the same row, not a uniqueness failure.
   it.effect("createForUser answers with the existing profile on a second ask", () =>
     Effect.gen(function* () {
       yield* insertUser("u-seeker-twice", "seeker-twice@test.local", "seeker");
 
       const repo = yield* SeekerRepository;
-      const first = Option.getOrThrow(yield* repo.createForUser(userId("u-seeker-twice")));
-      const second = Option.getOrThrow(yield* repo.createForUser(userId("u-seeker-twice")));
+      const first = yield* repo.createForUser(userId("u-seeker-twice"));
+      const second = yield* repo.createForUser(userId("u-seeker-twice"));
 
       assert.strictEqual(second.id, first.id);
       assert.strictEqual(second.userId, "u-seeker-twice");

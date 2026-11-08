@@ -215,9 +215,9 @@ describe("POST /api/users/change-role", () => {
     }),
   );
 
-  // The state a pre-provisioning account is in, and the state a registration
-  // interrupted between its two profile rows leaves behind: exactly one of the
-  // two rows exists. The switch heals what it needs and still answers.
+  // The state a pre-provisioning account is in when one of its rows was never
+  // opened: exactly one of the two rows exists. The switch heals what it needs
+  // and still answers.
   it.effect("heals a partially provisioned account in either direction", () =>
     Effect.gen(function* () {
       const onlyLister = yield* freshUser("partial-lister");
