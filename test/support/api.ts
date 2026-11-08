@@ -27,6 +27,7 @@ uint8ArrayPrototype.toHex ??= function (this: Uint8Array) {
 
 const DOMAIN = "http://listings.test";
 const JWT_SECRET = "listings-test-secret-listings-test-secret";
+const TEST_ORIGIN = "http://localhost";
 
 // The multipart upload endpoint on the public router is the only consumer of R2;
 // these tests never touch it, but the router's request services still name it.
@@ -35,35 +36,46 @@ const StorageRepositoryStub = Layer.succeed(StorageRepository, {
   newMultipart: () => Effect.die("storage is not used by the listing tests"),
 });
 
-const ConfigLive = ConfigProvider.layer(
-  ConfigProvider.fromUnknown({ DOMAIN, JWT_SECRET, ENVIRONMENT: "local" }),
-);
+const makeApp = (config: Readonly<Record<string, string>> = {}) => {
+  const ConfigLive = ConfigProvider.layer(
+    ConfigProvider.fromUnknown({ DOMAIN, JWT_SECRET, ENVIRONMENT: "local", ...config }),
+  );
 
-const AppLayer = Layer.mergeAll(PublicRouterLive, PrivateRouterLive).pipe(
-  Layer.provide(Etag.layer),
-  Layer.provide(HttpPlatform.layer),
-  Layer.provide(Path.layer),
-  Layer.provide(FileSystem.layerNoop({})),
-  Layer.provide(AppServicesLive),
-  Layer.provide(StorageRepositoryStub),
-  HttpRouter.provideRequest(AppServicesLive),
-  HttpRouter.provideRequest(StorageRepositoryStub),
-  Layer.provide(TestSqlLive),
-  Layer.provide(ConfigLive),
-);
+  const AppLayer = Layer.mergeAll(PublicRouterLive, PrivateRouterLive).pipe(
+    Layer.provide(Etag.layer),
+    Layer.provide(HttpPlatform.layer),
+    Layer.provide(Path.layer),
+    Layer.provide(FileSystem.layerNoop({})),
+    Layer.provide(AppServicesLive),
+    Layer.provide(StorageRepositoryStub),
+    HttpRouter.provideRequest(AppServicesLive),
+    HttpRouter.provideRequest(StorageRepositoryStub),
+    Layer.provide(TestSqlLive),
+    Layer.provide(ConfigLive),
+  );
 
-const app = HttpRouter.toWebHandler(AppLayer, { disableLogger: true });
+  return HttpRouter.toWebHandler(AppLayer, { disableLogger: true });
+};
+
+type TestApp = ReturnType<typeof makeApp>;
+
+const app = makeApp();
 
 export interface TestResponse {
   readonly status: number;
   readonly body: string;
   readonly json: unknown;
   readonly cookies: Readonly<Record<string, string>>;
+  readonly location: string | null;
 }
 
-export const call = (path: string, init?: RequestInit): Effect.Effect<TestResponse> =>
+const callThrough = (
+  testApp: TestApp,
+  path: string,
+  init?: RequestInit,
+): Effect.Effect<TestResponse> =>
   Effect.promise(async () => {
-    const response = await app.handler(new Request(`http://localhost${path}`, init));
+    const response = await testApp.handler(new Request(`${TEST_ORIGIN}${path}`, init));
     const body = await response.text();
     const cookies: Record<string, string> = {};
     for (const header of response.headers.getSetCookie()) {
@@ -77,8 +89,27 @@ export const call = (path: string, init?: RequestInit): Effect.Effect<TestRespon
     } catch {
       json = undefined;
     }
-    return { status: response.status, body, json, cookies };
+    return {
+      status: response.status,
+      body,
+      json,
+      cookies,
+      location: response.headers.get("location"),
+    };
   });
+
+export const call = (path: string, init?: RequestInit): Effect.Effect<TestResponse> =>
+  callThrough(app, path, init);
+
+// A separate app instance, so a test can drive a configuration the shared one
+// does not use.
+export const callWithConfig = (
+  config: Readonly<Record<string, string>>,
+  path: string,
+  init?: RequestInit,
+): Effect.Effect<TestResponse> => callThrough(makeApp(config), path, init);
+
+export const testOrigin = TEST_ORIGIN;
 
 export interface TestUser {
   readonly id: string;
@@ -91,6 +122,20 @@ export const json = (init: RequestInit, payload?: unknown): RequestInit => ({
   ...init,
   headers: { "content-type": "application/json", "user-agent": "estia-tests", ...init.headers },
   ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+});
+
+/*
+ * What a browser sends when it submits one of the server-rendered forms: the
+ * declared form content type, with the fields URL-encoded in the body.
+ */
+export const form = (init: RequestInit, fields: Readonly<Record<string, string>>): RequestInit => ({
+  ...init,
+  headers: {
+    "content-type": "application/x-www-form-urlencoded",
+    "user-agent": "estia-tests",
+    ...init.headers,
+  },
+  body: new URLSearchParams(fields).toString(),
 });
 
 export const send = (

@@ -92,6 +92,13 @@ export const PublicApiLive = HttpApiBuilder.group(PublicApi, "auth", (handlers) 
           ]),
           Effect.orDie,
         );
-      }).pipe(Effect.mapError(() => new InternalError())),
+      }).pipe(
+        // A duplicate registration keeps its own 409 so the caller can act on it;
+        // anything else is reported as the server failure it is.
+        Effect.catchTags({
+          UserAlreadyExistsError: (error) => Effect.fail(error),
+          InvalidCredentialsError: () => Effect.fail(new InternalError()),
+        }),
+      ),
     ),
 );

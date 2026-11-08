@@ -11,6 +11,7 @@ import { ListerRepository } from "@/repos/lister.repo";
 export class UserAlreadyExistsError extends Schema.TaggedError<UserAlreadyExistsError>()(
   "UserAlreadyExistsError",
   { cause: Schema.String },
+  { httpApiStatus: 409 },
 ) {}
 
 export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
