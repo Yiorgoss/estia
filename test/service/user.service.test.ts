@@ -79,8 +79,9 @@ layer(TestLive, { concurrent: false })("UserService registration", (it) => {
   );
 
   // The reported failure: the account row is written, the first profile insert
-  // fails, and the caller is told the registration was refused. Nothing may be
-  // left behind for a retry with the same address to collide with.
+  // fails, and the caller is told the registration was refused. When the cleanup
+  // succeeds nothing is left behind for a retry with the same address to collide
+  // with, which is what the retry below shows.
   it.effect("leaves no account behind when the seeking profile cannot be opened", () =>
     Effect.gen(function* () {
       const email = "rollback-seeker@test.local";

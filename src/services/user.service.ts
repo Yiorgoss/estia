@@ -47,8 +47,9 @@ export interface UserService {
   /*
    * Create the account and every profile it needs: one row per role, so no
    * account exists without a seeker and a lister profile. A profile that cannot
-   * be opened takes the new account with it, so a failed registration leaves
-   * nothing behind.
+   * be opened removes the new account again, and that delete is best effort: a
+   * failed cleanup is logged, so a retry after a reported failure may still
+   * collide with the account row.
    */
   registerUser: (
     credentials: typeof UserCredentials.Type,
