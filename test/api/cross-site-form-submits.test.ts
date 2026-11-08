@@ -421,8 +421,8 @@ describe("a state-changing JSON write from another site", () => {
   );
 
   // A user-initiated request carries no cross-site claim, so it is not refused.
-  // The handler may still answer with its own error, which is not the gate's 403:
-  // a freshly registered account has no profile for `change-role` to return.
+  // Registration opened both profiles, so the accepted switch answers 200 with the
+  // lister profile instead of the gate's 403.
   it.effect("is accepted on change-role when the browser marks it user-initiated", () =>
     Effect.gen(function* () {
       const user = yield* register("api-write-user-initiated");
@@ -430,7 +430,11 @@ describe("a state-changing JSON write from another site", () => {
       const userInitiated = yield* apiWrite(user, "/api/users/change-role", {
         "sec-fetch-site": "none",
       });
-      assert.notStrictEqual(userInitiated.status, 403, userInitiated.body);
+      assert.strictEqual(userInitiated.status, 200, userInitiated.body);
+      assert.strictEqual(
+        asObject(asObject(userInitiated.json)["newProfile"])["ownership"],
+        "owner",
+      );
       assert.notInclude(userInitiated.body, "can only be submitted from this site");
     }),
   );
