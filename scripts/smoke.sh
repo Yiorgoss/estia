@@ -894,9 +894,11 @@ HEALED_LISTERS="$(profile_rows listers "$SECOND_USER_ID")"
   || fail "the healing switch did not leave exactly one lister row (${HEALED_LISTERS} rows)"
 pass "an account with no profile rows heals and reports the profile it opened"
 
-# 8c. the partially provisioned state - a user row, one profile, and a role that
-# points at the other - heals on the next request the same way.
+# 8c. the partially provisioned state - a user row, a seeker profile, and a
+# stored lister role whose lister row is missing - heals on the next request the
+# same way: the missing row is opened and answered with.
 db_exec "DELETE FROM listers WHERE user_id='${SECOND_USER_ID}';"
+db_exec "INSERT INTO seekers (user_id) VALUES ('${SECOND_USER_ID}');"
 CODE=$(curl -s -o "$WORK/change-role-partial" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/users/change-role" \
   -H "Origin: ${BASE_URL}" \
@@ -907,6 +909,9 @@ grep -q '"ownership":"owner"' "$WORK/change-role-partial" \
 PARTIAL_LISTERS="$(profile_rows listers "$SECOND_USER_ID")"
 [ "$PARTIAL_LISTERS" = "1" ] \
   || fail "the partially provisioned account did not regain its lister row (${PARTIAL_LISTERS} rows)"
+PARTIAL_SEEKERS="$(profile_rows seekers "$SECOND_USER_ID")"
+[ "$PARTIAL_SEEKERS" = "1" ] \
+  || fail "the healing switch lost the seeker row the account already had (${PARTIAL_SEEKERS} rows)"
 CODE=$(curl -s -o "$WORK/me-partial" -w '%{http_code}' "${BASE_URL}/api/users/me" \
   -H "Cookie: access_token=${SECOND_ACCESS}")
 assert_status "$CODE" 200 "the healed account's /api/users/me"

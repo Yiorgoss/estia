@@ -172,9 +172,10 @@ export const UserServiceLive = Layer.effect(
           // it, and the two profile rows follow. D1's atomic batch is only on the
           // D1-specific client, which these `SqlClient` repositories are not
           // written against, so a profile that cannot be opened removes the
-          // account it just created - its profile rows cascade with it - and a
-          // registration that reports a failure leaves nothing behind for the
-          // retry to collide with.
+          // account it just created, its profile rows cascading with it. That
+          // delete is best effort: a cleanup that fails is logged rather than
+          // swallowed, so a retry after a reported failure can still collide with
+          // the account row.
           yield* Effect.gen(function* () {
             yield* seekerRepo.createForUser(user.id);
             yield* listerRepo.createForUser(user.id);
