@@ -43,6 +43,17 @@ cookie_flags() {
   grep -i "^set-cookie: ${2}=" "$1" | head -1 | tr -d '\r'
 }
 
+# The account id an access token was minted for, so a check can name the row it
+# expects the app to have read.
+user_id_from_token() {
+  # $1: access token
+  node -e '
+    const token = process.argv[1];
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    process.stdout.write(String(payload.id));
+  ' "$1"
+}
+
 EMAIL="smoke-$(date +%s)@test.local"
 PASSWORD="correct horse battery staple"
 
@@ -201,15 +212,25 @@ pass "cross-site form login sets no session"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me")
 assert_status "$CODE" 401 "unauthenticated /api/users/me rejected"
 
+# 3b. a freshly registered account has no profile row yet, and the profile call
+# says so instead of failing: this is the state every new sign-up is in.
+CODE=$(curl -s -o "$WORK/me-fresh" -w '%{http_code}' "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "fresh user /api/users/me"
+grep -q '"userProfile":null' "$WORK/me-fresh" \
+  || fail "the fresh user's profile call did not report a null profile"
+grep -q '"role":"user"' "$WORK/me-fresh" \
+  || fail "the fresh user's profile call did not report the stored role"
+pass "a fresh user's /api/users/me reports a null profile"
+
 # 4. seed a profile for the fresh user, then current-user
-USER_ID="$(node -e '
-  const token = process.argv[1];
-  const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
-  process.stdout.write(String(payload.id));
-' "$ACCESS")"
+USER_ID="$(user_id_from_token "$ACCESS")"
 pnpm exec wrangler d1 execute "$DB_BINDING" --local \
   --command "INSERT OR IGNORE INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets) VALUES ('${USER_ID}', 'Smoke User', NULL, 946684800000, 'NB', 1, 0);" \
   >/dev/null 2>&1 || fail "seed seeker profile"
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "UPDATE users SET role='seeker' WHERE id='${USER_ID}';" \
+  >/dev/null 2>&1 || fail "seed seeker role"
 pass "seed seeker profile"
 
 CODE=$(curl -s -o "$WORK/me" -w '%{http_code}' "${BASE_URL}/api/users/me" \
@@ -778,18 +799,14 @@ pass "multipart upload response body"
 # 8. the payload-less role switch on the JSON API
 #
 # It is a simple request too, so a sibling site is refused outright while the
-# app's own page is allowed through. The switch returns the profile of the new
-# role, which has to exist before the handler can answer with it.
+# app's own page is allowed through. The switch opens the profile for the new
+# role where that is possible (listing needs only the user id), and refuses the
+# switch where it is not (seeking needs a profile the request does not carry).
 CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST "${BASE_URL}/api/users/change-role" \
   -H 'Sec-Fetch-Site: same-site' \
   -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 403 "the API refuses a role switch from a sibling site"
-
-pnpm exec wrangler d1 execute "$DB_BINDING" --local \
-  --command "INSERT OR IGNORE INTO listers (user_id) VALUES ('${USER_ID}');" \
-  >/dev/null 2>&1 || fail "seed lister profile"
-pass "seed lister profile"
 
 CODE=$(curl -s -o "$WORK/change-role" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/users/change-role" \
@@ -798,6 +815,119 @@ CODE=$(curl -s -o "$WORK/change-role" -w '%{http_code}' \
 assert_status "$CODE" 200 "a role switch from the app's own origin"
 grep -q '"newProfile"' "$WORK/change-role" \
   || fail "the role switch did not return the new profile"
-pass "a role switch from the app's own origin returns the new profile"
+grep -q '"ownership":"owner"' "$WORK/change-role" \
+  || fail "the role switch did not return a lister profile"
+pass "a role switch from the app's own origin returns the profile it provisioned"
+
+# The same cookie, no new token: the role a request is authorised against comes
+# from the account row, so the switch is live immediately instead of when the
+# token happens to be reissued.
+CODE=$(curl -s -o "$WORK/me-after-role" -w '%{http_code}' "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "current-user /api/users/me after a role switch"
+grep -q '"role":"lister"' "$WORK/me-after-role" \
+  || fail "the role switch did not take effect on the same token"
+pass "a role switch takes effect on the same token"
+
+# A freshly registered account is not a seeker or a lister yet, so it has no
+# role to switch between: the switch is refused instead of guessing listing.
+SECOND_USER_ID="$(user_id_from_token "$SECOND_ACCESS")"
+CODE=$(curl -s -o "$WORK/change-role-unassigned" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 409 "a role switch on an unassigned account is refused"
+grep -q 'UnassignedRoleSwitchError' "$WORK/change-role-unassigned" \
+  || fail "the unassigned role switch did not say why"
+UNASSIGNED_LISTERS=$(pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
+  --command "SELECT COUNT(*) AS total FROM listers WHERE user_id='${SECOND_USER_ID}';" 2>/dev/null \
+  | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].total)))')
+[ "$UNASSIGNED_LISTERS" = "0" ] \
+  || fail "an unassigned role switch opened a lister profile (${UNASSIGNED_LISTERS} rows)"
+pass "an unassigned account cannot become a lister by switching"
+
+# Once the account is set up to seek, the switch to listing provisions the row.
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "UPDATE users SET role='seeker' WHERE id='${SECOND_USER_ID}';" \
+  >/dev/null 2>&1 || fail "seed second account seeker role"
+CODE=$(curl -s -o "$WORK/change-role-second" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "a second account switches to listing"
+
+# Switching back to seeking cannot be invented: a seeker profile needs a name, a
+# date of birth, and a gender, which a payload-less switch does not carry. The
+# switch is refused with a reason and the account is left exactly as it was.
+CODE=$(curl -s -o "$WORK/change-role-refused" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 409 "a switch to seeking without a seeker profile is refused"
+grep -q 'seeker profile has to be completed first' "$WORK/change-role-refused" \
+  || fail "the refused role switch did not explain itself"
+pass "the refused role switch explains that a seeker profile has to be completed first"
+
+CODE=$(curl -s -o "$WORK/me-second" -w '%{http_code}' "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "the second account's /api/users/me after a refused switch"
+grep -q '"role":"lister"' "$WORK/me-second" \
+  || fail "the refused role switch changed the account anyway"
+pass "a refused role switch leaves the account's role alone"
+
+# The refusal never left a role pointing at a profile that does not exist: the
+# seeker table gained no row for this account, and `me` answered with the lister
+# profile the account really has.
+SEEKER_ROWS=$(pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
+  --command "SELECT COUNT(*) AS total FROM seekers WHERE user_id='${SECOND_USER_ID}';" 2>/dev/null \
+  | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].total)))')
+[ "$SEEKER_ROWS" = "0" ] \
+  || fail "the refused role switch created a seeker profile (${SEEKER_ROWS} rows)"
+pass "a refused role switch creates no profile row"
+
+# 8b. the corrupted state the old code left behind - a stored lister role whose
+# lister row was never created - heals on the next switch instead of stranding
+# the account with a role that points at nothing.
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "DELETE FROM listers WHERE user_id='${SECOND_USER_ID}';" \
+  >/dev/null 2>&1 || fail "seed the corrupt lister state"
+
+CODE=$(curl -s -o "$WORK/change-role-healed" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "a stored lister role with no lister row heals"
+grep -q '"ownership":"owner"' "$WORK/change-role-healed" \
+  || fail "the healing switch did not return the lister profile"
+CODE=$(curl -s -o "$WORK/me-healed" -w '%{http_code}' "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "the healed account's /api/users/me"
+grep -q '"role":"lister"' "$WORK/me-healed" \
+  || fail "the healing switch changed the stored role"
+grep -q '"userProfile":{' "$WORK/me-healed" \
+  || fail "the healed account's profile call did not report the lister profile"
+HEALED_LISTERS=$(pnpm exec wrangler d1 execute "$DB_BINDING" --local --json \
+  --command "SELECT COUNT(*) AS total FROM listers WHERE user_id='${SECOND_USER_ID}';" 2>/dev/null \
+  | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].total)))')
+[ "$HEALED_LISTERS" = "1" ] \
+  || fail "the healing switch did not leave exactly one lister row (${HEALED_LISTERS} rows)"
+pass "a stored lister role with no lister row heals and reports its profile"
+
+# 8c. an admin has no profile to switch between, and must never be demoted by a
+# payload-less switch.
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "UPDATE users SET role='admin' WHERE id='${SECOND_USER_ID}';" \
+  >/dev/null 2>&1 || fail "seed admin role"
+CODE=$(curl -s -o "$WORK/change-role-admin" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 403 "a role switch on an admin account is refused"
+grep -q 'AdminRoleSwitchError' "$WORK/change-role-admin" \
+  || fail "the admin role switch did not say why"
+grep -q '"role":"admin"' <(curl -s "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${SECOND_ACCESS}") \
+  || fail "the refused switch demoted the admin"
+pass "an admin cannot be switched and stays admin"
 
 echo "smoke checklist passed"

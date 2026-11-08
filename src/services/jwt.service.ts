@@ -76,6 +76,9 @@ export const JWTServiceLive = Layer.effect(
           try: () =>
             new SignJWT({
               id: user.id,
+              // Informational only. Every handler reads the stored role from the
+              // database, so a stale claim here can never authorise anything and
+              // a role change is live on the next request, not the next token.
               role: user.role,
             })
               .setSubject(user.id.toString())
@@ -88,6 +91,8 @@ export const JWTServiceLive = Layer.effect(
           catch: (error) => new JWTSigningError({ cause: error }),
         }).pipe(Effect.map((token) => Schema.decodeUnknownSync(JWTSchema)(token))),
       extractUser: (object) =>
+        // The token's identity, plus the informational `role` claim. Do not
+        // authorise against that claim: the stored role is the source of truth.
         Effect.try(() =>
           Schema.decodeUnknownSync(CurrentUser)({
             id: object.payload.id,
