@@ -5,15 +5,17 @@ import { Effect } from "effect";
 
 /*
  * A form post is a simple request, so CORS never sees it: another site's page can
- * post one of these forms with the lister's session cookie attached. Today the
- * browser's `SameSite=Lax` default is what keeps that cookie off the post, which
- * is a guarantee the code never asked for. These tests pin both halves of the
- * deliberate version: the session cookies say `SameSite=Lax`, and every
- * state-changing listing form route refuses a request it can tell came from
- * another site before it reads the form or touches a listing.
+ * post one of these forms, and the payload-less writes on the JSON API, with the
+ * lister's session cookie attached. These tests pin both halves of the defence:
+ * the session cookies state `SameSite=Lax` instead of inheriting a browser
+ * default, and both the page form routes and the private API boundary refuse a
+ * state-changing request they can tell came from another site before it reads the
+ * form or touches a listing.
  *
- * The forms themselves are the browser's: `application/x-www-form-urlencoded`,
- * posted to the page route with the session cookie the app issued.
+ * The page forms are the browser's: `application/x-www-form-urlencoded`, posted to
+ * the page route with the session cookie the app issued. The API writes carry
+ * their own `Origin` / `Sec-Fetch-Site` headers, including the payload-less
+ * publish, unlist and change-role calls a page can submit without a preflight.
  */
 
 const PASSWORD = "correct horse battery staple";
