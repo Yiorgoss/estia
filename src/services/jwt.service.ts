@@ -65,9 +65,9 @@ export const JWTServiceLive = Layer.effect(
             secure: true,
             path: "/",
             maxAge: 60 * 60 * 1000,
-            // `Lax` keeps the session on top-level navigations while keeping it
-            // off a cross-site form post, which is half of the CSRF defence; the
-            // form routes check the request origin for the other half.
+            // `Lax` keeps the session on top-level navigations and off a
+            // cross-site form post. The origin check in `@/handlers/same-origin`
+            // is the other half of that defence.
             sameSite: "lax",
           },
         ]),

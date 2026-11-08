@@ -19,15 +19,15 @@ const isStateChangingRequest = (request: HttpServerRequest.HttpServerRequest): b
  * site's page can post one to this app without a preflight, and the browser
  * attaches whatever cookies its policy allows. The session cookies are
  * `SameSite=Lax`, so a cross-site post carries no session today - but that is one
- * cookie attribute away from disappearing, so every state-changing route checks
- * where the request came from instead.
+ * cookie attribute away from disappearing, so the page forms and the private API
+ * check where the request came from instead.
  *
  * The page's own origin is the one the browser reached, so the request URL is the
  * authority, not a configured host name. A same-site but different origin
  * (a sibling subdomain) still carries the cookie, so it is refused too. Browsers
  * label their own posts and `Sec-Fetch-Site` is their own statement, so it is
- * decisive when present. A client sending none of these headers is not a browser
- * and keeps the access the JSON API already gives it.
+ * decisive when present. A client sending none of these headers is not a browser,
+ * so it keeps the access it has always had.
  */
 export const isSameOriginWrite = (request: HttpServerRequest.HttpServerRequest): boolean => {
   const fetchSite = request.headers["sec-fetch-site"];
@@ -54,9 +54,9 @@ export const crossSiteFormMessage =
  * preflight; this covers it anyway at no extra cost.
  *
  * A browser client on another origin is refused like any other, so a future
- * cross-origin client would have to be named here. Nothing that exists today is
- * one: the pages are served from this app, and tools and scripts send neither of
- * the headers.
+ * cross-origin client would need an explicit origin allowlist added here.
+ * Nothing that exists today is one: the pages are served from this app, and tools
+ * and scripts send neither of the headers.
  */
 export const SameOriginWriteMiddleware = HttpRouter.middleware((app) =>
   Effect.gen(function* () {
