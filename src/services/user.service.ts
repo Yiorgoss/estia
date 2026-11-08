@@ -178,14 +178,25 @@ export const UserServiceLive = Layer.effect(
           yield* Effect.gen(function* () {
             yield* seekerRepo.createForUser(user.id);
             yield* listerRepo.createForUser(user.id);
-          }).pipe(Effect.onError(() => userRepo.deleteById(user.id).pipe(Effect.ignore)));
+          }).pipe(
+            Effect.onError(() =>
+              userRepo
+                .deleteById(user.id)
+                .pipe(
+                  Effect.tapError((error) =>
+                    Effect.logError("Registration rollback failed", { error }),
+                  ),
+                  Effect.ignore,
+                ),
+            ),
+          );
 
           return user;
           // const accessToken = yield* jwtService.signUser(user)
           // const refreshToken = yield* refreshTokenService.issueToken(user.id, userAgent)
           // return { accessToken, refreshToken }
         }).pipe(
-          Effect.tapError((e) => Effect.logError(`Signup Failed - ${e.cause}`)),
+          Effect.tapError((e) => Effect.logError("Signup failed", { error: e })),
           Effect.catchTags({
             UserAlreadyExistsError: (e) => Effect.fail(e),
             HashError: () => Effect.fail(new InternalError()),
