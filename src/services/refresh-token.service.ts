@@ -56,6 +56,10 @@ export const RefreshTokenServiceLive = Layer.effect(
             secure: true,
             path: "/",
             maxAge: 30 * 24 * 60 * 60 * 1000, // one month
+            // `Lax` keeps the session on top-level navigations while keeping it
+            // off a cross-site form post, which is half of the CSRF defence; the
+            // form routes check the request origin for the other half.
+            sameSite: "lax",
           },
         ]),
       issueToken: (id, userAgent) =>

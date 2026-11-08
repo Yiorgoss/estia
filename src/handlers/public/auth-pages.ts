@@ -1,5 +1,6 @@
 import { authFormEmail, decodeLoginForm, decodeRegisterForm } from "@/frontend/auth-form";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
+import { crossSiteFormMessage, isSameOriginFormPost } from "@/handlers/form-origin";
 import { AuthService, type AuthTokens } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
@@ -24,34 +25,6 @@ const unsupportedBodyMessage = "This page expects a form submission, not a raw r
 
 const isFormPost = (request: HttpServerRequest.HttpServerRequest): boolean =>
   (request.headers["content-type"] ?? "").toLowerCase().startsWith(FORM_CONTENT_TYPE);
-
-const crossSiteMessage =
-  "This form can only be submitted from this site's own page. Open the page and try again.";
-
-const originOf = (value: string): string | undefined => {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return undefined;
-  }
-};
-
-// A form post is a simple request, so CORS never sees it, and the cookies a
-// cross-site submit would receive would sign the visitor in as the submitter.
-// The page's own origin is the one the browser reached, so the request URL is the
-// authority, not a configured host name. Browsers label their own posts; a client
-// sending none of these headers is not a browser, so it keeps the access the JSON
-// API already gives it.
-const isSameOriginFormPost = (request: HttpServerRequest.HttpServerRequest): boolean => {
-  const fetchSite = request.headers["sec-fetch-site"];
-  if (fetchSite !== undefined) return fetchSite === "same-origin" || fetchSite === "none";
-
-  const source = request.headers["origin"] ?? request.headers["referer"];
-  if (source === undefined) return true;
-
-  const requestOrigin = originOf(request.originalUrl);
-  return requestOrigin !== undefined && originOf(source) === requestOrigin;
-};
 
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(request.urlParamsBody, UrlParams.toRecord).pipe(Effect.orDie);
@@ -80,7 +53,7 @@ const signedInResponse = (tokens: AuthTokens) =>
 const login = HttpRouter.route("POST", "/login", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginFormPost(request)) {
-      return respond(loginPage({ message: crossSiteMessage }), 403);
+      return respond(loginPage({ message: crossSiteFormMessage }), 403);
     }
 
     if (!isFormPost(request)) {
@@ -125,7 +98,7 @@ const login = HttpRouter.route("POST", "/login", (request) =>
 const register = HttpRouter.route("POST", "/register", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginFormPost(request)) {
-      return respond(registerPage({ message: crossSiteMessage }), 403);
+      return respond(registerPage({ message: crossSiteFormMessage }), 403);
     }
 
     if (!isFormPost(request)) {

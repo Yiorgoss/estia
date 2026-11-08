@@ -6,6 +6,7 @@ import {
   ListingCursorFromString,
   ListingMineQueryCodec,
 } from "@/db/schema/Listing";
+import { crossSiteFormMessage, isSameOriginFormPost } from "@/handlers/form-origin";
 import { callerId } from "@/handlers/private/caller";
 import {
   decodeCreateListingForm,
@@ -115,6 +116,15 @@ const errorResponse = (error: ListingPageError): HttpServerResponse.HttpServerRe
 const missingListingResponse = (): HttpServerResponse.HttpServerResponse =>
   respond(listingErrorPage("Listing not found", "That listing does not exist."), 404);
 
+/*
+ * These routes change a listing, and their forms are simple requests, so the
+ * browser will post one from another site with the lister's cookies attached.
+ * `SameSite=Lax` keeps the session off such a post, and the shared origin check
+ * keeps the route itself from relying on that one cookie attribute.
+ */
+const crossSiteResponse = (): HttpServerResponse.HttpServerResponse =>
+  respond(listingErrorPage("That form did not come from this site", crossSiteFormMessage), 403);
+
 // A body that cannot be read is a broken request, not a listing failure, so it
 // is a defect rather than something the pages explain.
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
@@ -175,6 +185,8 @@ const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
  */
 const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
   Effect.gen(function* () {
+    if (!isSameOriginFormPost(request)) return crossSiteResponse();
+
     const params = yield* readForm(request);
     const values = listingFormValues(params);
     const decoded = decodeCreateListingForm(params);
@@ -210,6 +222,8 @@ const getEditListingPage = HttpRouter.route("GET", "/listings/:id/edit", (reques
 
 const updateListing = HttpRouter.route("POST", "/listings/:id/edit", (request) =>
   Effect.gen(function* () {
+    if (!isSameOriginFormPost(request)) return crossSiteResponse();
+
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return missingListingResponse();
 
@@ -264,6 +278,8 @@ const decodeReturnTo = (raw: string | ReadonlyArray<string> | undefined): Return
 const transitionRoute = (action: "publish" | "unlist") =>
   HttpRouter.route("POST", `/listings/:id/${action}`, (request) =>
     Effect.gen(function* () {
+      if (!isSameOriginFormPost(request)) return crossSiteResponse();
+
       const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
       if (id === undefined) return missingListingResponse();
 

@@ -76,20 +76,18 @@ export const PublicApiLive = HttpApiBuilder.group(PublicApi, "auth", (handlers) 
         );
 
         yield* Effect.logInfo("Successfully Registered");
+
+        // The cookie's attributes live in the services that issue the tokens, so
+        // the API's session is the same session the pages issue - SameSite
+        // included. A second copy of the options here would drift from them.
+        const jwtService = yield* JWTService;
+        const accessCookie = yield* jwtService.asCookie(accessToken);
+        const refreshTokenService = yield* RefreshTokenService;
+        const refreshCookie = yield* refreshTokenService.asCookie(refreshToken);
+
         return yield* HttpServerResponse.empty().pipe(
           HttpServerResponse.setStatus(200),
-          HttpServerResponse.setCookies([
-            [
-              "access_token",
-              accessToken,
-              { httpOnly: true, secure: true, path: "/", maxAge: 60 * 60 * 1000 },
-            ],
-            [
-              "refresh_token",
-              refreshToken,
-              { httpOnly: true, secure: true, path: "/", maxAge: 30 * 24 * 60 * 60 * 1000 },
-            ],
-          ]),
+          HttpServerResponse.setCookies([accessCookie, refreshCookie]),
           Effect.orDie,
         );
       }).pipe(
