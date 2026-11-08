@@ -829,10 +829,6 @@ grep -q '"role":"lister"' "$WORK/me-after-role" \
   || fail "the role switch did not take effect on the same token"
 pass "a role switch takes effect on the same token"
 
-# Switching back to seeking cannot be invented: a seeker profile needs a name, a
-# date of birth, and a gender, which a payload-less switch does not carry. The
-# switch is refused with a reason and the account is left exactly as it was.
-#
 # A freshly registered account is not a seeker or a lister yet, so it has no
 # role to switch between: the switch is refused instead of guessing listing.
 SECOND_USER_ID="$(user_id_from_token "$SECOND_ACCESS")"
@@ -860,6 +856,9 @@ CODE=$(curl -s -o "$WORK/change-role-second" -w '%{http_code}' \
   -H "Cookie: access_token=${SECOND_ACCESS}")
 assert_status "$CODE" 200 "a second account switches to listing"
 
+# Switching back to seeking cannot be invented: a seeker profile needs a name, a
+# date of birth, and a gender, which a payload-less switch does not carry. The
+# switch is refused with a reason and the account is left exactly as it was.
 CODE=$(curl -s -o "$WORK/change-role-refused" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/users/change-role" \
   -H "Origin: ${BASE_URL}" \
