@@ -1,8 +1,9 @@
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
 import { StorageRepository } from "@/repos/storage.repo";
 import { assert } from "@effect/vitest";
-import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect";
+import { ConfigProvider, Context, Effect, FileSystem, Layer, Path } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
+import { SqlClient } from "effect/sql";
 import { TestSqlLive } from "./sql";
 
 /*
@@ -54,12 +55,42 @@ const makeApp = (config: Readonly<Record<string, string>> = {}) => {
     Layer.provide(ConfigLive),
   );
 
-  return HttpRouter.toWebHandler(AppLayer, { disableLogger: true });
+  // Sharing the memo map is what lets `query` below reach the one database this
+  // app instance runs on instead of opening a second, empty one.
+  const memoMap = Layer.makeMemoMapUnsafe();
+  return { memoMap, web: HttpRouter.toWebHandler(AppLayer, { disableLogger: true, memoMap }) };
 };
 
-type TestApp = ReturnType<typeof makeApp>;
+/*
+ * The handler shape this harness calls: one request in, one response out. The
+ * router's own type is conditional on whether a layer graph leaves a
+ * requirement, and reading it back out of the app object does not resolve that
+ * condition, so the harness names the shape it uses.
+ */
+type TestApp = {
+  readonly handler: (request: globalThis.Request) => Promise<globalThis.Response>;
+};
 
-const app = makeApp();
+const shared = makeApp();
+const app: TestApp = shared.web;
+
+/*
+ * The database behind the shared app, for a test that has to prove what an
+ * endpoint did to a row rather than infer it from a later response: the same
+ * `SqlClient` the handlers use, so both see one in-memory D1-shaped database.
+ */
+export const query = <T extends object = Record<string, unknown>>(
+  statement: string,
+  params: ReadonlyArray<unknown> = [],
+): Effect.Effect<ReadonlyArray<T>> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope;
+      const context = yield* Layer.buildWithMemoMap(TestSqlLive, shared.memoMap, scope);
+      const sql = Context.get(context, SqlClient.SqlClient);
+      return yield* sql.unsafe<T>(statement, params);
+    }),
+  ).pipe(Effect.orDie);
 
 export interface TestResponse {
   readonly status: number;
@@ -112,7 +143,7 @@ export const callWithConfig = (
   config: Readonly<Record<string, string>>,
   path: string,
   init?: RequestInit,
-): Effect.Effect<TestResponse> => callThrough(makeApp(config), path, init);
+): Effect.Effect<TestResponse> => callThrough(makeApp(config).web, path, init);
 
 export const testOrigin = TEST_ORIGIN;
 

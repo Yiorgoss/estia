@@ -3,7 +3,7 @@ import { UserRepository } from "@/repos/user.repo";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { HasherService } from "./hasher.service";
 import { ListerSchema } from "@/db/schema/Lister";
-import { UserId, UserRoles } from "@/db/schema/brands";
+import { UserId } from "@/db/schema/brands";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { SeekerRepository } from "@/repos/seeker.repo";
 import { ListerRepository } from "@/repos/lister.repo";
@@ -21,15 +21,33 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
 
 export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {}
 
+/*
+ * A role switch is only honest when the target profile exists afterwards. A
+ * lister profile needs nothing but the user id, so switching to listing can
+ * provision it. A seeker profile needs a name, a date of birth, and a gender,
+ * which a payload-less switch does not carry, so the switch is refused instead
+ * of leaving the account with a role that points at nothing.
+ */
+export class SeekerProfileRequiredError extends Schema.TaggedError<SeekerProfileRequiredError>()(
+  "SeekerProfileRequiredError",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+export type UserProfile = typeof SeekerSchema.Type | typeof ListerSchema.Type;
+
 export interface UserService {
   registerUser: (
     credentials: typeof UserCredentials.Type,
     userAgent: string,
   ) => Effect.Effect<typeof UserSchema.Type, UserAlreadyExistsError | InternalError>;
+  /*
+   * Flip the stored role and answer with the profile that role now has. The
+   * stored role is the starting point, never a role carried by the request.
+   */
   switchRoles: (
     id: typeof UserId.Type,
-    role: typeof UserRoles.Type,
-  ) => Effect.Effect<typeof SeekerSchema.Type | typeof ListerSchema.Type, never>;
+  ) => Effect.Effect<UserProfile, SeekerProfileRequiredError | InternalError>;
 }
 
 export const UserService = Context.Service<UserService>("UserService");
@@ -43,29 +61,44 @@ export const UserServiceLive = Layer.effect(
     const seekerRepo = yield* SeekerRepository;
 
     return {
-      switchRoles: (id, role) =>
+      switchRoles: (id) =>
         Effect.gen(function* () {
-          if (role === "admin") return yield* Effect.die("cannot update to admin");
-          const user = yield* userRepo.updateRole(id, role).pipe(
-            Effect.filterOrFail(Option.isSome, () => new Error("Cannot update Role")),
-            Effect.orDie,
-            Effect.map((some) => some.value),
-          );
-          if (user.role == "seeker") {
-            return yield* seekerRepo.findByUserId(id).pipe(
-              Effect.filterOrFail(Option.isSome, () => new Error("Cannot find Seeker")),
-              Effect.orDie,
-              Effect.map((some) => some.value),
-            );
-          } else if (user.role == "lister") {
-            return yield* listerRepo.findByUserId(id).pipe(
-              Effect.filterOrFail(Option.isSome, () => new Error("Cannot find Lister")),
-              Effect.orDie,
-              Effect.map((some) => some.value),
+          const user = yield* userRepo
+            .findById(id)
+            .pipe(Effect.mapError(() => new InternalError()));
+          if (Option.isNone(user)) {
+            return yield* Effect.fail(new InternalError());
+          }
+
+          // Switching to listing: the profile is either there already or can be
+          // opened from the user id alone. The row is created first and the role
+          // is written second, so the role never points at a missing profile.
+          if (user.value.role !== "lister") {
+            const existing = yield* listerRepo.findByUserId(id);
+            const lister = Option.isSome(existing)
+              ? existing.value
+              : yield* listerRepo.createForUser(id);
+            yield* userRepo
+              .updateRole(id, "lister")
+              .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
+            return lister;
+          }
+
+          // Switching to seeking: the profile cannot be invented from a
+          // payload-less request, so refuse before touching anything.
+          const seeker = yield* seekerRepo.findByUserId(id);
+          if (Option.isNone(seeker)) {
+            return yield* Effect.fail(
+              new SeekerProfileRequiredError({
+                message: "A seeker profile has to be completed first.",
+              }),
             );
           }
-          return yield* Effect.die("role didnt match shit");
-        }).pipe(Effect.catch((e) => Effect.die(e as unknown))),
+          yield* userRepo
+            .updateRole(id, "seeker")
+            .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
+          return seeker.value;
+        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
       registerUser: ({ email, password }) =>
         Effect.gen(function* () {
           yield* userRepo

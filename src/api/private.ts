@@ -10,7 +10,7 @@ import {
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { UnauthorizedError } from "@/services/auth.service";
-import { InternalError } from "@/services/user.service";
+import { InternalError, SeekerProfileRequiredError } from "@/services/user.service";
 import {
   InvalidListingTransitionError,
   ListingLocationOutOfGreeceError,
@@ -28,7 +28,9 @@ export const UserGroup = HttpApiGroup.make("user-group")
     HttpApiEndpoint.get("me", "/me", {
       success: Schema.Struct({
         user: CurrentUser,
-        userProfile: Schema.Union([SeekerSchema, ListerSchema]),
+        // A signed-in account whose role has no profile row yet is a normal
+        // state, not a failure: a fresh registration is exactly that.
+        userProfile: Schema.NullOr(Schema.Union([SeekerSchema, ListerSchema])),
       }),
       error: [InternalError, UnauthorizedError],
     }),
@@ -38,7 +40,9 @@ export const UserGroup = HttpApiGroup.make("user-group")
       success: Schema.Struct({
         newProfile: Schema.Union([SeekerSchema, ListerSchema]),
       }),
-      error: [InternalError, UnauthorizedError],
+      // A switch to seeking without a seeker profile is refused rather than
+      // half-applied, so the 409 is part of the endpoint's contract.
+      error: [SeekerProfileRequiredError, InternalError, UnauthorizedError],
     }),
   )
   // A group prefix only applies to the endpoints added before it.
