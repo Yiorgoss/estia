@@ -22,13 +22,13 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
 export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {}
 
 /*
- * A role switch is only honest when the target profile exists afterwards. A
- * lister profile needs nothing but the user id, so a stored lister role without
- * a row can be repaired and switching to listing can provision one. A seeker
- * profile needs a name, a date of birth, and a gender, which a payload-less
- * switch does not carry, so that switch is refused instead of leaving the
- * account with a role that points at nothing. Admins and unassigned accounts
- * hold no profile to switch between, so they are refused rather than guessed at.
+ * A role switch is only honest when the target profile exists afterwards, so a
+ * switch whose target can neither be found nor opened is refused rather than
+ * leaving the account with a role that points at nothing. Both profiles are
+ * provisioned at registration, so this is the last resort rather than the normal
+ * answer: a stored role whose profile row is missing heals instead. Admins and
+ * unassigned accounts hold no profile to switch between, so they are refused
+ * rather than guessed at.
  */
 export class SeekerProfileRequiredError extends Schema.TaggedError<SeekerProfileRequiredError>()(
   "SeekerProfileRequiredError",
@@ -51,6 +51,10 @@ export class UnassignedRoleSwitchError extends Schema.TaggedError<UnassignedRole
 export type UserProfile = typeof SeekerSchema.Type | typeof ListerSchema.Type;
 
 export interface UserService {
+  /*
+   * Create the account and every profile it needs: one row per role, in a fixed
+   * order, so no account exists without a seeker and a lister profile.
+   */
   registerUser: (
     credentials: typeof UserCredentials.Type,
     userAgent: string,
@@ -98,7 +102,9 @@ export const UserServiceLive = Layer.effect(
               );
 
             // The unassigned role holds no profile, so there is nothing to
-            // switch between and no target role to infer.
+            // switch between and no target role to infer. It is the role an
+            // account created before registration provisioned both profiles
+            // carries until that account picks one.
             case "user":
               return yield* Effect.fail(
                 new UnassignedRoleSwitchError({
@@ -106,9 +112,11 @@ export const UserServiceLive = Layer.effect(
                 }),
               );
 
-            // Switching to listing: the profile is opened from the user id
-            // alone, and the row is created first so the role never points at a
-            // missing profile.
+            // Switching to listing: both profiles exist from registration
+            // onward, so this is a plain flip. The profile is still asked for
+            // first, and created if it is missing, so a legacy account - or a
+            // half-applied registration - never gets a role pointing at a
+            // profile that does not exist.
             case "seeker": {
               const lister = yield* listerRepo.createForUser(id);
               yield* userRepo
@@ -120,18 +128,31 @@ export const UserServiceLive = Layer.effect(
             // Switching to seeking. A stored lister role with no lister row is
             // the half-applied state an earlier switch left behind, so that row
             // is opened first and answered with; the account was a lister all
-            // along, and the next call can switch once a seeker profile exists.
+            // along, and a later call can switch back.
             case "lister": {
               const existing = yield* listerRepo.findByUserId(id);
               if (Option.isNone(existing)) {
                 return yield* listerRepo.createForUser(id);
               }
 
-              const seeker = yield* seekerRepo.findByUserId(id);
+              // The seeking profile was provisioned at registration, so it is
+              // normally already there and the flip is all that is left. A
+              // legacy account that predates that gets a blank profile opened
+              // from the user id alone, which the nullable columns in 0006
+              // allow. An account whose profile can neither be found nor opened
+              // is refused and keeps its stored role.
+              const seeker = yield* seekerRepo.findByUserId(id).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onSome: (found) => Effect.succeed(Option.some(found)),
+                    onNone: () => seekerRepo.createForUser(id),
+                  }),
+                ),
+              );
               if (Option.isNone(seeker)) {
                 return yield* Effect.fail(
                   new SeekerProfileRequiredError({
-                    message: "A seeker profile has to be completed first.",
+                    message: "A seeker profile could not be opened for this account.",
                   }),
                 );
               }
@@ -154,7 +175,13 @@ export const UserServiceLive = Layer.effect(
             );
 
           const hash = yield* hasherService.hashPassword(password);
-          return yield* userRepo.insert({ email, password: hash }).pipe(
+
+          // A new account is born seeking: it has both profiles, so the stored
+          // role only decides which of them `me` answers with, and one flip
+          // moves the account to listing. Leaving it unassigned would strand a
+          // brand new account on the guard that refuses to switch an account
+          // with no profile to switch between.
+          const user = yield* userRepo.insert({ email, password: hash, role: "seeker" }).pipe(
             Effect.flatMap(
               Option.match({
                 onNone: () => Effect.fail(new InternalError()),
@@ -162,6 +189,19 @@ export const UserServiceLive = Layer.effect(
               }),
             ),
           );
+
+          // D1 has no interactive transactions, so the profiles are opened as
+          // two single statements in a fixed order instead of pretending the
+          // registration is atomic. A failure between them leaves an account
+          // that the self-heal path in `switchRoles` repairs on its next
+          // request; a duplicate email, the failure worth reporting, happens
+          // before any of this.
+          yield* seekerRepo
+            .createForUser(user.id)
+            .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
+          yield* listerRepo.createForUser(user.id);
+
+          return user;
           // const accessToken = yield* jwtService.signUser(user)
           // const refreshToken = yield* refreshTokenService.issueToken(user.id, userAgent)
           // return { accessToken, refreshToken }

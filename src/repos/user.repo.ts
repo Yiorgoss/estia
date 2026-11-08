@@ -15,6 +15,7 @@ export interface UserRepository {
   readonly insert: (creds: {
     email: string;
     password: typeof UserPasswordHash.Type;
+    role: typeof UserRoles.Type;
   }) => Effect.Effect<Option.Option<User>, SqlError>;
   readonly updateRole: (
     id: typeof UserId.Type,
@@ -51,10 +52,10 @@ export const UserRepositoryLive = Layer.effect(
           Effect.map(Option.fromNullishOr),
           Effect.map(Option.map(decodeUser)),
         ),
-      insert: ({ email, password }) =>
+      insert: ({ email, password, role }) =>
         sql<Record<string, unknown>>`
-          INSERT INTO users (email, password_hash)
-               VALUES (${email}, ${password})
+          INSERT INTO users (email, password_hash, role)
+               VALUES (${email}, ${password}, ${role})
             RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),

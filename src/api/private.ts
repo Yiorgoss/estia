@@ -33,8 +33,9 @@ export const UserGroup = HttpApiGroup.make("user-group")
     HttpApiEndpoint.get("me", "/me", {
       success: Schema.Struct({
         user: CurrentUser,
-        // A signed-in account whose role has no profile row yet is a normal
-        // state, not a failure: a fresh registration is exactly that.
+        // An account whose role has no profile row yet is a normal state, not a
+        // failure: a legacy account, or a registration interrupted between its
+        // two profile rows, is exactly that.
         userProfile: Schema.NullOr(Schema.Union([SeekerSchema, ListerSchema])),
       }),
       error: [InternalError, UnauthorizedError],
@@ -45,9 +46,10 @@ export const UserGroup = HttpApiGroup.make("user-group")
       success: Schema.Struct({
         newProfile: Schema.Union([SeekerSchema, ListerSchema]),
       }),
-      // A switch to seeking without a seeker profile is refused rather than
-      // half-applied, and an admin or unassigned account has no profile to
-      // switch between, so those refusals are part of the endpoint's contract.
+      // A switch whose target profile can neither be found nor opened is
+      // refused rather than half-applied, and an admin or unassigned account has
+      // no profile to switch between, so those refusals are part of the
+      // endpoint's contract.
       error: [
         SeekerProfileRequiredError,
         AdminRoleSwitchError,

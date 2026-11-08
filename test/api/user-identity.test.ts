@@ -61,32 +61,75 @@ const countFor = (table: string, userId: string) =>
 const setRole = (id: string, role: string) =>
   query("UPDATE users SET role = ? WHERE id = ?", [role, id]);
 
-const seedSeeker = (id: string, name = "Ada Seeker") =>
-  query(`INSERT INTO seekers (user_id, name, date_of_birth, gender) VALUES (?, ?, ?, ?)`, [
-    id,
+// The fields a person fills in themselves. Registration opened the row, so the
+// test completes it the way the profile page eventually will.
+const nameSeeker = (id: string, name = "Ada Seeker") =>
+  query("UPDATE seekers SET name = ?, date_of_birth = ?, gender = ? WHERE user_id = ?", [
     name,
     946684800000,
     "NB",
+    id,
   ]);
 
-const seedLister = (id: string) => query("INSERT INTO listers (user_id) VALUES (?)", [id]);
+const deleteProfile = (table: "seekers" | "listers", id: string) =>
+  query(`DELETE FROM ${table} WHERE user_id = ?`, [id]);
 
-// A freshly registered account: role `user`, and no profile row for any role.
+// A freshly registered account: role `seeker`, and one row in each profile table.
 const freshUser = (label: string) => register(`identity-${label}`);
 
-// An account that is actually set up to seek, so it has a role to switch away
-// from: a fresh registration is unassigned until a profile makes it one or the
-// other.
-const seekerUser = (label: string) =>
+// An account from before registration provisioned both profiles: the user row
+// exists, and the role is whatever it was left as while neither profile table
+// has a row for it. It is built from a real registration so the row has the
+// shape the app creates, then stripped back to the legacy state.
+const legacyUser = (label: string, role: "user" | "seeker" | "lister" | "admin") =>
   Effect.gen(function* () {
     const user = yield* freshUser(label);
-    yield* seedSeeker(user.id);
-    yield* setRole(user.id, "seeker");
+    yield* deleteProfile("seekers", user.id);
+    yield* deleteProfile("listers", user.id);
+    yield* setRole(user.id, role);
     return user;
   });
 
+describe("POST /api/auth/register", () => {
+  it.effect("opens one seeking and one listing profile for the new account", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("register-provisions");
+
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+
+      // The seeking row is a real row nobody has filled in yet, not a placeholder
+      // that pretends to be a person.
+      const rows = yield* query<{ name: string | null; dateOfBirth: number | null }>(
+        "SELECT name, date_of_birth AS dateOfBirth, gender FROM seekers WHERE user_id = ?",
+        [user.id],
+      );
+      assert.strictEqual(rows.length, 1);
+      assert.isNull(rows[0]?.name);
+      assert.isNull(rows[0]?.dateOfBirth);
+    }),
+  );
+
+  it.effect("answers the same empty 200 with the same two session cookies", () =>
+    Effect.gen(function* () {
+      const email = `identity-answer-${Date.now()}@test.local`;
+      const response = yield* send("POST", "/api/auth/register", {
+        payload: { email, password: "correct horse battery staple" },
+      });
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(response.body, "");
+      assert.deepStrictEqual(Object.keys(response.cookies).sort(), [
+        "access_token",
+        "refresh_token",
+      ]);
+    }),
+  );
+});
+
 describe("GET /api/users/me", () => {
-  it.effect("answers honestly with a null profile for a fresh account", () =>
+  it.effect("answers with the profile the registered role points at", () =>
     Effect.gen(function* () {
       const user = yield* freshUser("fresh-me");
 
@@ -96,16 +139,22 @@ describe("GET /api/users/me", () => {
       const body = bodyOf(response);
       assert.deepStrictEqual(Object.keys(body).sort(), ["user", "userProfile"]);
       assert.strictEqual(asObject(body["user"])["id"], user.id);
-      assert.strictEqual(body["userProfile"], null);
+      assert.strictEqual(roleOf(response), "seeker");
+      // The blank profile registration opened: it exists, and says so honestly by
+      // carrying nulls for the fields the person has not filled in.
+      const profile = profileOf(response);
+      assert.isNotNull(profile);
+      assert.strictEqual(profile["userId"], user.id);
+      assert.isNull(profile["name"]);
+      assert.isNull(profile["dateOfBirth"]);
     }),
   );
 
-  it.effect("still returns the profile the caller's role points at", () =>
+  it.effect("returns the profile the caller's role points at", () =>
     Effect.gen(function* () {
-      const user = yield* seekerUser("with-profile");
+      const user = yield* freshUser("with-profile");
+      yield* nameSeeker(user.id);
 
-      // Switching to listing provisions the lister row, so this account now has
-      // a role and a profile that agree.
       const switched = yield* changeRole(user);
       assert.strictEqual(switched.status, 200, switched.body);
 
@@ -129,32 +178,131 @@ describe("GET /api/users/me", () => {
 });
 
 describe("POST /api/users/change-role", () => {
-  it.effect("switches to listing by provisioning the lister profile", () =>
+  it.effect("switches a fresh account between both roles without provisioning", () =>
     Effect.gen(function* () {
-      const user = yield* seekerUser("switch-to-lister");
-      assert.strictEqual(yield* countFor("listers", user.id), 0);
+      const user = yield* freshUser("switch-both-ways");
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
 
-      const response = yield* changeRole(user);
+      // Registration already opened both rows, so this is a plain flip to the
+      // profile that was there all along.
+      const toListing = yield* changeRole(user);
 
-      assert.strictEqual(response.status, 200, response.body);
-      const profile = asObject(bodyOf(response)["newProfile"]);
+      assert.strictEqual(toListing.status, 200, toListing.body);
+      const lister = asObject(bodyOf(toListing)["newProfile"]);
+      assert.strictEqual(lister["userId"], user.id);
+      assert.strictEqual(lister["ownership"], "owner");
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+      const listingView = yield* me(user);
+      assert.strictEqual(roleOf(listingView), "lister");
+      assert.strictEqual(profileOf(listingView)?.["ownership"], "owner");
+
+      const toSeeking = yield* changeRole(user);
+
+      assert.strictEqual(toSeeking.status, 200, toSeeking.body);
+      const seeker = asObject(bodyOf(toSeeking)["newProfile"]);
+      assert.strictEqual(seeker["userId"], user.id);
+      assert.isNull(seeker["name"]);
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      const seekingView = yield* me(user);
+      assert.strictEqual(roleOf(seekingView), "seeker");
+      assert.strictEqual(profileOf(seekingView)?.["userId"], user.id);
+
+      // Switching is not a provisioning event: the profile tables still hold
+      // exactly the one row each that registration created.
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
+    }),
+  );
+
+  // The state a pre-provisioning account is in, and the state a registration
+  // interrupted between its two profile rows leaves behind: exactly one of the
+  // two rows exists. The switch heals what it needs and still answers.
+  it.effect("heals a partially provisioned account in either direction", () =>
+    Effect.gen(function* () {
+      const onlyLister = yield* freshUser("partial-lister");
+      yield* deleteProfile("seekers", onlyLister.id);
+      assert.strictEqual(yield* countFor("seekers", onlyLister.id), 0);
+
+      // Seeking is the stored role and its row is missing, so the flip to
+      // listing finds the row that is there and keeps the account honest.
+      const toListing = yield* changeRole(onlyLister);
+      assert.strictEqual(toListing.status, 200, toListing.body);
+      assert.strictEqual(yield* storedRole(onlyLister.id), "lister");
+      assert.strictEqual(yield* countFor("listers", onlyLister.id), 1);
+
+      // Coming back opens the missing seeking row instead of refusing: 0006 made
+      // the fields optional, so a blank profile can exist.
+      const toSeeking = yield* changeRole(onlyLister);
+      assert.strictEqual(toSeeking.status, 200, toSeeking.body);
+      assert.strictEqual(asObject(bodyOf(toSeeking)["newProfile"])["userId"], onlyLister.id);
+      assert.strictEqual(yield* storedRole(onlyLister.id), "seeker");
+      assert.strictEqual(yield* countFor("seekers", onlyLister.id), 1);
+
+      const onlySeeker = yield* freshUser("partial-seeker");
+      yield* deleteProfile("listers", onlySeeker.id);
+      assert.strictEqual(yield* countFor("listers", onlySeeker.id), 0);
+
+      const healed = yield* changeRole(onlySeeker);
+      assert.strictEqual(healed.status, 200, healed.body);
+      assert.strictEqual(asObject(bodyOf(healed)["newProfile"])["ownership"], "owner");
+      assert.strictEqual(yield* storedRole(onlySeeker.id), "lister");
+      assert.strictEqual(yield* countFor("listers", onlySeeker.id), 1);
+    }),
+  );
+
+  // The state the previous switch left behind when it wrote the role and then
+  // could not find the profile: a lister role with no lister row.
+  it.effect("heals a stored lister role that has no lister row", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("heal-stored-lister", "lister");
+
+      const healed = yield* changeRole(user);
+
+      assert.strictEqual(healed.status, 200, healed.body);
+      const profile = asObject(bodyOf(healed)["newProfile"]);
       assert.strictEqual(profile["userId"], user.id);
       assert.strictEqual(profile["ownership"], "owner");
-      assert.isNull(profile["name"]);
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
 
-      // The role and the row agree, in the database and not just on the wire.
+      // `me` now reports the profile the role points at instead of a null.
+      const after = yield* me(user);
+      assert.strictEqual(roleOf(after), "lister");
+      assert.strictEqual(profileOf(after)?.["userId"], user.id);
+
+      // The repaired account is not stuck: the next switch opens the seeking
+      // profile it never had and answers with it.
+      const switched = yield* changeRole(user);
+      assert.strictEqual(switched.status, 200, switched.body);
+      assert.strictEqual(asObject(bodyOf(switched)["newProfile"])["userId"], user.id);
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+    }),
+  );
+
+  // A pre-provisioning account that was already seeking has neither row, and
+  // still has to be able to switch.
+  it.effect("heals a stored seeker role that has no profile rows", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("heal-stored-seeker", "seeker");
+      assert.strictEqual(yield* countFor("seekers", user.id), 0);
+      assert.strictEqual(yield* countFor("listers", user.id), 0);
+
+      const switched = yield* changeRole(user);
+
+      assert.strictEqual(switched.status, 200, switched.body);
+      assert.strictEqual(asObject(bodyOf(switched)["newProfile"])["userId"], user.id);
       assert.strictEqual(yield* storedRole(user.id), "lister");
       assert.strictEqual(yield* countFor("listers", user.id), 1);
     }),
   );
 
-  // A double click or a retry can ask again while the row is already there: the
-  // ask is idempotent instead of a uniqueness failure.
   it.effect("provisions the lister profile idempotently when it already exists", () =>
     Effect.gen(function* () {
       const user = yield* freshUser("idempotent-provision");
-      yield* seedLister(user.id);
       yield* setRole(user.id, "seeker");
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
 
       const response = yield* changeRole(user);
 
@@ -171,95 +319,24 @@ describe("POST /api/users/change-role", () => {
     }),
   );
 
-  it.effect("switches back to seeking when the seeker profile exists", () =>
+  // The stale token is the point: the claim inside it still says `seeker` while
+  // the stored role says lister, so a handler that read the claim would flip to
+  // listing again instead of seeking.
+  it.effect("reads the stored role, so a switch is live on the very same token", () =>
     Effect.gen(function* () {
-      const user = yield* seekerUser("switch-to-seeker");
-      assert.strictEqual((yield* changeRole(user)).status, 200);
+      const user = yield* freshUser("stale-claim");
+      assert.strictEqual(claimedRole(user), "seeker");
+      yield* setRole(user.id, "lister");
 
       const response = yield* changeRole(user);
 
       assert.strictEqual(response.status, 200, response.body);
-      assert.strictEqual(asObject(bodyOf(response)["newProfile"])["name"], "Ada Seeker");
+      assert.strictEqual(asObject(bodyOf(response)["newProfile"])["userId"], user.id);
       assert.strictEqual(yield* storedRole(user.id), "seeker");
-    }),
-  );
-
-  it.effect("refuses to switch to seeking with no seeker profile and changes nothing", () =>
-    Effect.gen(function* () {
-      const user = yield* freshUser("refused-seeker");
-      yield* setRole(user.id, "lister");
-      yield* seedLister(user.id);
-
-      // The switch a payload-less request cannot complete: a seeker profile
-      // needs a name, a date of birth, and a gender, which nobody sent.
-      const refused = yield* changeRole(user);
-
-      assert.strictEqual(refused.status, 409, refused.body);
-      const body = bodyOf(refused);
-      assert.strictEqual(body["_tag"], "SeekerProfileRequiredError");
-      assert.include(String(body["message"]), "seeker profile has to be completed first");
-
-      // The account is exactly where it was: no role pointing at nothing, and
-      // neither profile table gained a row.
-      assert.strictEqual(yield* storedRole(user.id), "lister");
-      assert.strictEqual(yield* countFor("seekers", user.id), 0);
-      assert.strictEqual(yield* countFor("listers", user.id), 1);
-      const after = yield* me(user);
-      assert.strictEqual(roleOf(after), "lister");
-      assert.strictEqual(profileOf(after)?.["userId"], user.id);
-    }),
-  );
-
-  // The stale token is the point: the claim inside it still says `user`, so a
-  // handler that read the claim would try listing again instead of refusing.
-  it.effect("reads the stored role, so a switch is live on the very same token", () =>
-    Effect.gen(function* () {
-      const user = yield* seekerUser("stale-claim");
-      assert.strictEqual(claimedRole(user), "user");
-
-      const switched = yield* changeRole(user);
-      assert.strictEqual(switched.status, 200, switched.body);
 
       // The cookie was not reissued, so this is the same stale claim.
-      assert.strictEqual(claimedRole(user), "user");
-      assert.strictEqual(roleOf(yield* me(user)), "lister");
-
-      // Reading the stale claim would switch back to listing; the stored role
-      // is what drives the switch, and it goes to the seeker profile.
-      const back = yield* changeRole(user);
-      assert.strictEqual(back.status, 200, back.body);
-      assert.strictEqual(asObject(bodyOf(back)["newProfile"])["name"], "Ada Seeker");
-      assert.strictEqual(yield* storedRole(user.id), "seeker");
-    }),
-  );
-
-  // The state the previous switch left behind when it wrote the role and then
-  // could not find the profile: a lister role with no lister row.
-  it.effect("heals a stored lister role that has no lister row", () =>
-    Effect.gen(function* () {
-      const user = yield* freshUser("heal-stored-lister");
-      yield* setRole(user.id, "lister");
-      assert.strictEqual(yield* countFor("listers", user.id), 0);
-
-      const healed = yield* changeRole(user);
-
-      assert.strictEqual(healed.status, 200, healed.body);
-      const profile = asObject(bodyOf(healed)["newProfile"]);
-      assert.strictEqual(profile["userId"], user.id);
-      assert.strictEqual(profile["ownership"], "owner");
-      assert.strictEqual(yield* storedRole(user.id), "lister");
-      assert.strictEqual(yield* countFor("listers", user.id), 1);
-
-      // `me` now reports the profile the role points at instead of a null.
-      const after = yield* me(user);
-      assert.strictEqual(roleOf(after), "lister");
-      assert.strictEqual(profileOf(after)?.["userId"], user.id);
-
-      // The repaired account is not stuck: with a seeker profile it switches.
-      yield* seedSeeker(user.id);
-      const switched = yield* changeRole(user);
-      assert.strictEqual(switched.status, 200, switched.body);
-      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      assert.strictEqual(claimedRole(user), "seeker");
+      assert.strictEqual(roleOf(yield* me(user)), "seeker");
     }),
   );
 
@@ -273,16 +350,13 @@ describe("POST /api/users/change-role", () => {
       assert.strictEqual(refused.status, 403, refused.body);
       assert.strictEqual(bodyOf(refused)["_tag"], "AdminRoleSwitchError");
       assert.strictEqual(yield* storedRole(user.id), "admin");
-      assert.strictEqual(yield* countFor("listers", user.id), 0);
-      const after = yield* me(user);
-      assert.strictEqual(roleOf(after), "admin");
-      assert.isNull(profileOf(after));
+      assert.strictEqual(roleOf(yield* me(user)), "admin");
     }),
   );
 
-  it.effect("refuses a role switch for an unassigned account", () =>
+  it.effect("refuses a role switch for an unassigned legacy account", () =>
     Effect.gen(function* () {
-      const user = yield* freshUser("unassigned-guard");
+      const user = yield* legacyUser("unassigned-guard", "user");
 
       const refused = yield* changeRole(user);
 
