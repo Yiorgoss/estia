@@ -1,8 +1,13 @@
 import { GreekRegionCodes, ListingKind, ListingSchema } from "@/db/schema/Listing";
-import { head } from "@/frontend/head";
-import { header } from "@/frontend/header";
+import {
+  errorBanner,
+  pageShell,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from "@/frontend/layout";
 import type { ListingFormValues } from "@/frontend/listing-form";
-import { kindLabels, regionLabels, statusLabels } from "@/frontend/listing-labels";
+import { kindLabels, regionLabels } from "@/frontend/listing-labels";
+import { statusBadge, statusNotes } from "@/frontend/listing-status";
 import { canTransition } from "@/services/listing.service";
 import { escapeHtml } from "@/utils";
 
@@ -22,10 +27,6 @@ const inputClass =
 const selectClass =
   "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
 const hintClass = "mt-1 text-xs text-gray-500";
-const primaryButtonClass =
-  "rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2";
-const secondaryButtonClass =
-  "rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50";
 
 const field = (name: string, label: string, control: string, hint?: string) => `
   <div>
@@ -98,11 +99,6 @@ const checkbox = (name: string, label: string, checked: boolean) => `
     />
     ${label}
   </label>`;
-
-export const listingErrorBanner = (message: string | undefined) =>
-  message === undefined
-    ? ""
-    : `<p class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">${escapeHtml(message)}</p>`;
 
 const regionOptions = GreekRegionCodes.map((code) => ({
   value: code,
@@ -223,22 +219,6 @@ export const listingFields = (
     <p class="${hintClass}">Optional, but enter both or neither. The point must be inside Greece.</p>
   </fieldset>`;
 
-const pageShell = (title: string, content: string) => `<!DOCTYPE html>
-<html lang="en">
-<head>
-  ${head}
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)}</title>
-</head>
-<body class="min-h-lvh bg-gray-50">
-  ${header}
-  <main class="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-    ${content}
-  </main>
-</body>
-</html>
-`;
-
 export const newListingPage = (values: ListingFormValues, error?: string) =>
   pageShell(
     "New listing",
@@ -249,7 +229,7 @@ export const newListingPage = (values: ListingFormValues, error?: string) =>
     </p>
 
     <div class="mt-4 space-y-4">
-      ${listingErrorBanner(error)}
+      ${errorBanner(error)}
     </div>
 
     <form
@@ -261,26 +241,11 @@ export const newListingPage = (values: ListingFormValues, error?: string) =>
 
       <div class="mt-6 flex flex-wrap items-center gap-3">
         <button type="submit" class="${primaryButtonClass}">Save draft</button>
+        <a href="/listings/mine" class="${secondaryButtonClass}">My listings</a>
         <a href="/search" class="${secondaryButtonClass}">Cancel</a>
       </div>
     </form>`,
   );
-
-const statusBadgeClass = {
-  draft: "bg-gray-100 text-gray-700",
-  published: "bg-green-100 text-green-800",
-  unpublished: "bg-amber-100 text-amber-800",
-} as const;
-
-// What each status means to a visitor, since publishing now opens a page as well
-// as a search result.
-const statusNotes = {
-  draft:
-    "Only you can see a draft. Publish it to show it in public search and give it a public page.",
-  published: "This listing is published: it appears in public search and has its own public page.",
-  unpublished:
-    "This listing is unlisted: it is hidden from public search and its public page, with all its details kept.",
-} as const;
 
 const transitionControls = (listing: typeof ListingSchema.Type) => {
   const publish = canTransition(listing.status, "published")
@@ -310,9 +275,7 @@ export const editListingPage = (
         <h1 class="text-2xl font-semibold text-gray-900">Edit listing</h1>
         <p class="mt-1 text-sm text-gray-600">Listing #${listing.id}</p>
       </div>
-      <span class="rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass[listing.status]}">
-        ${statusLabels[listing.status]}
-      </span>
+      ${statusBadge(listing.status)}
     </div>
 
     <section class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
@@ -323,7 +286,7 @@ export const editListingPage = (
     </section>
 
     <div class="mt-4 space-y-4">
-      ${listingErrorBanner(error)}
+      ${errorBanner(error)}
     </div>
 
     <form
@@ -335,6 +298,7 @@ export const editListingPage = (
 
       <div class="mt-6 flex flex-wrap items-center gap-3">
         <button type="submit" class="${primaryButtonClass}">Save changes</button>
+        <a href="/listings/mine" class="${secondaryButtonClass}">My listings</a>
         <a href="/listings/${listing.id}/edit" class="${secondaryButtonClass}">Reset</a>
       </div>
     </form>`,
@@ -350,7 +314,8 @@ export const listingErrorPage = (title: string, message: string) =>
     <p class="mt-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
       ${escapeHtml(message)}
     </p>
-    <p class="mt-6">
+    <p class="mt-6 flex flex-wrap items-center gap-3">
+      <a href="/listings/mine" class="${secondaryButtonClass}">My listings</a>
       <a href="/search" class="${secondaryButtonClass}">Back to search</a>
     </p>`,
   );

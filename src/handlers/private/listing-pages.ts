@@ -1,4 +1,11 @@
-import { decodeListingId } from "@/db/schema/Listing";
+import {
+  decodeListingId,
+  encodeListingCursor,
+  LISTING_PAGE_DEFAULT_LIMIT,
+  ListingCursor,
+  ListingCursorFromString,
+  ListingMineQueryCodec,
+} from "@/db/schema/Listing";
 import { callerId } from "@/handlers/private/caller";
 import {
   decodeCreateListingForm,
@@ -8,6 +15,7 @@ import {
   listingFormValuesFor,
 } from "@/frontend/listing-form";
 import { editListingPage, listingErrorPage, newListingPage } from "@/frontend/pages/listing-form";
+import { myListingsPage } from "@/frontend/pages/my-listings";
 import { UnauthorizedError } from "@/services/auth.service";
 import {
   InvalidListingTransitionError,
@@ -19,14 +27,14 @@ import {
 } from "@/services/listing.service";
 import type { InternalError } from "@/services/user.service";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 /*
  * Owner-facing listing pages. They live on the private router, so `AuthMiddleware`
- * gates them the same way it gates the JSON API, and the caller's id reaches
- * `ListingService` as the owner exactly as in the API handlers. Every submit is
- * answered with a page, so a rejected form shows its reason instead of an empty
- * document.
+ * gates them, answering a signed-out visitor with the sign-in prompt page rather
+ * than the JSON API's 401 body, and the caller's id reaches `ListingService` as
+ * the owner exactly as in the API handlers. Every submit is answered with a page,
+ * so a rejected form shows its reason instead of an empty document.
  */
 
 type ListingPageError =
@@ -119,8 +127,51 @@ const getNewListingPage = HttpRouter.route(
 );
 
 /*
- * A draft is created here and the owner lands on its edit page, which is where
- * publish lives.
+ * The owner's own feed. The cursor is the model's opaque token, so paging is a
+ * link carrying it and a malformed one is a readable 400 rather than a silent
+ * first page. The page size stays the model's default: the page is not a place
+ * to ask for an arbitrary slice, so a `limit` in the link is decoded with the
+ * shared query codec but never used.
+ */
+const mineHref = (cursor?: string): string =>
+  cursor === undefined ? "/listings/mine" : `/listings/mine?cursor=${cursor}`;
+
+const mineHrefFor = (cursor: typeof ListingCursor.Type | undefined): string =>
+  mineHref(cursor === undefined ? undefined : encodeListingCursor(cursor));
+
+const minePageRequest = (cursor?: typeof ListingCursor.Type) => ({
+  limit: LISTING_PAGE_DEFAULT_LIMIT,
+  cursor,
+});
+
+const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
+  Effect.gen(function* () {
+    const searchParams = yield* HttpServerRequest.ParsedSearchParams;
+    const query = yield* Schema.decodeUnknownEffect(ListingMineQueryCodec)(searchParams);
+    const ownerId = yield* callerId(request);
+    const listingService = yield* ListingService;
+    const page = yield* listingService.listMine(ownerId, minePageRequest(query.cursor));
+    return respond(myListingsPage(page, { selfHref: mineHrefFor(query.cursor) }), 200);
+  }).pipe(
+    Effect.catchTag("SchemaError", () =>
+      Effect.succeed(
+        respond(
+          listingErrorPage(
+            "That page link could not be read",
+            "The page link is malformed. Open My listings again.",
+          ),
+          400,
+        ),
+      ),
+    ),
+    Effect.catch((error: ListingPageError) => Effect.succeed(errorResponse(error))),
+  ),
+);
+
+/*
+ * A draft is created here and the owner lands on its edit page. Its publish and
+ * unlist controls live there and on the mine page; both post to the transition
+ * routes below.
  */
 const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
   Effect.gen(function* () {
@@ -185,12 +236,39 @@ const updateListing = HttpRouter.route("POST", "/listings/:id/edit", (request) =
   }).pipe(Effect.catch((error: ListingPageError) => Effect.succeed(errorResponse(error)))),
 );
 
+/*
+ * A publish or unlist form may name the page it came from. Only the mine page is
+ * accepted - with or without a cursor - so the value can never become an open
+ * redirect, and an unnamed or unrecognised one keeps the edit page as the
+ * destination, which is where those actions have always returned.
+ */
+const MINE_RETURN_TO = /^\/listings\/mine(?:\?cursor=([A-Za-z0-9_-]+))?$/;
+
+type ReturnTo =
+  | { readonly page: "edit" }
+  | { readonly page: "mine"; readonly cursor: typeof ListingCursor.Type | undefined };
+
+// A form posts one `returnTo` value. A missing value, or a repeated field that
+// arrives as an array, keeps the edit page as the destination.
+const decodeReturnTo = (raw: string | ReadonlyArray<string> | undefined): ReturnTo => {
+  if (typeof raw !== "string") return { page: "edit" };
+  const match = MINE_RETURN_TO.exec(raw);
+  if (match === null) return { page: "edit" };
+  const cursor =
+    match[1] === undefined
+      ? undefined
+      : Option.getOrUndefined(Schema.decodeUnknownOption(ListingCursorFromString)(match[1]));
+  return { page: "mine", cursor };
+};
+
 const transitionRoute = (action: "publish" | "unlist") =>
   HttpRouter.route("POST", `/listings/:id/${action}`, (request) =>
     Effect.gen(function* () {
       const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
       if (id === undefined) return missingListingResponse();
 
+      const params = yield* readForm(request);
+      const returnTo = decodeReturnTo(params["returnTo"]);
       const ownerId = yield* callerId(request);
       const listingService = yield* ListingService;
       const move =
@@ -198,19 +276,37 @@ const transitionRoute = (action: "publish" | "unlist") =>
           ? listingService.publish(ownerId, id)
           : listingService.unlist(ownerId, id);
 
-      return yield* move.pipe(
-        Effect.map(() => seeOther(`/listings/${id}/edit`)),
-        Effect.catch((error: ListingPageError) => {
-          const { message, status } = describeError(error);
-          // An illegal transition is best explained next to the listing as it is
-          // now, so the page is re-read rather than rendered from a stale guess.
+      // A rejected transition is explained where its owner can act on it: the
+      // mine page re-reads its rows and repeats the message above them, the edit
+      // page shows the listing as it stands now.
+      const rejected = (error: ListingPageError) => {
+        const { message, status } = describeError(error);
+        if (returnTo.page === "edit") {
           return listingService.getOwn(ownerId, id).pipe(
             Effect.map((current) =>
               respond(editListingPage(current, listingFormValuesFor(current), message), status),
             ),
             Effect.orElseSucceed(() => errorResponse(error)),
           );
-        }),
+        }
+        return listingService.listMine(ownerId, minePageRequest(returnTo.cursor)).pipe(
+          Effect.map((page) =>
+            respond(
+              myListingsPage(page, { selfHref: mineHrefFor(returnTo.cursor), error: message }),
+              status,
+            ),
+          ),
+          Effect.orElseSucceed(() => errorResponse(error)),
+        );
+      };
+
+      return yield* move.pipe(
+        Effect.map(() =>
+          seeOther(
+            returnTo.page === "mine" ? mineHrefFor(returnTo.cursor) : `/listings/${id}/edit`,
+          ),
+        ),
+        Effect.catch(rejected),
       );
     }).pipe(Effect.catch((error: ListingPageError) => Effect.succeed(errorResponse(error)))),
   );
@@ -219,6 +315,7 @@ const transitionRoute = (action: "publish" | "unlist") =>
 // them next to its other routes under one auth middleware.
 export const ListingPageRoutes = [
   getNewListingPage,
+  getMyListingsPage,
   createListing,
   getEditListingPage,
   updateListing,

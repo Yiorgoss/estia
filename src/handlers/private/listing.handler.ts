@@ -5,13 +5,21 @@ import { HttpApiBuilder } from "effect/http-api";
 import { Effect } from "effect";
 
 /*
- * The authenticated listing mutations. The caller is always the owner, so no
- * request carries an owner id: the cookie is the identity, and the service owns
- * the ownership, transition, and validation rules. Every error the service
- * raises already carries its HTTP status, so the handlers only wire the calls.
+ * The authenticated listing reads and mutations. The caller is always the owner,
+ * so no request carries an owner id: the cookie is the identity, and the
+ * service owns the ownership, transition, and validation rules. Every error the
+ * service raises already carries its HTTP status, so the handlers only wire the
+ * calls.
  */
 export const ListingHandler = HttpApiBuilder.group(PrivateApi, "listing-group", (handlers) =>
   handlers
+    .handle("mine", ({ query, request }) =>
+      Effect.gen(function* () {
+        const ownerId = yield* callerId(request);
+        const listingService = yield* ListingService;
+        return yield* listingService.listMine(ownerId, query);
+      }),
+    )
     .handle("create", ({ payload, request }) =>
       Effect.gen(function* () {
         const ownerId = yield* callerId(request);

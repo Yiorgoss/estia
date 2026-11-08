@@ -2,7 +2,13 @@ import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { ListingId } from "@/db/schema/brands";
 import { CurrentUser } from "@/db/schema/User";
-import { CreateListingInput, ListingSchema, UpdateListingInput } from "@/db/schema/Listing";
+import {
+  CreateListingInput,
+  ListingCursorFromString,
+  ListingMineQuery,
+  ListingSchema,
+  UpdateListingInput,
+} from "@/db/schema/Listing";
 import { UnauthorizedError } from "@/services/auth.service";
 import { InternalError } from "@/services/user.service";
 import {
@@ -39,11 +45,33 @@ export const UserGroup = HttpApiGroup.make("user-group")
   .prefix("/users");
 
 /*
- * Owner-scoped listing writes. `ownerId`, `status`, and the timestamps are never
- * request data: the owner comes from the access token, a new listing is always a
- * draft, and only the publish/unlist endpoints move the status machine.
+ * The owner's own feed. Unlike the public search feed there is no projection:
+ * the caller is the owner of every row, so the whole listing - id, status,
+ * timestamps, and its own owner id - is theirs to read. The cursor is encoded
+ * for the wire exactly as the model defines it, so the page can hand it back
+ * untouched.
+ */
+export const MyListingPageResponse = Schema.Struct({
+  items: Schema.Array(ListingSchema),
+  nextCursor: Schema.NullishOr(ListingCursorFromString),
+});
+export type MyListingPageResponse = typeof MyListingPageResponse.Type;
+
+/*
+ * Owner-scoped listing endpoints. The caller is always the owner, so no request
+ * carries an owner id: the cookie is the identity, `mine` only ever reads rows
+ * that bearer owns, and `ownerId`, `status`, and the timestamps are never
+ * request data for a write (a new listing is always a draft, and only the
+ * publish/unlist endpoints move the status machine).
  */
 export const ListingGroup = HttpApiGroup.make("listing-group")
+  .add(
+    HttpApiEndpoint.get("mine", "/mine", {
+      query: ListingMineQuery,
+      success: MyListingPageResponse,
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
   .add(
     HttpApiEndpoint.post("create", "/", {
       payload: CreateListingInput,

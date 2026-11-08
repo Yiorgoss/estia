@@ -412,6 +412,172 @@ grep -q 'href="/search"' "$WORK/detail-page-unlisted" \
   || fail "unlisted not-found page has no way back to search"
 pass "unlisted detail page shows the not-found state with a way back"
 
+# 5e. the owner's own feed (GET /api/listings/mine and /listings/mine)
+#
+# Two independent users, each posting a fresh draft: every "mine" feed contains
+# only its own rows - drafts included - while the public feed still hides those
+# drafts. Publishing from the page itself is exercised end to end.
+SECOND_EMAIL="smoke-second-$(date +%s)@test.local"
+CODE=$(curl -s -D "$WORK/register-second.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${SECOND_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+assert_status "$CODE" 200 "register second smoke user"
+SECOND_ACCESS="$(cookie_value "$WORK/register-second.h" access_token)"
+[ -n "$SECOND_ACCESS" ] || fail "second smoke user has no access cookie"
+pass "second smoke user registered"
+
+MINE_EUR=$(( ($(date +%s) % 3000) + 81000 ))
+MINE_MINOR=$((MINE_EUR * 100))
+MINE_TITLE="Smoke mine draft ${SMOKE_TAG}"
+MINE_TITLE_2="Smoke mine draft two ${SMOKE_TAG}"
+SECOND_TITLE="Smoke second user draft ${SMOKE_TAG}"
+
+post_listing() {
+  # $1: access cookie, $2: title, $3: minor price, $4: response body file
+  curl -s -o "$4" -w '%{http_code}' \
+    -X POST "${BASE_URL}/api/listings" \
+    -H 'Content-Type: application/json' \
+    -H "Cookie: access_token=$1" \
+    -d "{\"kind\":\"room\",\"title\":\"$2\",\"priceMinor\":$3,\"regionCode\":\"crete\"}"
+}
+
+CODE=$(post_listing "$ACCESS" "$MINE_TITLE" "$MINE_MINOR" "$WORK/mine-create")
+assert_status "$CODE" 200 "mine listing create"
+MINE_ID="$(json_field id < "$WORK/mine-create")"
+CODE=$(post_listing "$ACCESS" "$MINE_TITLE_2" "$MINE_MINOR" "$WORK/mine-create-2")
+assert_status "$CODE" 200 "mine listing create (second)"
+MINE_ID_2="$(json_field id < "$WORK/mine-create-2")"
+CODE=$(post_listing "$SECOND_ACCESS" "$SECOND_TITLE" "$MINE_MINOR" "$WORK/mine-create-second")
+assert_status "$CODE" 200 "second user's listing create"
+SECOND_ID="$(json_field id < "$WORK/mine-create-second")"
+[ -n "$MINE_ID" ] && [ -n "$MINE_ID_2" ] && [ -n "$SECOND_ID" ] || fail "mine listing ids"
+pass "two users each posted a draft"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/mine")
+assert_status "$CODE" 401 "the mine feed rejects an unauthenticated caller"
+CODE=$(curl -s -o "$WORK/mine-unauth" -w '%{http_code}' "${BASE_URL}/listings/mine")
+assert_status "$CODE" 401 "the mine page rejects an unauthenticated caller"
+grep -q "You need to be signed in to see your listings and manage them." "$WORK/mine-unauth" \
+  || fail "the signed-out mine page did not render the sign-in prompt"
+if grep -q 'UnauthorizedError' "$WORK/mine-unauth"; then
+  fail "the signed-out mine page answered with a bare 401 body"
+fi
+pass "the signed-out mine page renders the sign-in prompt"
+
+id_before() {
+  # $1: id expected earlier, $2: id expected later, stdin: mine feed JSON
+  node -e 'let s=""; process.stdin.on("data", (d) => s += d).on("end", () => { const items = JSON.parse(s).items.map((item) => String(item.id)); const a = items.indexOf(process.argv[1]); const b = items.indexOf(process.argv[2]); process.exit(a >= 0 && b >= 0 && a < b ? 0 : 1); })' "$1" "$2"
+}
+
+listing_status() {
+  # $1: listing id, stdin: mine feed JSON
+  node -e 'let s=""; process.stdin.on("data", (d) => s += d).on("end", () => { const found = JSON.parse(s).items.find((item) => String(item.id) === process.argv[1]); process.stdout.write(found === undefined ? "" : String(found.status)); })' "$1"
+}
+
+CODE=$(curl -s -o "$WORK/mine-feed" -w '%{http_code}' "${BASE_URL}/api/listings/mine?limit=50" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine feed"
+MINE_IDS="$(listing_ids < "$WORK/mine-feed")"
+for id in "$MINE_ID" "$MINE_ID_2" "$API_ID" "$DRAFT_ID"; do
+  case ",${MINE_IDS}," in
+    *",${id},"*) ;;
+    *) fail "mine feed is missing the owner's listing ${id} (got ${MINE_IDS})" ;;
+  esac
+done
+pass "mine feed includes the owner's drafts and unlisted listings"
+case ",${MINE_IDS}," in
+  *",${SECOND_ID},"*) fail "mine feed leaked another user's listing" ;;
+  *) pass "mine feed never returns another user's rows" ;;
+esac
+id_before "$MINE_ID_2" "$MINE_ID" < "$WORK/mine-feed" \
+  || fail "mine feed is not newest first (got ${MINE_IDS})"
+pass "mine feed is newest first"
+
+CODE=$(curl -s -o "$WORK/mine-feed-second" -w '%{http_code}' "${BASE_URL}/api/listings/mine?limit=50" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "second user's mine feed"
+SECOND_IDS="$(listing_ids < "$WORK/mine-feed-second")"
+case ",${SECOND_IDS}," in
+  *",${SECOND_ID},"*) pass "second user's mine feed includes its own draft" ;;
+  *) fail "second user's mine feed is missing its own draft (got ${SECOND_IDS})" ;;
+esac
+case ",${SECOND_IDS}," in
+  *",${MINE_ID},"*|*",${MINE_ID_2},"*) fail "second user's mine feed leaked another user's rows" ;;
+  *) pass "second user's mine feed only has its own rows" ;;
+esac
+
+CODE=$(curl -s -o "$WORK/mine-page1" -w '%{http_code}' "${BASE_URL}/api/listings/mine?limit=1" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine feed with a limit"
+MINE_CURSOR=$(node -e 'let s=""; process.stdin.on("data", (d) => s += d).on("end", () => { const body = JSON.parse(s); process.stdout.write(body.nextCursor == null ? "" : String(body.nextCursor)); })' < "$WORK/mine-page1")
+[ -n "$MINE_CURSOR" ] || fail "mine feed did not return a nextCursor"
+CODE=$(curl -s -o "$WORK/mine-page2" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/mine?limit=1&cursor=${MINE_CURSOR}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine feed second page"
+MINE_PAGE1_ID="$(listing_ids < "$WORK/mine-page1")"
+MINE_PAGE2_ID="$(listing_ids < "$WORK/mine-page2")"
+[ -n "$MINE_PAGE2_ID" ] || fail "mine feed second page is empty"
+[ "$MINE_PAGE2_ID" != "$MINE_PAGE1_ID" ] || fail "mine feed second page repeated the first page"
+pass "mine feed pages with its cursor"
+
+# The fresh drafts are not in the public feed, so the mine feed genuinely shows
+# rows a visitor cannot reach.
+CODE=$(curl -s -o "$WORK/mine-public" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?minPriceMinor=${MINE_MINOR}&maxPriceMinor=${MINE_MINOR}")
+assert_status "$CODE" 200 "public feed for the mine fixture price"
+PUBLIC_IDS="$(listing_ids < "$WORK/mine-public")"
+case ",${PUBLIC_IDS}," in
+  *",${MINE_ID},"*|*",${MINE_ID_2},"*|*",${SECOND_ID},"*) fail "a draft reached the public feed" ;;
+  *) pass "the mine feed's drafts are not in the public feed" ;;
+esac
+
+# The page itself: drafts render with a status badge and a publish action that
+# comes back to this page.
+CODE=$(curl -s -o "$WORK/mine-page" -w '%{http_code}' "${BASE_URL}/listings/mine" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine page"
+grep -q "${MINE_TITLE_2}" "$WORK/mine-page" || fail "mine page rendered the owner's listing"
+grep -q 'Draft' "$WORK/mine-page" || fail "mine page shows a status badge"
+grep -Eq 'Showing [0-9]+ listings?, newest first' "$WORK/mine-page" \
+  || fail "mine page did not render the owner's feed count"
+grep -q "action=\"/listings/${MINE_ID}/publish\"" "$WORK/mine-page" || fail "mine page offers publish on a draft"
+grep -q 'name="returnTo" value="/listings/mine"' "$WORK/mine-page" || fail "mine page actions name the page to return to"
+pass "mine page renders drafts with a status badge and a publish action"
+
+CODE=$(curl -s -D "$WORK/mine-publish.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${MINE_ID}/publish" \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode "returnTo=/listings/mine")
+assert_status "$CODE" 303 "publish from the mine page"
+MINE_LOCATION=$(grep -i '^location:' "$WORK/mine-publish.h" | head -1 | tr -d '\r' | sed -E 's/^[Ll]ocation: //')
+[ "$MINE_LOCATION" = "/listings/mine" ] \
+  || fail "publish did not return to the mine page (got ${MINE_LOCATION})"
+pass "publish from the mine page returns to the mine page"
+
+CODE=$(curl -s -o "$WORK/mine-after-publish" -w '%{http_code}' "${BASE_URL}/api/listings/mine?limit=50" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine feed after publishing"
+[ "$(listing_status "$MINE_ID" < "$WORK/mine-after-publish")" = "published" ] \
+  || fail "publishing from the mine page did not publish the listing"
+pass "publishing from the mine page changes the status"
+
+# A second publish is illegal, and the rejection has to be readable on the page
+# the owner came from instead of an empty response.
+CODE=$(curl -s -o "$WORK/mine-rejected" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${MINE_ID}/publish" \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode "returnTo=/listings/mine")
+assert_status "$CODE" 409 "publishing twice from the mine page is rejected"
+grep -q "This listing is already published." "$WORK/mine-rejected" \
+  || fail "the mine page did not explain the rejected transition"
+grep -q "${MINE_TITLE_2}" "$WORK/mine-rejected" \
+  || fail "the rejection did not re-render the owner's feed"
+grep -Eq 'Showing [0-9]+ listings?, newest first' "$WORK/mine-rejected" \
+  || fail "the rejection did not re-render the owner's feed count"
+pass "a rejected transition is explained on the mine page"
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")

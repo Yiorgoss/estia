@@ -201,8 +201,9 @@ export type ListingPage = typeof ListingPage.Type;
  * The cursor travels as `base64url("<createdAt>:<id>")`, so the sort key is not
  * a JSON field and there is no offset parameter to page with. It is
  * tamper-tolerant, not tamper-proof: a forged cursor is accepted, which is
- * harmless because it only moves the keyset window while the published-only
- * rule and every filter still apply.
+ * harmless because it only moves the keyset window - each feed still decides
+ * which rows exist for it, the published-only rule and the filters on public
+ * search, the owner scope on the owner's own feed.
  */
 const CURSOR_PATTERN = /^(\d+):(\d+)$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -275,6 +276,18 @@ const ListingPageLimitFromString = NonBlankFiniteFromString.pipe(
   Schema.decodeTo(ListingPageLimit, SchemaTransformation.passthrough()),
 );
 
+/*
+ * The paging contract both listing feeds share. Declaring the fields once keeps
+ * the two feeds from drifting: `limit` defaults to 20 and is capped at 50, and
+ * the cursor is the opaque base64url token, never an offset.
+ */
+const pagingQueryFields = {
+  limit: ListingPageLimitFromString.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(LISTING_PAGE_DEFAULT_LIMIT)),
+  ),
+  cursor: Schema.optional(ListingCursorFromString),
+};
+
 export const ListingSearchQuery = Schema.Struct({
   kind: Schema.optional(ListingKind),
   regionCode: Schema.optional(GreekRegion),
@@ -287,10 +300,7 @@ export const ListingSearchQuery = Schema.Struct({
   smoking: Schema.optional(BooleanFromString),
   pets: Schema.optional(BooleanFromString),
   availableFrom: Schema.optional(Schema.DateFromString),
-  limit: ListingPageLimitFromString.pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(LISTING_PAGE_DEFAULT_LIMIT)),
-  ),
-  cursor: Schema.optional(ListingCursorFromString),
+  ...pagingQueryFields,
 }).check(
   Schema.makeFilter((query) => {
     const issues: Array<Schema.FilterIssue> = [];
@@ -322,3 +332,10 @@ export type ListingSearchQuery = typeof ListingSearchQuery.Type;
 // Query parameters arrive as a string tree, so the schema is read through this
 // codec instead of its own encoded side.
 export const ListingSearchQueryCodec = Schema.toCodecStringTree(ListingSearchQuery);
+
+// The owner's own feed filters on nothing at all: every status, newest first.
+// Only the paging contract above travels as query data.
+export const ListingMineQuery = Schema.Struct({ ...pagingQueryFields });
+export type ListingMineQuery = typeof ListingMineQuery.Type;
+
+export const ListingMineQueryCodec = Schema.toCodecStringTree(ListingMineQuery);
