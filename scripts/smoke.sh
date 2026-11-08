@@ -696,6 +696,15 @@ CODE=$(curl -s -o "$WORK/cross-site-publish" -w '%{http_code}' \
   --data-urlencode "returnTo=/listings/mine")
 assert_status "$CODE" 403 "publishing from another site is refused"
 
+# The same transition is a payload-less post on the JSON API, which a page on
+# another site can submit as a plain form post, so the API refuses a foreign
+# origin itself instead of relying on the cookie attribute.
+CODE=$(curl -s -o "$WORK/api-cross-site-publish" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${MINE_ID}/publish" \
+  -H 'Origin: https://evil.example' \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 403 "the API refuses a publish from another site"
+
 CODE=$(curl -s -o "$WORK/mine-after-cross-site" -w '%{http_code}' \
   "${BASE_URL}/api/listings/mine?limit=50" -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 200 "mine feed after the refused cross-site posts"
@@ -765,5 +774,30 @@ CODE=$(curl -s -o "$WORK/multipart" -w '%{http_code}' \
 assert_status "$CODE" 200 "multipart upload"
 grep -q 'Successful' "$WORK/multipart" || fail "multipart upload response body"
 pass "multipart upload response body"
+
+# 8. the payload-less role switch on the JSON API
+#
+# It is a simple request too, so a sibling site is refused outright while the
+# app's own page is allowed through. The switch returns the profile of the new
+# role, which has to exist before the handler can answer with it.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 403 "the API refuses a role switch from a sibling site"
+
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "INSERT OR IGNORE INTO listers (user_id) VALUES ('${USER_ID}');" \
+  >/dev/null 2>&1 || fail "seed lister profile"
+pass "seed lister profile"
+
+CODE=$(curl -s -o "$WORK/change-role" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "a role switch from the app's own origin"
+grep -q '"newProfile"' "$WORK/change-role" \
+  || fail "the role switch did not return the new profile"
+pass "a role switch from the app's own origin returns the new profile"
 
 echo "smoke checklist passed"

@@ -313,6 +313,128 @@ describe("a listing form post from this site", () => {
 });
 
 /*
+ * The same rule at the JSON API's own boundary. These endpoints take no payload,
+ * so a page on another site can submit one as a plain form post: empty body, no
+ * content type, the lister's own cookie attached. The tests drive the endpoints
+ * because the gate sits on the private router rather than in one handler.
+ */
+const apiWrite = (user: TestUser, path: string, headers: Readonly<Record<string, string>> = {}) =>
+  call(path, {
+    method: "POST",
+    headers: { "user-agent": "estia-tests", cookie: user.cookie, ...headers },
+  });
+
+const statusOf = (user: TestUser, id: unknown) =>
+  Effect.map(ownListing(user, id), (listing) => listing?.status);
+
+const assertApiRefused = (response: { status: number; body: string }) => {
+  assert.strictEqual(response.status, 403, response.body);
+  assert.include(response.body, "can only be submitted from this site");
+};
+
+describe("a state-changing JSON write from another site", () => {
+  it.effect("is refused on publish and leaves the listing a draft", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-csrf-publish");
+      const draft = yield* createDraft(user);
+
+      assertApiRefused(
+        yield* apiWrite(user, `/api/listings/${String(draft.id)}/publish`, crossSite),
+      );
+      assert.strictEqual(yield* statusOf(user, draft.id), "draft");
+    }),
+  );
+
+  it.effect("is refused on unlist and leaves the listing published", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-csrf-unlist");
+      const draft = yield* createDraft(user);
+      assert.strictEqual((yield* publish(user, draft.id)).status, 200);
+
+      assertApiRefused(
+        yield* apiWrite(user, `/api/listings/${String(draft.id)}/unlist`, crossSite),
+      );
+      assert.strictEqual(yield* statusOf(user, draft.id), "published");
+    }),
+  );
+
+  // A sibling subdomain is not the request's own origin but still counts as the
+  // same site, so the browser attaches the session cookie to its post.
+  it.effect("is refused when the browser labels the write same-site", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-csrf-same-site");
+      const draft = yield* createDraft(user);
+
+      assertApiRefused(
+        yield* apiWrite(user, `/api/listings/${String(draft.id)}/publish`, {
+          "sec-fetch-site": "same-site",
+        }),
+      );
+      assert.strictEqual(yield* statusOf(user, draft.id), "draft");
+    }),
+  );
+
+  it.effect("is refused on change-role", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-csrf-change-role");
+
+      assertApiRefused(yield* apiWrite(user, "/api/users/change-role", crossSite));
+      assertApiRefused(
+        yield* apiWrite(user, "/api/users/change-role", { "sec-fetch-site": "cross-site" }),
+      );
+    }),
+  );
+
+  it.effect("is accepted from this site's own page", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-write-same-origin");
+      const draft = yield* createDraft(user);
+      const path = `/api/listings/${String(draft.id)}`;
+      const ownOrigin = { origin: testOrigin, "sec-fetch-site": "same-origin" };
+
+      const accepted = yield* apiWrite(user, `${path}/publish`, ownOrigin);
+      assert.strictEqual(accepted.status, 200, accepted.body);
+      assert.strictEqual(yield* statusOf(user, draft.id), "published");
+
+      const unlisted = yield* apiWrite(user, `${path}/unlist`, ownOrigin);
+      assert.strictEqual(unlisted.status, 200, unlisted.body);
+      assert.strictEqual(yield* statusOf(user, draft.id), "unpublished");
+    }),
+  );
+
+  it.effect("is accepted from a client that sends none of the origin headers", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-write-header-less");
+      const draft = yield* createDraft(user);
+      const path = `/api/listings/${String(draft.id)}`;
+
+      const accepted = yield* apiWrite(user, `${path}/publish`);
+      assert.strictEqual(accepted.status, 200, accepted.body);
+      assert.strictEqual(yield* statusOf(user, draft.id), "published");
+
+      const unlisted = yield* apiWrite(user, `${path}/unlist`);
+      assert.strictEqual(unlisted.status, 200, unlisted.body);
+      assert.strictEqual(yield* statusOf(user, draft.id), "unpublished");
+    }),
+  );
+
+  // A user-initiated request carries no cross-site claim, so it is not refused.
+  // The handler may still answer with its own error, which is not the gate's 403:
+  // a freshly registered account has no profile for `change-role` to return.
+  it.effect("is accepted on change-role when the browser marks it user-initiated", () =>
+    Effect.gen(function* () {
+      const user = yield* register("api-write-user-initiated");
+
+      const userInitiated = yield* apiWrite(user, "/api/users/change-role", {
+        "sec-fetch-site": "none",
+      });
+      assert.notStrictEqual(userInitiated.status, 403, userInitiated.body);
+      assert.notInclude(userInitiated.body, "can only be submitted from this site");
+    }),
+  );
+});
+
+/*
  * The other half of the defence: the session cookies state their policy instead of
  * inheriting a browser default, on both the surface that issues them and the
  * middleware that re-issues them on every authenticated request.

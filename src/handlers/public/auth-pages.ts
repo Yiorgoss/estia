@@ -1,6 +1,6 @@
 import { authFormEmail, decodeLoginForm, decodeRegisterForm } from "@/frontend/auth-form";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
-import { crossSiteFormMessage, isSameOriginFormPost } from "@/handlers/form-origin";
+import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import { AuthService, type AuthTokens } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
@@ -52,7 +52,7 @@ const signedInResponse = (tokens: AuthTokens) =>
 
 const login = HttpRouter.route("POST", "/login", (request) =>
   Effect.gen(function* () {
-    if (!isSameOriginFormPost(request)) {
+    if (!isSameOriginWrite(request)) {
       return respond(loginPage({ message: crossSiteFormMessage }), 403);
     }
 
@@ -97,7 +97,7 @@ const login = HttpRouter.route("POST", "/login", (request) =>
 
 const register = HttpRouter.route("POST", "/register", (request) =>
   Effect.gen(function* () {
-    if (!isSameOriginFormPost(request)) {
+    if (!isSameOriginWrite(request)) {
       return respond(registerPage({ message: crossSiteFormMessage }), 403);
     }
 

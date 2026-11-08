@@ -6,7 +6,7 @@ import {
   ListingCursorFromString,
   ListingMineQueryCodec,
 } from "@/db/schema/Listing";
-import { crossSiteFormMessage, isSameOriginFormPost } from "@/handlers/form-origin";
+import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import { callerId } from "@/handlers/private/caller";
 import {
   decodeCreateListingForm,
@@ -185,7 +185,7 @@ const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
  */
 const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
   Effect.gen(function* () {
-    if (!isSameOriginFormPost(request)) return crossSiteResponse();
+    if (!isSameOriginWrite(request)) return crossSiteResponse();
 
     const params = yield* readForm(request);
     const values = listingFormValues(params);
@@ -222,7 +222,7 @@ const getEditListingPage = HttpRouter.route("GET", "/listings/:id/edit", (reques
 
 const updateListing = HttpRouter.route("POST", "/listings/:id/edit", (request) =>
   Effect.gen(function* () {
-    if (!isSameOriginFormPost(request)) return crossSiteResponse();
+    if (!isSameOriginWrite(request)) return crossSiteResponse();
 
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return missingListingResponse();
@@ -278,7 +278,7 @@ const decodeReturnTo = (raw: string | ReadonlyArray<string> | undefined): Return
 const transitionRoute = (action: "publish" | "unlist") =>
   HttpRouter.route("POST", `/listings/:id/${action}`, (request) =>
     Effect.gen(function* () {
-      if (!isSameOriginFormPost(request)) return crossSiteResponse();
+      if (!isSameOriginWrite(request)) return crossSiteResponse();
 
       const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
       if (id === undefined) return missingListingResponse();
