@@ -47,12 +47,7 @@ export const UserGroup = HttpApiGroup.make("user-group")
       }),
       // An admin or unassigned account has no profile to switch between, so
       // those refusals are part of the endpoint's contract.
-      error: [
-        AdminRoleSwitchError,
-        UnassignedRoleSwitchError,
-        InternalError,
-        UnauthorizedError,
-      ],
+      error: [AdminRoleSwitchError, UnassignedRoleSwitchError, InternalError, UnauthorizedError],
     }),
   )
   // A group prefix only applies to the endpoints added before it.

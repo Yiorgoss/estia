@@ -63,10 +63,7 @@ export interface UserService {
    */
   switchRoles: (
     id: typeof UserId.Type,
-  ) => Effect.Effect<
-    UserProfile,
-    AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError
-  >;
+  ) => Effect.Effect<UserProfile, AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError>;
 }
 
 export const UserService = Context.Service<UserService>("UserService");
@@ -182,14 +179,12 @@ export const UserServiceLive = Layer.effect(
             yield* listerRepo.createForUser(user.id);
           }).pipe(
             Effect.onError(() =>
-              userRepo
-                .deleteById(user.id)
-                .pipe(
-                  Effect.tapError((error) =>
-                    Effect.logError("Registration rollback failed", { error }),
-                  ),
-                  Effect.ignore,
+              userRepo.deleteById(user.id).pipe(
+                Effect.tapError((error) =>
+                  Effect.logError("Registration rollback failed", { error }),
                 ),
+                Effect.ignore,
+              ),
             ),
           );
 
