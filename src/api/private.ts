@@ -10,7 +10,12 @@ import {
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { UnauthorizedError } from "@/services/auth.service";
-import { InternalError, SeekerProfileRequiredError } from "@/services/user.service";
+import {
+  AdminRoleSwitchError,
+  InternalError,
+  SeekerProfileRequiredError,
+  UnassignedRoleSwitchError,
+} from "@/services/user.service";
 import {
   InvalidListingTransitionError,
   ListingLocationOutOfGreeceError,
@@ -41,8 +46,15 @@ export const UserGroup = HttpApiGroup.make("user-group")
         newProfile: Schema.Union([SeekerSchema, ListerSchema]),
       }),
       // A switch to seeking without a seeker profile is refused rather than
-      // half-applied, so the 409 is part of the endpoint's contract.
-      error: [SeekerProfileRequiredError, InternalError, UnauthorizedError],
+      // half-applied, and an admin or unassigned account has no profile to
+      // switch between, so those refusals are part of the endpoint's contract.
+      error: [
+        SeekerProfileRequiredError,
+        AdminRoleSwitchError,
+        UnassignedRoleSwitchError,
+        InternalError,
+        UnauthorizedError,
+      ],
     }),
   )
   // A group prefix only applies to the endpoints added before it.

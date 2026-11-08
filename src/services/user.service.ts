@@ -23,13 +23,27 @@ export class InternalError extends Schema.TaggedError<InternalError>()("Internal
 
 /*
  * A role switch is only honest when the target profile exists afterwards. A
- * lister profile needs nothing but the user id, so switching to listing can
- * provision it. A seeker profile needs a name, a date of birth, and a gender,
- * which a payload-less switch does not carry, so the switch is refused instead
- * of leaving the account with a role that points at nothing.
+ * lister profile needs nothing but the user id, so a stored lister role without
+ * a row can be repaired and switching to listing can provision one. A seeker
+ * profile needs a name, a date of birth, and a gender, which a payload-less
+ * switch does not carry, so that switch is refused instead of leaving the
+ * account with a role that points at nothing. Admins and unassigned accounts
+ * hold no profile to switch between, so they are refused rather than guessed at.
  */
 export class SeekerProfileRequiredError extends Schema.TaggedError<SeekerProfileRequiredError>()(
   "SeekerProfileRequiredError",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+export class AdminRoleSwitchError extends Schema.TaggedError<AdminRoleSwitchError>()(
+  "AdminRoleSwitchError",
+  { message: Schema.String },
+  { httpApiStatus: 403 },
+) {}
+
+export class UnassignedRoleSwitchError extends Schema.TaggedError<UnassignedRoleSwitchError>()(
+  "UnassignedRoleSwitchError",
   { message: Schema.String },
   { httpApiStatus: 409 },
 ) {}
@@ -43,11 +57,16 @@ export interface UserService {
   ) => Effect.Effect<typeof UserSchema.Type, UserAlreadyExistsError | InternalError>;
   /*
    * Flip the stored role and answer with the profile that role now has. The
-   * stored role is the starting point, never a role carried by the request.
+   * stored role is the starting point, never a role carried by the request, and
+   * the stored role and its profile row agree after the call whichever side was
+   * missing.
    */
   switchRoles: (
     id: typeof UserId.Type,
-  ) => Effect.Effect<UserProfile, SeekerProfileRequiredError | InternalError>;
+  ) => Effect.Effect<
+    UserProfile,
+    SeekerProfileRequiredError | AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError
+  >;
 }
 
 export const UserService = Context.Service<UserService>("UserService");
@@ -70,34 +89,58 @@ export const UserServiceLive = Layer.effect(
             return yield* Effect.fail(new InternalError());
           }
 
-          // Switching to listing: the profile is either there already or can be
-          // opened from the user id alone. The row is created first and the role
-          // is written second, so the role never points at a missing profile.
-          if (user.value.role !== "lister") {
-            const existing = yield* listerRepo.findByUserId(id);
-            const lister = Option.isSome(existing)
-              ? existing.value
-              : yield* listerRepo.createForUser(id);
-            yield* userRepo
-              .updateRole(id, "lister")
-              .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
-            return lister;
-          }
+          switch (user.value.role) {
+            case "admin":
+              return yield* Effect.fail(
+                new AdminRoleSwitchError({
+                  message: "An admin account cannot switch roles.",
+                }),
+              );
 
-          // Switching to seeking: the profile cannot be invented from a
-          // payload-less request, so refuse before touching anything.
-          const seeker = yield* seekerRepo.findByUserId(id);
-          if (Option.isNone(seeker)) {
-            return yield* Effect.fail(
-              new SeekerProfileRequiredError({
-                message: "A seeker profile has to be completed first.",
-              }),
-            );
+            // The unassigned role holds no profile, so there is nothing to
+            // switch between and no target role to infer.
+            case "user":
+              return yield* Effect.fail(
+                new UnassignedRoleSwitchError({
+                  message: "This account has neither a seeker nor a lister profile yet.",
+                }),
+              );
+
+            // Switching to listing: the profile is opened from the user id
+            // alone, and the row is created first so the role never points at a
+            // missing profile.
+            case "seeker": {
+              const lister = yield* listerRepo.createForUser(id);
+              yield* userRepo
+                .updateRole(id, "lister")
+                .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
+              return lister;
+            }
+
+            // Switching to seeking. A stored lister role with no lister row is
+            // the half-applied state an earlier switch left behind, so that row
+            // is opened first and answered with; the account was a lister all
+            // along, and the next call can switch once a seeker profile exists.
+            case "lister": {
+              const existing = yield* listerRepo.findByUserId(id);
+              if (Option.isNone(existing)) {
+                return yield* listerRepo.createForUser(id);
+              }
+
+              const seeker = yield* seekerRepo.findByUserId(id);
+              if (Option.isNone(seeker)) {
+                return yield* Effect.fail(
+                  new SeekerProfileRequiredError({
+                    message: "A seeker profile has to be completed first.",
+                  }),
+                );
+              }
+              yield* userRepo
+                .updateRole(id, "seeker")
+                .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
+              return seeker.value;
+            }
           }
-          yield* userRepo
-            .updateRole(id, "seeker")
-            .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
-          return seeker.value;
         }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
       registerUser: ({ email, password }) =>
         Effect.gen(function* () {

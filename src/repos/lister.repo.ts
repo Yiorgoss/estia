@@ -9,9 +9,11 @@ export interface ListerRepository {
     userId: typeof UserId.Type,
   ) => Effect.Effect<Option.Option<typeof ListerSchema.Type>, SqlError>;
   /*
-   * A lister row needs nothing but the user id: `ownership` has a default and
-   * `name` is nullish, so a listing profile can be opened before anyone has
-   * filled one in. That is what makes switching to listing provisionable.
+   * Ensure the user has a listing profile and answer with it. A lister row needs
+   * nothing but the user id: `ownership` has a default and `name` is nullish, so
+   * a listing profile can be opened before anyone has filled one in. Asking
+   * twice - a double click, a retry, two tabs - answers with the same profile
+   * instead of tripping the `user_id` uniqueness constraint.
    */
   readonly createForUser: (
     userId: typeof UserId.Type,
@@ -39,6 +41,7 @@ export const ListerRepositoryLive = Layer.effect(
         sql<Record<string, unknown>>`
             INSERT INTO listers (user_id)
                  VALUES (${userId})
+            ON CONFLICT (user_id) DO UPDATE SET user_id = excluded.user_id
              RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map((row) => Schema.decodeUnknownSync(ListerSchema)(row)),

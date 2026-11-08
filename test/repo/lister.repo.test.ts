@@ -49,4 +49,33 @@ layer(TestLive, { concurrent: false })("ListerRepository", (it) => {
       assert.isTrue(Option.isNone(missing));
     }),
   );
+
+  it.effect("createForUser opens a profile with the column defaults", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-lister-create", "lister-create@test.local", "lister");
+
+      const repo = yield* ListerRepository;
+      const lister = yield* repo.createForUser(userId("u-lister-create"));
+
+      assert.strictEqual(lister.userId, "u-lister-create");
+      assert.strictEqual(lister.ownership, "owner");
+      assert.isNull(lister.name);
+      assert.instanceOf(lister.createdAt, Date);
+    }),
+  );
+
+  // A double click, a retry, or two tabs can ask twice for the same profile. The
+  // second ask is the same profile, not a uniqueness failure.
+  it.effect("createForUser answers with the existing profile on a second ask", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-lister-twice", "lister-twice@test.local", "lister");
+
+      const repo = yield* ListerRepository;
+      const first = yield* repo.createForUser(userId("u-lister-twice"));
+      const second = yield* repo.createForUser(userId("u-lister-twice"));
+
+      assert.strictEqual(second.id, first.id);
+      assert.strictEqual(second.userId, "u-lister-twice");
+    }),
+  );
 });
