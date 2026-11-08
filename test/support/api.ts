@@ -66,6 +66,9 @@ export interface TestResponse {
   readonly body: string;
   readonly json: unknown;
   readonly cookies: Readonly<Record<string, string>>;
+  // The `Set-Cookie` headers verbatim, so a test can pin the attributes a
+  // browser applies to a cookie, not just its value.
+  readonly setCookies: ReadonlyArray<string>;
   readonly location: string | null;
 }
 
@@ -78,7 +81,8 @@ const callThrough = (
     const response = await testApp.handler(new Request(`${TEST_ORIGIN}${path}`, init));
     const body = await response.text();
     const cookies: Record<string, string> = {};
-    for (const header of response.headers.getSetCookie()) {
+    const setCookies = response.headers.getSetCookie();
+    for (const header of setCookies) {
       const [pair = ""] = header.split(";");
       const index = pair.indexOf("=");
       cookies[pair.slice(0, index)] = pair.slice(index + 1);
@@ -94,6 +98,7 @@ const callThrough = (
       body,
       json,
       cookies,
+      setCookies,
       location: response.headers.get("location"),
     };
   });

@@ -65,9 +65,11 @@ ACCESS_H=$(cookie_flags "$WORK/register.h" access_token)
 REFRESH_H=$(cookie_flags "$WORK/register.h" refresh_token)
 printf '%s' "$ACCESS_H" | grep -qi 'httponly' || fail "access_token missing HttpOnly"
 printf '%s' "$ACCESS_H" | grep -qi 'secure'   || fail "access_token missing Secure"
+printf '%s' "$ACCESS_H" | grep -qi 'samesite=lax' || fail "access_token missing SameSite=Lax"
 printf '%s' "$REFRESH_H" | grep -qi 'secure'  || fail "refresh_token missing Secure"
 printf '%s' "$REFRESH_H" | grep -qi 'httponly' || fail "refresh_token missing HttpOnly"
-pass "register cookie flags (access HttpOnly+Secure, refresh HttpOnly+Secure)"
+printf '%s' "$REFRESH_H" | grep -qi 'samesite=lax' || fail "refresh_token missing SameSite=Lax"
+pass "register cookie flags (both HttpOnly+Secure+SameSite=Lax)"
 
 ACCESS="$(cookie_value "$WORK/register.h" access_token)"
 REFRESH="$(cookie_value "$WORK/register.h" refresh_token)"
@@ -668,9 +670,56 @@ grep -q "action=\"/listings/${MINE_ID}/publish\"" "$WORK/mine-page" || fail "min
 grep -q 'name="returnTo" value="/listings/mine"' "$WORK/mine-page" || fail "mine page actions name the page to return to"
 pass "mine page renders drafts with a status badge and a publish action"
 
+# Another site can post these forms without a preflight, so the routes refuse a
+# foreign Origin themselves and the listing must not move. The cookies say
+# SameSite=Lax as well, which keeps the session off such a post in the first place.
+CROSS_TITLE="Smoke cross-site create ${SMOKE_TAG}"
+CODE=$(curl -s -o "$WORK/cross-site-create" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/new" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'Origin: https://evil.example' \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode 'kind=room' \
+  --data-urlencode "title=${CROSS_TITLE}" \
+  --data-urlencode 'price=1234' \
+  --data-urlencode 'regionCode=crete')
+assert_status "$CODE" 403 "creating a listing from another site is refused"
+grep -q 'can only be submitted from this site' "$WORK/cross-site-create" \
+  || fail "the refused cross-site create has no readable message"
+pass "a cross-site create is refused with a readable reason"
+
+CODE=$(curl -s -o "$WORK/cross-site-publish" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${MINE_ID}/publish" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'Origin: https://evil.example' \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode "returnTo=/listings/mine")
+assert_status "$CODE" 403 "publishing from another site is refused"
+
+# The same transition is a payload-less post on the JSON API, which a page on
+# another site can submit as a plain form post, so the API refuses a foreign
+# origin itself instead of relying on the cookie attribute.
+CODE=$(curl -s -o "$WORK/api-cross-site-publish" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${MINE_ID}/publish" \
+  -H 'Origin: https://evil.example' \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 403 "the API refuses a publish from another site"
+
+CODE=$(curl -s -o "$WORK/mine-after-cross-site" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/mine?limit=50" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "mine feed after the refused cross-site posts"
+[ "$(listing_status "$MINE_ID" < "$WORK/mine-after-cross-site")" = "draft" ] \
+  || fail "a cross-site publish changed the listing"
+if grep -q "${CROSS_TITLE}" "$WORK/mine-after-cross-site"; then
+  fail "a cross-site create created a listing"
+fi
+pass "refused cross-site posts change nothing"
+
+# The same publish the page itself makes, from the page's own origin.
 CODE=$(curl -s -D "$WORK/mine-publish.h" -o /dev/null -w '%{http_code}' \
   -X POST "${BASE_URL}/listings/${MINE_ID}/publish" \
   -H "Cookie: access_token=${ACCESS}" \
+  -H "Origin: ${BASE_URL}" \
   --data-urlencode "returnTo=/listings/mine")
 assert_status "$CODE" 303 "publish from the mine page"
 MINE_LOCATION=$(grep -i '^location:' "$WORK/mine-publish.h" | head -1 | tr -d '\r' | sed -E 's/^[Ll]ocation: //')
@@ -711,7 +760,11 @@ ROTATED_REFRESH="$(cookie_value "$WORK/rotate.h" refresh_token)"
 ROTATED_REFRESH_H=$(cookie_flags "$WORK/rotate.h" refresh_token)
 printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'httponly' || fail "rotated refresh_token missing HttpOnly"
 printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'secure'   || fail "rotated refresh_token missing Secure"
-pass "refresh rotation issued new access + refresh cookies (refresh HttpOnly+Secure)"
+printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'samesite=lax' \
+  || fail "rotated refresh_token missing SameSite=Lax"
+printf '%s' "$(cookie_flags "$WORK/rotate.h" access_token)" | grep -qi 'samesite=lax' \
+  || fail "rotated access_token missing SameSite=Lax"
+pass "refresh rotation issued new access + refresh cookies (HttpOnly+Secure+SameSite=Lax)"
 
 # 7. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
@@ -721,5 +774,30 @@ CODE=$(curl -s -o "$WORK/multipart" -w '%{http_code}' \
 assert_status "$CODE" 200 "multipart upload"
 grep -q 'Successful' "$WORK/multipart" || fail "multipart upload response body"
 pass "multipart upload response body"
+
+# 8. the payload-less role switch on the JSON API
+#
+# It is a simple request too, so a sibling site is refused outright while the
+# app's own page is allowed through. The switch returns the profile of the new
+# role, which has to exist before the handler can answer with it.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 403 "the API refuses a role switch from a sibling site"
+
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "INSERT OR IGNORE INTO listers (user_id) VALUES ('${USER_ID}');" \
+  >/dev/null 2>&1 || fail "seed lister profile"
+pass "seed lister profile"
+
+CODE=$(curl -s -o "$WORK/change-role" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "a role switch from the app's own origin"
+grep -q '"newProfile"' "$WORK/change-role" \
+  || fail "the role switch did not return the new profile"
+pass "a role switch from the app's own origin returns the new profile"
 
 echo "smoke checklist passed"

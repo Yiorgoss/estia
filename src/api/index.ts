@@ -11,6 +11,7 @@ import { PublicApiLive } from "@/handlers/public/auth-handler";
 import { AuthServiceLive } from "@/services/auth.service";
 import { PrivateApi, PrivateRoutes } from "./private";
 import { AuthMiddleware } from "@/middleware/auth-mw";
+import { SameOriginWriteMiddleware } from "@/handlers/same-origin";
 import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { ListingRepositoryLive } from "@/repos/listing.repo";
@@ -76,6 +77,7 @@ export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
   Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler)),
+  Layer.provide(SameOriginWriteMiddleware),
 );
 
 export const PrivateRouterLive = Layer.mergeAll(PrivateApiRouterLive, PrivateRoutes).pipe(

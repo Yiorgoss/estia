@@ -56,6 +56,10 @@ export const RefreshTokenServiceLive = Layer.effect(
             secure: true,
             path: "/",
             maxAge: 30 * 24 * 60 * 60 * 1000, // one month
+            // `Lax` keeps the session on top-level navigations and off a
+            // cross-site form post. The origin check in `@/handlers/same-origin`
+            // is the other half of that defence.
+            sameSite: "lax",
           },
         ]),
       issueToken: (id, userAgent) =>
