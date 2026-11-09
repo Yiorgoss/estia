@@ -118,8 +118,10 @@ const register = HttpRouter.route("POST", "/register", (request) =>
     const registration = yield* Effect.result(userService.registerUser(decoded.input, userAgent));
 
     if (Result.isFailure(registration)) {
-      // Only a duplicate leaves an account behind; every other failure is a
-      // refused registration, so the account does not exist.
+      // A duplicate is the only failure that is known to leave an account behind.
+      // Every other failure removes the account it created, but that cleanup is
+      // best effort and a failed one is only logged, so this answer asks the
+      // person to try again without promising the account does not exist.
       return registration.failure._tag === "UserAlreadyExistsError"
         ? respond(
             registerPage({

@@ -15,12 +15,19 @@ export interface UserRepository {
   readonly insert: (creds: {
     email: string;
     password: typeof UserPasswordHash.Type;
+    role: typeof UserRoles.Type;
   }) => Effect.Effect<Option.Option<User>, SqlError>;
   readonly updateRole: (
     id: typeof UserId.Type,
     role: typeof UserRoles.Type,
   ) => Effect.Effect<Option.Option<User>, SqlError>;
   readonly updateAvatar: (id: typeof UserId.Type, avatar: string) => Effect.Effect<void, SqlError>;
+  /*
+   * Remove an account. Every profile, token, and listing the account owns
+   * references `users(id) ON DELETE CASCADE`, so the row is the only thing to
+   * delete and the rest goes with it.
+   */
+  readonly deleteById: (id: typeof UserId.Type) => Effect.Effect<void, SqlError>;
 }
 
 export const UserRepository = Context.Service<UserRepository>("UserRepository");
@@ -51,10 +58,10 @@ export const UserRepositoryLive = Layer.effect(
           Effect.map(Option.fromNullishOr),
           Effect.map(Option.map(decodeUser)),
         ),
-      insert: ({ email, password }) =>
+      insert: ({ email, password, role }) =>
         sql<Record<string, unknown>>`
-          INSERT INTO users (email, password_hash)
-               VALUES (${email}, ${password})
+          INSERT INTO users (email, password_hash, role)
+               VALUES (${email}, ${password}, ${role})
             RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
@@ -79,6 +86,10 @@ export const UserRepositoryLive = Layer.effect(
           Effect.map((row) => row[0]),
           Effect.map(Option.fromNullishOr),
         ),
+      deleteById: (id) =>
+        sql`
+          DELETE FROM users
+           WHERE id = ${id};`.pipe(Effect.asVoid),
     } satisfies UserRepository; // needed otherwise email/password become untyped when using taperror
   }).pipe(
     Effect.tapError((error) =>

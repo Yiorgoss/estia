@@ -17,6 +17,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       const inserted = yield* repo.insert({
         email: "insert@test.local",
         password: password("hash-insert"),
+        role: "user",
       });
       assert.isTrue(Option.isSome(inserted));
       const user = Option.getOrThrow(inserted);
@@ -47,6 +48,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       yield* repo.insert({
         email: "lookup@test.local",
         password: password("hash-lookup"),
+        role: "user",
       });
 
       const found = yield* repo.findByEmail("lookup@test.local");
@@ -66,6 +68,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
         yield* repo.insert({
           email: "by-id@test.local",
           password: password("hash-by-id"),
+          role: "user",
         }),
       );
 
@@ -86,6 +89,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
         yield* repo.insert({
           email: "role@test.local",
           password: password("hash-role"),
+          role: "user",
         }),
       );
 
@@ -108,12 +112,14 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
       yield* repo.insert({
         email: "duplicate@test.local",
         password: password("hash-first"),
+        role: "user",
       });
 
       const error = yield* Effect.flip(
         repo.insert({
           email: "duplicate@test.local",
           password: password("hash-second"),
+          role: "user",
         }),
       );
       assert.strictEqual(error._tag, "SqlError");

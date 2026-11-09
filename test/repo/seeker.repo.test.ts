@@ -41,6 +41,40 @@ layer(TestLive, { concurrent: false })("SeekerRepository", (it) => {
     }),
   );
 
+  it.effect("createForUser opens a profile nobody has filled in yet", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-seeker-create", "seeker-create@test.local", "seeker");
+
+      const repo = yield* SeekerRepository;
+      const seeker = yield* repo.createForUser(userId("u-seeker-create"));
+
+      assert.strictEqual(seeker.userId, "u-seeker-create");
+      // Migration 0006 made the fields a person fills in themselves optional, so
+      // the profile exists before anyone has typed a name.
+      assert.isNull(seeker.name);
+      assert.isNull(seeker.dateOfBirth);
+      assert.isNull(seeker.gender);
+      assert.strictEqual(seeker.smoking, false);
+      assert.strictEqual(seeker.pets, false);
+      assert.instanceOf(seeker.createdAt, Date);
+    }),
+  );
+
+  // A double click, a retry, or the heal of a legacy account asks again for the
+  // same profile. The second ask is the same row, not a uniqueness failure.
+  it.effect("createForUser answers with the existing profile on a second ask", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-seeker-twice", "seeker-twice@test.local", "seeker");
+
+      const repo = yield* SeekerRepository;
+      const first = yield* repo.createForUser(userId("u-seeker-twice"));
+      const second = yield* repo.createForUser(userId("u-seeker-twice"));
+
+      assert.strictEqual(second.id, first.id);
+      assert.strictEqual(second.userId, "u-seeker-twice");
+    }),
+  );
+
   it.effect("findByUserId returns None for an unknown user", () =>
     Effect.gen(function* () {
       const repo = yield* SeekerRepository;
