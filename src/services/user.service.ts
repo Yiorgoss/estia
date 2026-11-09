@@ -7,7 +7,11 @@ import { UserId } from "@/db/schema/brands";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { SeekerRepository } from "@/repos/seeker.repo";
 import { ListerRepository } from "@/repos/lister.repo";
-import { editableProfileRole, type EditableProfileRole, type ProfileInput } from "@/db/schema/Profile";
+import {
+  editableProfileRole,
+  type EditableProfileRole,
+  type ProfileInput,
+} from "@/db/schema/Profile";
 
 export class UserAlreadyExistsError extends Schema.TaggedError<UserAlreadyExistsError>()(
   "UserAlreadyExistsError",
@@ -69,8 +73,9 @@ export class ProfileValidationError extends Schema.TaggedError<ProfileValidation
 
 export type UserProfile = typeof SeekerSchema.Type | typeof ListerSchema.Type;
 
-// A profile together with the role it belongs to. The role is the answer, not
-// the request, because an unassigned account's save or choice assigns it.
+// A profile together with the role it belongs to. The role is what the account
+// holds after the call: its stored role when it already had one, or the one an
+// unassigned account adopted.
 export interface ProfileDetails {
   readonly role: EditableProfileRole;
   readonly profile: UserProfile;
@@ -89,11 +94,11 @@ export interface UserService {
     userAgent: string,
   ) => Effect.Effect<typeof UserSchema.Type, UserAlreadyExistsError | InternalError>;
   /*
-   * Flip the stored role and answer with the profile that role now has. The
-   * stored role is the starting point, never a role carried by the request. An
+   * Change the stored role and answer with the profile that role now has. An
    * unassigned account has no role to flip away from, so it adopts the target
-   * it names; an assigned account flips to the other profile unless it names a
-   * target too. The stored role and its profile row agree after the call
+   * it names; an assigned account flips to its other profile when it names no
+   * target, or moves to the target it names. The starting point is always the
+   * stored role, and the stored role and its profile row agree after the call
    * whichever side was missing.
    */
   switchRoles: (
@@ -132,8 +137,7 @@ export interface UserService {
 export const UserService = Context.Service<UserService>("UserService");
 
 // The refusal an admin gets: the one account with no profile to read or edit.
-export const noProfileMessage =
-  "An admin account has no seeking or listing profile to edit.";
+export const noProfileMessage = "An admin account has no seeking or listing profile to edit.";
 
 // A saved bio is either a value the person typed or nothing: a box they emptied
 // is an absence, not an empty string in the database.
@@ -201,15 +205,16 @@ export const UserServiceLive = Layer.effect(
             );
           }
 
-          const profile = "ownership" in input
-            ? yield* listerRepo.upsertForUser(user.id, input)
-            : yield* Effect.gen(function* () {
-                yield* beforeToday(input.dateOfBirth);
-                return yield* seekerRepo.upsertForUser(user.id, {
-                  ...input,
-                  bio: bioOf(input.bio),
+          const profile =
+            "ownership" in input
+              ? yield* listerRepo.upsertForUser(user.id, input)
+              : yield* Effect.gen(function* () {
+                  yield* beforeToday(input.dateOfBirth);
+                  return yield* seekerRepo.upsertForUser(user.id, {
+                    ...input,
+                    bio: bioOf(input.bio),
+                  });
                 });
-              });
 
           if (user.role === "user") {
             yield* userRepo

@@ -7,10 +7,13 @@ import { Schema, SchemaTransformation } from "effect";
  * these schemas are the HTTP boundary's contract for `PUT /api/users/profile`
  * and the decoded values are what the repository upserts take.
  *
- * The payload is one union rather than a role field: the server knows the
- * caller's role from the stored account, and the two shapes cannot be confused
- * because a seeking profile requires a date of birth and a gender while a
- * listing profile requires an ownership. A client never names the role.
+ * The payload is one union rather than a role field. An account that already
+ * holds a role keeps it: a payload for the other role is refused. An unassigned
+ * account has no role to keep, so the shape it submits is the choice that
+ * assigns one. The two shapes cannot be confused because a seeking profile
+ * requires a date of birth and a gender while a listing profile requires an
+ * ownership, so the shape is the role either way and a client never sends a
+ * `role` field.
  */
 
 // A name is trimmed before it is bounded, so a padded name is stored trimmed and

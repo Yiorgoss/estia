@@ -29,9 +29,12 @@ const switchRole = (user: TestUser) =>
 const switchTo = (user: TestUser, role: "seeker" | "lister") =>
   call(
     "/profile/switch",
-    form({ method: "POST", headers: { cookie: user.cookie, "user-agent": "estia-tests" } }, {
-      role,
-    }),
+    form(
+      { method: "POST", headers: { cookie: user.cookie, "user-agent": "estia-tests" } },
+      {
+        role,
+      },
+    ),
   );
 
 const setRole = (id: string, role: string) =>
@@ -314,9 +317,10 @@ describe("POST /profile/switch", () => {
       assert.strictEqual(healed.location, "/profile?completed=1");
       assert.strictEqual(yield* storedRole(user.id), "lister");
       assert.strictEqual(
-        (yield* query<{ total: number }>("SELECT COUNT(*) AS total FROM listers WHERE user_id = ?", [
-          user.id,
-        ]))[0]?.total,
+        (yield* query<{ total: number }>(
+          "SELECT COUNT(*) AS total FROM listers WHERE user_id = ?",
+          [user.id],
+        ))[0]?.total,
         1,
       );
 

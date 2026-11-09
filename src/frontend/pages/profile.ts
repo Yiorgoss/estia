@@ -250,8 +250,8 @@ export const profilePage = (state: ProfilePageState) => {
   );
 };
 
-// An admin account has no profile to edit and is told so instead of being shown
-// a form that cannot be saved.
+// Why there is no profile form to show, for the cases that have none: an admin
+// holds no profile, and a rejected or cross-site write is told why too.
 export const profileUnavailablePage = (title: string, message: string) =>
   pageShell(
     title,
