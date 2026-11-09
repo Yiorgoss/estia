@@ -33,11 +33,6 @@ const BASEMAPS_JS = "https://unpkg.com/@protomaps/basemaps@5.7.2/dist/basemaps.j
 
 const ATTRIBUTION = "Basemap © OpenStreetMap contributors (ODbL), tiles by Protomaps";
 
-// Pins that share a grid cell collapse onto one coordinate by design, so a
-// group fans out on this small circle. Presentation only: the wire coordinate
-// never moves.
-const FANOUT_PX = 18;
-
 const mapStyles = `
   #listing-map { height: 70vh; min-height: 420px; }
   .estia-pin { display: block; padding: 0; border: 0; background: none; cursor: pointer; line-height: 0; }
@@ -150,34 +145,14 @@ const probeBasemap = async (url) => {
 };
 
 const addPins = (maplibregl, map) => {
-  const groups = new Map();
   for (const pin of payload.pins) {
-    const key = pin.lat + "," + pin.lng;
-    const group = groups.get(key);
-    if (group === undefined) groups.set(key, [pin]);
-    else group.push(pin);
-  }
-
-  // A pin is ~24px wide, so a group's circle has to be big enough that the
-  // chord between neighbours clears one pin. Small groups keep the tight 18px
-  // ring; a busy cell opens up instead of stacking into an unclickable blob.
-  const fanOutRadius = (count) =>
-    count <= 1 ? 0 : Math.max(${FANOUT_PX}, 13 / Math.sin(Math.PI / count));
-
-  for (const group of groups.values()) {
-    const radius = fanOutRadius(group.length);
-    group.forEach((pin, index) => {
-      const angle = (2 * Math.PI * index) / group.length;
-      const offset = radius === 0 ? [0, 0] : [Math.cos(angle) * radius, Math.sin(angle) * radius];
-      const popup = new maplibregl.Popup({ offset: 22, closeButton: true }).setDOMContent(
-        popupContent(pin),
-      );
-      const marker = new maplibregl.Marker({ element: pinElement(pin), anchor: "bottom" })
-        .setLngLat([pin.lng, pin.lat])
-        .setPopup(popup)
-        .addTo(map);
-      marker.setOffset(offset);
-    });
+    const popup = new maplibregl.Popup({ offset: 22, closeButton: true }).setDOMContent(
+      popupContent(pin),
+    );
+    new maplibregl.Marker({ element: pinElement(pin), anchor: "bottom" })
+      .setLngLat([pin.lng, pin.lat])
+      .setPopup(popup)
+      .addTo(map);
   }
 };
 
@@ -264,7 +239,7 @@ export const mapPage = (input: MapPageInput): string => {
         <h1 class="text-2xl font-semibold text-gray-900">Listings map</h1>
         <p class="mt-1 max-w-2xl text-sm text-gray-600">
           Every pin is within about ${LOCATION_MAX_ERROR_KM} km of the listing's real spot - enough to compare
-          neighbourhoods, never the exact address. Pins in the same spot are spread slightly so none is hidden.
+          neighbourhoods, never the exact address. Listings that round to the same spot sit on top of each other.
         </p>
       </div>
       <a href="/search" class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">

@@ -15,7 +15,6 @@ import { Effect } from "effect";
 const owner = await Effect.runPromise(register("map-owner"));
 
 const publicPinKeys = [
-  "avatarUrl",
   "currency",
   "id",
   "kind",
@@ -120,7 +119,6 @@ describe("GET /api/listings/map", () => {
       assert.strictEqual(pin?.lng, rounded.lng);
       assert.strictEqual(pin?.lat, 37.98);
       assert.notStrictEqual(pin?.lat, 37.9838);
-      assert.strictEqual(pin?.avatarUrl, null);
       assert.strictEqual(pin?.currency, "EUR");
     }),
   );

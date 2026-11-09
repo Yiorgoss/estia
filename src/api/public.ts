@@ -142,9 +142,6 @@ export const toPublicListingPin = (
     sizeSqm: listing.sizeSqm,
     lat: approximate.lat,
     lng: approximate.lng,
-    // The avatar pipeline is its own later task; the field is in the contract
-    // already so adding faces changes no route, schema, or client code path.
-    avatarUrl: null,
   };
 };
 

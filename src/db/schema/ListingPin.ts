@@ -39,8 +39,7 @@ export const approximateLocation = (lat: number, lng: number): ApproximateLocati
 
 /*
  * A map pin on the wire. `lat`/`lng` are the rounded values, never the stored
- * pair; `avatarUrl` is part of the contract but null until the avatar pipeline
- * exists, so adding faces later changes no route and no client code path.
+ * pair.
  */
 export const PublicListingPin = Schema.Struct({
   id: ListingId,
@@ -52,7 +51,6 @@ export const PublicListingPin = Schema.Struct({
   sizeSqm: Schema.NullishOr(Schema.Number),
   lat: Schema.Number,
   lng: Schema.Number,
-  avatarUrl: Schema.NullishOr(Schema.String),
 });
 export type PublicListingPin = typeof PublicListingPin.Type;
 

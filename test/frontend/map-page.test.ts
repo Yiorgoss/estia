@@ -13,7 +13,6 @@ const pin = (overrides: Partial<PublicListingPin> = {}): PublicListingPin => ({
   sizeSqm: 42,
   lat: 37.98,
   lng: 23.73,
-  avatarUrl: null,
   ...overrides,
 });
 
@@ -74,12 +73,17 @@ describe("mapPage", () => {
     assert.include(html, "\\u003c/script");
   });
 
-  it("renders the degraded state without a basemap", () => {
+  it("carries the archive as page data and a hidden alert for the script to reveal", () => {
     const html = render([pin()], false, "/maps/missing.pmtiles");
 
-    assert.include(html, "/maps/missing.pmtiles");
-    assert.include(html, 'id="map-banner"');
-    assert.include(html, "could not be loaded");
+    const marker = html.indexOf('id="map-data">');
+    const end = html.indexOf("</script>", marker);
+    const payload = JSON.parse(html.slice(html.indexOf(">", marker) + 1, end));
+    assert.strictEqual(payload.basemapUrl, "/maps/missing.pmtiles");
+
+    const bannerTag = /<[a-z]+\s[^>]*\bid="map-banner"[^>]*>/i.exec(html)?.[0] ?? "";
+    assert.include(bannerTag, 'role="alert"');
+    assert.match(bannerTag, /\bhidden\b/);
   });
 });
 
