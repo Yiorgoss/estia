@@ -1,5 +1,6 @@
 import { Option, Context, Effect, Layer, Schema } from "effect";
 import { SeekerSchema } from "@/db/schema/Seeker";
+import type { SeekerProfileInput } from "@/db/schema/Profile";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { UserId } from "@/db/schema/brands";
@@ -18,6 +19,17 @@ export interface SeekerRepository {
    */
   readonly createForUser: (
     userId: typeof UserId.Type,
+  ) => Effect.Effect<typeof SeekerSchema.Type, SqlError>;
+  /*
+   * Write the details a person filled in, whether or not the row exists. A
+   * registration-provisioned account updates its row; a legacy or partially
+   * provisioned one gets the missing row opened by the same call, so a profile
+   * is never unreachable because it was never created. The update is the whole
+   * profile: a save replaces every field the form showed.
+   */
+  readonly upsertForUser: (
+    userId: typeof UserId.Type,
+    input: typeof SeekerProfileInput.Type,
   ) => Effect.Effect<typeof SeekerSchema.Type, SqlError>;
 }
 
@@ -46,6 +58,27 @@ export const SeekerRepositoryLive = Layer.effect(
             INSERT INTO seekers (user_id)
                  VALUES (${userId})
             ON CONFLICT (user_id) DO UPDATE SET user_id = excluded.user_id
+             RETURNING *;`.pipe(
+          Effect.map((rows) => rows[0]),
+          Effect.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row)),
+        ),
+      upsertForUser: (userId, input) =>
+        sql<Record<string, unknown>>`
+            INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets)
+                 VALUES (${userId},
+                         ${input.name},
+                         ${input.bio ?? null},
+                         ${input.dateOfBirth.getTime()},
+                         ${input.gender},
+                         ${input.smoking === true ? 1 : 0},
+                         ${input.pets === true ? 1 : 0})
+            ON CONFLICT (user_id) DO UPDATE SET
+                    name = excluded.name,
+                     bio = excluded.bio,
+           date_of_birth = excluded.date_of_birth,
+                gender = excluded.gender,
+               smoking = excluded.smoking,
+                  pets = excluded.pets
              RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row)),

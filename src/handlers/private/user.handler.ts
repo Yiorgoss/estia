@@ -33,6 +33,25 @@ export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handl
         };
       }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
     )
+    .handle("profile", ({ request }) =>
+      Effect.gen(function* () {
+        const user = yield* callerUser(request);
+        const userService = yield* UserService;
+        const profile = yield* userService.readProfile(user);
+        return { role: user.role, profile: Option.getOrNull(profile) };
+      }),
+    )
+    .handle("save-profile", ({ payload, request }) =>
+      Effect.gen(function* () {
+        // The role is read from the stored account, so a caller cannot save a
+        // listing profile by saying it is one: the payload is matched to the role
+        // the account already holds.
+        const user = yield* callerUser(request);
+        const userService = yield* UserService;
+        const profile = yield* userService.saveProfile(user, payload);
+        return { role: user.role, profile };
+      }),
+    )
     .handle("change-role", ({ request }) =>
       Effect.gen(function* () {
         const user = yield* callerUser(request);

@@ -12,8 +12,8 @@ import { Effect, Result } from "effect";
  * Browser-facing sign-in and registration. These are page routes, not part of the
  * JSON API: the form posts `application/x-www-form-urlencoded`, the route runs the
  * same `AuthService`/`UserService` the API handlers run, and every submit is
- * answered with a page - a redirect to the feed on success, the same page with a
- * readable reason on failure. The JSON endpoints keep decoding JSON only.
+ * answered with a page - a redirect on success, the same page with a readable
+ * reason on failure. The JSON endpoints keep decoding JSON only.
  */
 
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
@@ -35,16 +35,19 @@ const userAgentOf = (request: HttpServerRequest.HttpServerRequest): string =>
 const respond = (body: string, status: number): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(body, { status, contentType: "text/html" });
 
-// A signed-in visitor is sent to the feed, which is where a person wants to be
-// once they are in. The cookies carry the session the JSON API would have issued.
-const signedInResponse = (tokens: AuthTokens) =>
+/*
+ * A signed-in visitor is sent to the page they came for. Signing in lands on the
+ * feed; a brand new account lands on its profile, because registration opened two
+ * blank profiles and the person has not said who they are yet.
+ */
+const signedInResponse = (tokens: AuthTokens, destination: "/search" | "/profile") =>
   Effect.gen(function* () {
     const jwtService = yield* JWTService;
     const refreshTokenService = yield* RefreshTokenService;
     const accessCookie = yield* jwtService.asCookie(tokens.accessToken);
     const refreshCookie = yield* refreshTokenService.asCookie(tokens.refreshToken);
 
-    return yield* HttpServerResponse.redirect("/search", { status: 303 }).pipe(
+    return yield* HttpServerResponse.redirect(destination, { status: 303 }).pipe(
       HttpServerResponse.setCookies([accessCookie, refreshCookie]),
       Effect.orDie,
     );
@@ -68,7 +71,7 @@ const login = HttpRouter.route("POST", "/login", (request) =>
 
     const authService = yield* AuthService;
     return yield* authService.authenticate(decoded.input, userAgentOf(request)).pipe(
-      Effect.flatMap(signedInResponse),
+      Effect.flatMap((tokens) => signedInResponse(tokens, "/search")),
       Effect.catchTags({
         InvalidCredentialsError: () =>
           Effect.succeed(
@@ -154,7 +157,7 @@ const register = HttpRouter.route("POST", "/register", (request) =>
       );
 
     return yield* authService.authenticate(decoded.input, userAgent).pipe(
-      Effect.flatMap(signedInResponse),
+      Effect.flatMap((tokens) => signedInResponse(tokens, "/profile")),
       Effect.catchTags({
         InvalidCredentialsError: () => Effect.succeed(accountCreated()),
         InternalError: () => Effect.succeed(accountCreated()),

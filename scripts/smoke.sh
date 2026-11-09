@@ -139,13 +139,27 @@ CODE=$(curl -s -D "$WORK/form-register.h" -o /dev/null -w '%{http_code}' \
   --data-urlencode "repeat_password=${PASSWORD}")
 assert_status "$CODE" 303 "form register"
 FORM_LOCATION="$(header_value "$WORK/form-register.h" location)"
-[ "$FORM_LOCATION" = "/search" ] \
-  || fail "form register did not redirect to the feed (got ${FORM_LOCATION:-no Location header})"
-pass "form register redirects to the feed"
+[ "$FORM_LOCATION" = "/profile" ] \
+  || fail "form register did not redirect to the profile page (got ${FORM_LOCATION:-no Location header})"
+pass "form register redirects to the profile page"
 FORM_ACCESS="$(cookie_value "$WORK/form-register.h" access_token)"
 FORM_REFRESH="$(cookie_value "$WORK/form-register.h" refresh_token)"
 [ -n "$FORM_ACCESS" ] && [ -n "$FORM_REFRESH" ] || fail "form register set the session cookies"
 pass "form register sets the session cookies"
+
+# 2c. the profile a new account lands on: registration opened both profiles, the
+# page edits the seeking one, and it says the profile is incomplete until the
+# required fields are filled in.
+CODE=$(curl -s -o "$WORK/profile-fresh" -w '%{http_code}' "${BASE_URL}/profile" \
+  -H "Cookie: access_token=${FORM_ACCESS}")
+assert_status "$CODE" 200 "the profile page for a new account"
+grep -q 'action="/profile"' "$WORK/profile-fresh" \
+  || fail "the profile page has no form"
+grep -q 'Your seeking profile is incomplete' "$WORK/profile-fresh" \
+  || fail "a new account's profile page does not say it is incomplete"
+grep -q 'href="/profile"' "$WORK/profile-fresh" \
+  || fail "the header has no profile link"
+pass "a new account lands on an incomplete profile page"
 
 CODE=$(curl -s -o "$WORK/form-duplicate" -w '%{http_code}' \
   -X POST "${BASE_URL}/register" \
@@ -252,15 +266,79 @@ grep -q '"name":null' "$WORK/me-fresh" \
   || fail "the fresh user's blank seeking profile did not report a null name"
 pass "a fresh user's /api/users/me reports the blank seeking profile"
 
-# 4. complete the seeking profile the way the profile page eventually will, then
-# current-user
-db_exec "UPDATE seekers SET name='Smoke User', date_of_birth=946684800000, gender='NB', smoking=1, pets=0 WHERE user_id='${USER_ID}';"
-pass "complete the seeker profile"
+# 4. complete the seeking profile through the profile API, then current-user.
+# This is the same write the profile page makes, so the update path is exercised
+# end to end rather than by editing the row behind the app's back.
+CODE=$(curl -s -o "$WORK/profile-read" -w '%{http_code}' "${BASE_URL}/api/users/profile" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the profile API reads a fresh account's seeking profile"
+grep -q '"role":"seeker"' "$WORK/profile-read" \
+  || fail "the profile API did not report the stored role"
+grep -q '"name":null' "$WORK/profile-read" \
+  || fail "a fresh account's profile API did not report a blank seeking profile"
+pass "the profile API reads the blank seeking profile registration opened"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Nobody","dateOfBirth":946684800000,"gender":"NB"}')
+assert_status "$CODE" 401 "the profile API rejects an unauthenticated save"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d '{"name":"   ","dateOfBirth":946684800000,"gender":"NB"}')
+assert_status "$CODE" 400 "the profile API rejects a blank required name"
+
+CODE=$(curl -s -o "$WORK/profile-save" -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d '{"name":"Smoke User","dateOfBirth":946684800000,"gender":"NB","bio":"Smoke bio","smoking":1,"pets":0}')
+assert_status "$CODE" 200 "the profile API saves a seeking profile"
+grep -q '"name":"Smoke User"' "$WORK/profile-save" \
+  || fail "the profile save did not store the name"
+grep -q '"bio":"Smoke bio"' "$WORK/profile-save" \
+  || fail "the profile save did not store the bio"
+grep -q "\"userId\":\"${USER_ID}\"" "$WORK/profile-save" \
+  || fail "the profile save answered with another account's profile"
+pass "the profile API saves a seeking profile"
+
+# The page's own form is the surface a browser uses. It redirects after a save so
+# a refresh cannot repeat the write, and the saved page re-reads the stored row.
+CODE=$(curl -s -D "$WORK/profile-page-save.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/profile" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode 'name=Smoke User' \
+  --data-urlencode 'dateOfBirth=2000-01-01' \
+  --data-urlencode 'gender=NB' \
+  --data-urlencode 'bio=Smoke bio' \
+  --data-urlencode 'smoking=true')
+assert_status "$CODE" 303 "the profile page saves the seeking form"
+PROFILE_LOCATION="$(header_value "$WORK/profile-page-save.h" location)"
+[ "$PROFILE_LOCATION" = "/profile?saved=1" ] \
+  || fail "the profile page did not redirect to its saved state (got ${PROFILE_LOCATION:-no Location header})"
+CODE=$(curl -s -o "$WORK/profile-page-saved" -w '%{http_code}' \
+  "${BASE_URL}/profile?saved=1" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the saved profile page"
+grep -q 'Your profile was saved.' "$WORK/profile-page-saved" \
+  || fail "the saved profile page did not report the save"
+grep -q 'value="Smoke User"' "$WORK/profile-page-saved" \
+  || fail "the saved profile page did not re-read the stored name"
+if grep -q 'Your seeking profile is incomplete' "$WORK/profile-page-saved"; then
+  fail "a completed seeking profile is still reported incomplete"
+fi
+pass "the profile page saves and reflects the stored profile"
 
 CODE=$(curl -s -o "$WORK/me" -w '%{http_code}' "${BASE_URL}/api/users/me" \
   -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 200 "current-user /api/users/me"
 grep -q '"userProfile"' "$WORK/me" || fail "current-user response has userProfile"
+grep -q '"name":"Smoke User"' "$WORK/me" \
+  || fail "the profile update did not reach the stored profile"
 pass "current-user response shape"
 
 # 5. the public listings feed and the htmx search page
@@ -856,6 +934,22 @@ grep -q '"role":"lister"' "$WORK/me-after-role" \
 grep -q '"ownership":"owner"' "$WORK/me-after-role" \
   || fail "the switched account's profile call did not report the lister profile"
 pass "a role switch takes effect on the same token"
+
+# The listing profile saves its own shape through the same endpoint: the server
+# matches the payload to the role the account holds now.
+CODE=$(curl -s -o "$WORK/profile-lister" -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d '{"name":"Smoke Lets","ownership":"leaseholder"}')
+assert_status "$CODE" 200 "the profile API saves a listing profile"
+grep -q '"ownership":"leaseholder"' "$WORK/profile-lister" \
+  || fail "the listing profile save did not store the ownership"
+grep -q '"name":"Smoke Lets"' "$WORK/profile-lister" \
+  || fail "the listing profile save did not store the display name"
+grep -q '"role":"lister"' "$WORK/profile-lister" \
+  || fail "the listing profile save did not report the listing role"
+pass "the profile API saves a listing profile"
 
 # Switching back is the same plain flip in the other direction, and answers with
 # the seeking profile registration already opened and the person completed.

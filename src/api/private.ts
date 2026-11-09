@@ -1,6 +1,7 @@
 import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
-import { ListingId } from "@/db/schema/brands";
+import { ProfileInput } from "@/db/schema/Profile";
+import { ListingId, UserRoles } from "@/db/schema/brands";
 import { CurrentUser } from "@/db/schema/User";
 import {
   CreateListingInput,
@@ -13,6 +14,8 @@ import { UnauthorizedError } from "@/services/auth.service";
 import {
   AdminRoleSwitchError,
   InternalError,
+  ProfileUnavailableError,
+  ProfileValidationError,
   UnassignedRoleSwitchError,
 } from "@/services/user.service";
 import {
@@ -26,6 +29,17 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
 import { ListingPageRoutes } from "@/handlers/private/listing-pages";
+import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
+
+/*
+ * The caller's own profile. The role is the account's stored role, which is what
+ * decides which of the two shapes the profile has; the profile is null until a
+ * legacy account's missing row is opened by its first save.
+ */
+export const ProfileResponse = Schema.Struct({
+  role: UserRoles,
+  profile: Schema.NullOr(Schema.Union([SeekerSchema, ListerSchema])),
+});
 
 export const UserGroup = HttpApiGroup.make("user-group")
   .add(
@@ -38,6 +52,24 @@ export const UserGroup = HttpApiGroup.make("user-group")
         userProfile: Schema.NullOr(Schema.Union([SeekerSchema, ListerSchema])),
       }),
       error: [InternalError, UnauthorizedError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("profile", "/profile", {
+      success: ProfileResponse,
+      // An admin or an account left unassigned by an older registration holds no
+      // profile to read, and says so instead of inventing one.
+      error: [ProfileUnavailableError, InternalError, UnauthorizedError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("save-profile", "/profile", {
+      // The payload is validated at the boundary: a seeking profile needs a
+      // name, a date of birth and a gender, and a listing profile needs an
+      // ownership. The server applies it to the account's own role.
+      payload: ProfileInput,
+      success: ProfileResponse,
+      error: [ProfileUnavailableError, ProfileValidationError, InternalError, UnauthorizedError],
     }),
   )
   .add(
@@ -156,4 +188,5 @@ export const PrivateRoutes = HttpRouter.addAll([
       `),
   ),
   ...ListingPageRoutes,
+  ...ProfilePageRoutes,
 ]);

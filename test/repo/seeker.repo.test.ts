@@ -82,4 +82,42 @@ layer(TestLive, { concurrent: false })("SeekerRepository", (it) => {
       assert.isTrue(Option.isNone(missing));
     }),
   );
+
+  // The save path writes a profile that already exists, and opens one that does
+  // not, so a legacy account is repaired rather than refused.
+  it.effect("upsertForUser writes an existing profile and opens a missing one", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-seeker-upsert", "seeker-upsert@test.local", "seeker");
+      const repo = yield* SeekerRepository;
+      const dateOfBirth = new Date("1995-04-12T00:00:00.000Z");
+
+      const opened = yield* repo.upsertForUser(userId("u-seeker-upsert"), {
+        name: "Ada Seeker",
+        dateOfBirth,
+        gender: "female",
+        bio: "Looking for a quiet room",
+        smoking: true,
+        pets: false,
+      });
+      assert.strictEqual(opened.userId, "u-seeker-upsert");
+      assert.strictEqual(opened.name, "Ada Seeker");
+      assert.strictEqual(opened.bio, "Looking for a quiet room");
+      assert.strictEqual(opened.gender, "female");
+      assert.strictEqual(opened.smoking, true);
+      assert.strictEqual(opened.pets, false);
+      assert.strictEqual(opened.dateOfBirth?.getTime(), dateOfBirth.getTime());
+
+      // A save replaces the whole profile: an absent bio is written as null.
+      const rewritten = yield* repo.upsertForUser(userId("u-seeker-upsert"), {
+        name: "Ada Lovelace",
+        dateOfBirth,
+        gender: "NB",
+      });
+      assert.strictEqual(rewritten.id, opened.id);
+      assert.strictEqual(rewritten.name, "Ada Lovelace");
+      assert.isNull(rewritten.bio);
+      assert.strictEqual(rewritten.gender, "NB");
+      assert.strictEqual(rewritten.smoking, false);
+    }),
+  );
 });

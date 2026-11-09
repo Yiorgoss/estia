@@ -44,7 +44,9 @@ describe("POST /register", () => {
       const response = yield* submit("/register", jobForm(email));
 
       assert.strictEqual(response.status, 303, response.body);
-      assert.strictEqual(response.location, "/search");
+      // A brand new account lands on its profile: registration opened two blank
+      // profiles and the person has not said who they are yet.
+      assert.strictEqual(response.location, "/profile");
       assert.isString(response.cookies["access_token"]);
       assert.isString(response.cookies["refresh_token"]);
 

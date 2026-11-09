@@ -7,6 +7,7 @@ import { UserId } from "@/db/schema/brands";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { SeekerRepository } from "@/repos/seeker.repo";
 import { ListerRepository } from "@/repos/lister.repo";
+import { editableProfileRole, type ProfileInput } from "@/db/schema/Profile";
 
 export class UserAlreadyExistsError extends Schema.TaggedError<UserAlreadyExistsError>()(
   "UserAlreadyExistsError",
@@ -41,6 +42,25 @@ export class UnassignedRoleSwitchError extends Schema.TaggedError<UnassignedRole
   { httpApiStatus: 409 },
 ) {}
 
+/*
+ * An account whose role holds no profile - an admin, or one left unassigned by
+ * an older registration - has nothing to read or save. That is a refusal about
+ * the account's state, not a server failure, so it keeps its own 409.
+ */
+export class ProfileUnavailableError extends Schema.TaggedError<ProfileUnavailableError>()(
+  "ProfileUnavailableError",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+// A payload that cannot be applied to the profile the account holds now - the
+// other role's shape, or an impossible value like a birth date in the future.
+export class ProfileValidationError extends Schema.TaggedError<ProfileValidationError>()(
+  "ProfileValidationError",
+  { message: Schema.String },
+  { httpApiStatus: 400 },
+) {}
+
 export type UserProfile = typeof SeekerSchema.Type | typeof ListerSchema.Type;
 
 export interface UserService {
@@ -64,9 +84,48 @@ export interface UserService {
   switchRoles: (
     id: typeof UserId.Type,
   ) => Effect.Effect<UserProfile, AdminRoleSwitchError | UnassignedRoleSwitchError | InternalError>;
+  /*
+   * The caller's own profile for the role they hold now. A profile row that does
+   * not exist yet is `None` rather than an invented one, so a legacy account can
+   * still open the form and save into it.
+   */
+  readProfile: (
+    user: typeof UserSchema.Type,
+  ) => Effect.Effect<Option.Option<UserProfile>, ProfileUnavailableError | InternalError>;
+  /*
+   * Save the details the caller filled in, creating the row if it is missing, so
+   * a legacy or partially provisioned account is repaired by the same call that
+   * saves a normal one. The role comes from the stored account, never from the
+   * payload, and a payload for the other role is refused instead of being
+   * partially applied.
+   */
+  saveProfile: (
+    user: typeof UserSchema.Type,
+    input: ProfileInput,
+  ) => Effect.Effect<UserProfile, ProfileUnavailableError | ProfileValidationError | InternalError>;
 }
 
 export const UserService = Context.Service<UserService>("UserService");
+
+// The refusal every surface gives an account whose role holds no profile.
+export const noProfileMessage =
+  "This account has neither a seeking nor a listing profile yet, so there is nothing to edit.";
+
+// A saved bio is either a value the person typed or nothing: a box they emptied
+// is an absence, not an empty string in the database.
+const bioOf = (bio: string | null | undefined): string | null => {
+  const trimmed = bio?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+};
+
+// A birth date in the future is not a birth date. This is the one rule the
+// boundary cannot state, because it depends on the moment of the save.
+const beforeToday = (dateOfBirth: Date): Effect.Effect<Date, ProfileValidationError> =>
+  dateOfBirth.getTime() > Date.now()
+    ? Effect.fail(
+        new ProfileValidationError({ message: "A date of birth cannot be in the future." }),
+      )
+    : Effect.succeed(dateOfBirth);
 
 export const UserServiceLive = Layer.effect(
   UserService,
@@ -77,6 +136,50 @@ export const UserServiceLive = Layer.effect(
     const seekerRepo = yield* SeekerRepository;
 
     return {
+      readProfile: (user) =>
+        Effect.gen(function* () {
+          const role = editableProfileRole(user.role);
+          if (role === undefined) {
+            return yield* Effect.fail(new ProfileUnavailableError({ message: noProfileMessage }));
+          }
+          return role === "seeker"
+            ? yield* seekerRepo.findByUserId(user.id)
+            : yield* listerRepo.findByUserId(user.id);
+        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
+      saveProfile: (user, input) =>
+        Effect.gen(function* () {
+          const role = editableProfileRole(user.role);
+          if (role === undefined) {
+            return yield* Effect.fail(new ProfileUnavailableError({ message: noProfileMessage }));
+          }
+
+          // The two payloads are told apart by the field only one of them has, so
+          // a client that sends the other role's form is refused rather than
+          // having every field it happened to send applied to the wrong profile.
+          if (role === "seeker") {
+            if ("ownership" in input) {
+              return yield* Effect.fail(
+                new ProfileValidationError({
+                  message: "This account is seeking, so it has no listing details to save.",
+                }),
+              );
+            }
+            yield* beforeToday(input.dateOfBirth);
+            return yield* seekerRepo.upsertForUser(user.id, {
+              ...input,
+              bio: bioOf(input.bio),
+            });
+          }
+
+          if (!("ownership" in input)) {
+            return yield* Effect.fail(
+              new ProfileValidationError({
+                message: "This account is listing, so it has no seeking details to save.",
+              }),
+            );
+          }
+          return yield* listerRepo.upsertForUser(user.id, input);
+        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
       switchRoles: (id) =>
         Effect.gen(function* () {
           const user = yield* userRepo
