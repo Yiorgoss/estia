@@ -8,6 +8,7 @@ import {
   ListingStatus,
   UpdateListingInput,
 } from "@/db/schema/Listing";
+import { ListingPinRows } from "@/db/schema/ListingPin";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -38,6 +39,11 @@ export interface ListingRepository {
     filters: typeof ListingSearchFilters.Type,
     page: typeof ListingPageRequest.Type,
   ) => Effect.Effect<typeof ListingPage.Type, SqlError>;
+
+  readonly listPinned: (
+    filters: typeof ListingSearchFilters.Type,
+    limit: number,
+  ) => Effect.Effect<typeof ListingPinRows.Type, SqlError>;
 
   readonly update: (
     id: typeof ListingId.Type,
@@ -95,6 +101,19 @@ const toPage = (
   };
 };
 
+// The map is bounded, not paged: the extra row proves there is one older pin
+// that did not fit, and the caller reports that as `truncated`.
+const toPinRows = (
+  rows: ReadonlyArray<Record<string, unknown>>,
+  limit: number,
+): typeof ListingPinRows.Type => {
+  const truncated = rows.length > limit;
+  return {
+    items: (truncated ? rows.slice(0, limit) : rows).map(decodeListing),
+    truncated,
+  };
+};
+
 export const ListingRepositoryLive = Layer.effect(
   ListingRepository,
   Effect.gen(function* () {
@@ -109,6 +128,25 @@ export const ListingRepositoryLive = Layer.effect(
       cursor === undefined
         ? sql``
         : sql`AND (created_at < ${cursor.createdAt} OR (created_at = ${cursor.createdAt} AND id < ${cursor.id}))`;
+
+    /*
+     * The feed and the map share one filter predicate, so a filter that narrows
+     * the list narrows the pins too and the two surfaces cannot disagree about
+     * what "matching listing" means.
+     */
+    const filterClause = (filters: typeof ListingSearchFilters.Type) => sql`
+      ${filters.kind != null ? sql`AND kind = ${filters.kind}` : sql``}
+      ${filters.regionCode != null ? sql`AND region_code = ${filters.regionCode}` : sql``}
+      ${filters.minPriceMinor != null ? sql`AND price_minor >= ${filters.minPriceMinor}` : sql``}
+      ${filters.maxPriceMinor != null ? sql`AND price_minor <= ${filters.maxPriceMinor}` : sql``}
+      ${filters.minSizeSqm != null ? sql`AND size_sqm >= ${filters.minSizeSqm}` : sql``}
+      ${filters.maxSizeSqm != null ? sql`AND size_sqm <= ${filters.maxSizeSqm}` : sql``}
+      ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
+      ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
+      ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
+      ${filters.pets != null ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
+      ${filters.availableFrom != null ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
+    `;
 
     return {
       create: (ownerId, values) =>
@@ -152,21 +190,28 @@ export const ListingRepositoryLive = Layer.effect(
             SELECT *
               FROM listings
              WHERE status = 'published'
-                 ${filters.kind != null ? sql`AND kind = ${filters.kind}` : sql``}
-                 ${filters.regionCode != null ? sql`AND region_code = ${filters.regionCode}` : sql``}
-                 ${filters.minPriceMinor != null ? sql`AND price_minor >= ${filters.minPriceMinor}` : sql``}
-                 ${filters.maxPriceMinor != null ? sql`AND price_minor <= ${filters.maxPriceMinor}` : sql``}
-                 ${filters.minSizeSqm != null ? sql`AND size_sqm >= ${filters.minSizeSqm}` : sql``}
-                 ${filters.maxSizeSqm != null ? sql`AND size_sqm <= ${filters.maxSizeSqm}` : sql``}
-                 ${filters.furnished != null ? sql`AND furnished = ${toBit(filters.furnished)}` : sql``}
-                 ${filters.ensuite != null ? sql`AND ensuite = ${toBit(filters.ensuite)}` : sql``}
-                 ${filters.smoking != null ? sql`AND smoking = ${toBit(filters.smoking)}` : sql``}
-                 ${filters.pets != null ? sql`AND pets = ${toBit(filters.pets)}` : sql``}
-                 ${filters.availableFrom != null ? sql`AND available_from >= ${toEpochMillis(filters.availableFrom)}` : sql``}
+                 ${filterClause(filters)}
                  ${cursorClause(page.cursor)}
           ORDER BY created_at DESC, id DESC
              LIMIT ${page.limit + 1}
             `.pipe(Effect.map((rows) => toPage(rows, page.limit))),
+      listPinned: (filters, limit) =>
+        // Published with a coordinate, newest first. Drafts, unlisted rows,
+        // half-populated coordinate pairs, and room-wanted ads never reach the
+        // map at all - they are excluded in SQL, not filtered in JS. A
+        // room-wanted ad's coordinate is where a person wants to live, not
+        // where a property is, so it is not a pin.
+        sql<Record<string, unknown>>`
+            SELECT *
+              FROM listings
+             WHERE status = 'published'
+               AND lat IS NOT NULL
+               AND lng IS NOT NULL
+               AND kind <> 'room_wanted'
+                 ${filterClause(filters)}
+          ORDER BY created_at DESC, id DESC
+             LIMIT ${limit + 1}
+            `.pipe(Effect.map((rows) => toPinRows(rows, limit))),
       update: (id, ownerId, values) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;

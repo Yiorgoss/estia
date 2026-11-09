@@ -288,7 +288,12 @@ const pagingQueryFields = {
   cursor: Schema.optional(ListingCursorFromString),
 };
 
-export const ListingSearchQuery = Schema.Struct({
+/*
+ * The filter vocabulary every listing surface speaks: the search feed, the map,
+ * and (in phase 2) the search page's map toggle. Declaring the fields once is
+ * what keeps those surfaces from drifting apart.
+ */
+const searchFilterQueryFields = {
   kind: Schema.optional(ListingKind),
   regionCode: Schema.optional(GreekRegion),
   minPriceMinor: Schema.optional(NonNegativeIntFromString),
@@ -300,33 +305,44 @@ export const ListingSearchQuery = Schema.Struct({
   smoking: Schema.optional(BooleanFromString),
   pets: Schema.optional(BooleanFromString),
   availableFrom: Schema.optional(Schema.DateFromString),
+};
+
+// An inverted range is a client mistake, not an empty result: it fails the
+// whole request instead of silently matching nothing.
+const validateFilterRanges = (query: {
+  readonly minPriceMinor?: number | undefined;
+  readonly maxPriceMinor?: number | undefined;
+  readonly minSizeSqm?: number | undefined;
+  readonly maxSizeSqm?: number | undefined;
+}): ReadonlyArray<Schema.FilterIssue> => {
+  const issues: Array<Schema.FilterIssue> = [];
+  if (
+    query.minPriceMinor !== undefined &&
+    query.maxPriceMinor !== undefined &&
+    query.minPriceMinor > query.maxPriceMinor
+  ) {
+    issues.push({
+      path: ["minPriceMinor"],
+      issue: "minPriceMinor must not be greater than maxPriceMinor",
+    });
+  }
+  if (
+    query.minSizeSqm !== undefined &&
+    query.maxSizeSqm !== undefined &&
+    query.minSizeSqm > query.maxSizeSqm
+  ) {
+    issues.push({
+      path: ["minSizeSqm"],
+      issue: "minSizeSqm must not be greater than maxSizeSqm",
+    });
+  }
+  return issues;
+};
+
+export const ListingSearchQuery = Schema.Struct({
+  ...searchFilterQueryFields,
   ...pagingQueryFields,
-}).check(
-  Schema.makeFilter((query) => {
-    const issues: Array<Schema.FilterIssue> = [];
-    if (
-      query.minPriceMinor !== undefined &&
-      query.maxPriceMinor !== undefined &&
-      query.minPriceMinor > query.maxPriceMinor
-    ) {
-      issues.push({
-        path: ["minPriceMinor"],
-        issue: "minPriceMinor must not be greater than maxPriceMinor",
-      });
-    }
-    if (
-      query.minSizeSqm !== undefined &&
-      query.maxSizeSqm !== undefined &&
-      query.minSizeSqm > query.maxSizeSqm
-    ) {
-      issues.push({
-        path: ["minSizeSqm"],
-        issue: "minSizeSqm must not be greater than maxSizeSqm",
-      });
-    }
-    return issues;
-  }),
-);
+}).check(Schema.makeFilter(validateFilterRanges));
 export type ListingSearchQuery = typeof ListingSearchQuery.Type;
 
 // Query parameters arrive as a string tree, so the schema is read through this
@@ -339,3 +355,31 @@ export const ListingMineQuery = Schema.Struct({ ...pagingQueryFields });
 export type ListingMineQuery = typeof ListingMineQuery.Type;
 
 export const ListingMineQueryCodec = Schema.toCodecStringTree(ListingMineQuery);
+
+/*
+ * The map contract. It takes the feed's whole filter vocabulary but bounds the
+ * response instead of paging it: the map shows the newest pins up to the cap,
+ * and `truncated` says whether older listings were left off. A limit above the
+ * cap is a bad request rather than a silent clamp, so a caller never believes
+ * it received every pin when it did not.
+ */
+export const LISTING_MAP_DEFAULT_LIMIT = 500;
+export const LISTING_MAP_MAX_LIMIT = 500;
+
+export const ListingMapLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: LISTING_MAP_MAX_LIMIT }),
+);
+
+const ListingMapLimitFromString = NonBlankFiniteFromString.pipe(
+  Schema.decodeTo(ListingMapLimit, SchemaTransformation.passthrough()),
+);
+
+export const ListingMapQuery = Schema.Struct({
+  ...searchFilterQueryFields,
+  limit: ListingMapLimitFromString.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(LISTING_MAP_DEFAULT_LIMIT)),
+  ),
+}).check(Schema.makeFilter(validateFilterRanges));
+export type ListingMapQuery = typeof ListingMapQuery.Type;
+
+export const ListingMapQueryCodec = Schema.toCodecStringTree(ListingMapQuery);

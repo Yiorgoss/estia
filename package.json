@@ -14,6 +14,8 @@
     "preview": "pnpm run build && vite preview",
     "deploy": "pnpm run build && wrangler deploy",
     "migrate": "wrangler d1 migrations",
+    "map:tiles": "bash packages/map/get_tiles.sh",
+    "map:tiles:remote": "REMOTE=1 bash packages/map/get_tiles.sh",
     "cf-typegen": "wrangler types",
     "prepare": "effect-tsgo patch --typescript --oxlint",
     "update:effect": "git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git main --squash"

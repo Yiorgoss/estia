@@ -34,6 +34,7 @@ const TEST_ORIGIN = "http://localhost";
 // these tests never touch it, but the router's request services still name it.
 const StorageRepositoryStub = Layer.succeed(StorageRepository, {
   put: () => Effect.die("storage is not used by the listing tests"),
+  get: () => Effect.die("storage is not used by the listing tests"),
   newMultipart: () => Effect.die("storage is not used by the listing tests"),
 });
 
