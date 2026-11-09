@@ -16,7 +16,8 @@ const ARCHIVE = new TextEncoder().encode("PMTiles\x03\x10\x00\x00\x00ABCDEF");
 // The local R2 emulator reports all three range members, with unused ones
 // present but `undefined` - a shape that used to turn the arithmetic into NaN.
 const rangeOf = (rangeHeader: string | undefined): R2Range => {
-  if (rangeHeader === undefined) return { offset: 0, length: ARCHIVE.length, suffix: undefined } as unknown as R2Range;
+  if (rangeHeader === undefined)
+    return { offset: 0, length: ARCHIVE.length, suffix: undefined } as unknown as R2Range;
 
   const spec = rangeHeader.replace(/^bytes=/, "");
   if (spec.startsWith("-")) {
@@ -25,7 +26,8 @@ const rangeOf = (rangeHeader: string | undefined): R2Range => {
   }
   const [startText, endText] = spec.split("-");
   const offset = Number(startText);
-  const length = (endText === undefined || endText === "" ? ARCHIVE.length - 1 : Number(endText)) - offset + 1;
+  const length =
+    (endText === undefined || endText === "" ? ARCHIVE.length - 1 : Number(endText)) - offset + 1;
   return { offset, length, suffix: undefined } as unknown as R2Range;
 };
 
@@ -51,7 +53,10 @@ interface Call {
 }
 
 const run = <A>(
-  get: (key: string, range: string | undefined) => Effect.Effect<Option.Option<R2ObjectBody>, R2ReadError>,
+  get: (
+    key: string,
+    range: string | undefined,
+  ) => Effect.Effect<Option.Option<R2ObjectBody>, R2ReadError>,
   request: Request,
   check: (response: Response, calls: ReadonlyArray<Call>) => Effect.Effect<A>,
 ) => {
@@ -79,7 +84,10 @@ const run = <A>(
         { disableLogger: true },
       ),
     ),
-    ({ handler }) => Effect.promise(() => handler(request)).pipe(Effect.flatMap((response) => check(response, calls))),
+    ({ handler }) =>
+      Effect.promise(() => handler(request)).pipe(
+        Effect.flatMap((response) => check(response, calls)),
+      ),
     ({ dispose }) => Effect.promise(dispose),
   );
 };
@@ -91,18 +99,15 @@ const serveArchive = (key: string, range: string | undefined) =>
 
 describe("GET /maps/:key", () => {
   it.effect("serves the whole archive as a 200", () =>
-    run(
-      serveArchive,
-      new Request("http://localhost/maps/greece.pmtiles"),
-      (response, calls) =>
-        Effect.promise(async () => {
-          assert.strictEqual(response.status, 200);
-          assert.strictEqual(response.headers.get("content-type"), "application/vnd.pmtiles");
-          assert.strictEqual(response.headers.get("accept-ranges"), "bytes");
-          assert.strictEqual(response.headers.get("content-range"), null);
-          assert.deepStrictEqual(calls, [{ key: "maps/greece.pmtiles", range: undefined }]);
-          assert.strictEqual((await response.arrayBuffer()).byteLength, ARCHIVE.length);
-        }),
+    run(serveArchive, new Request("http://localhost/maps/greece.pmtiles"), (response, calls) =>
+      Effect.promise(async () => {
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual(response.headers.get("content-type"), "application/vnd.pmtiles");
+        assert.strictEqual(response.headers.get("accept-ranges"), "bytes");
+        assert.strictEqual(response.headers.get("content-range"), null);
+        assert.deepStrictEqual(calls, [{ key: "maps/greece.pmtiles", range: undefined }]);
+        assert.strictEqual((await response.arrayBuffer()).byteLength, ARCHIVE.length);
+      }),
     ),
   );
 
@@ -155,26 +160,20 @@ describe("GET /maps/:key", () => {
   );
 
   it.effect("answers 404 for an unknown archive without reading the bucket path", () =>
-    run(
-      serveArchive,
-      new Request("http://localhost/maps/missing.pmtiles"),
-      (response, calls) =>
-        Effect.promise(async () => {
-          assert.strictEqual(response.status, 404);
-          assert.deepStrictEqual(calls, [{ key: "maps/missing.pmtiles", range: undefined }]);
-        }),
+    run(serveArchive, new Request("http://localhost/maps/missing.pmtiles"), (response, calls) =>
+      Effect.promise(async () => {
+        assert.strictEqual(response.status, 404);
+        assert.deepStrictEqual(calls, [{ key: "maps/missing.pmtiles", range: undefined }]);
+      }),
     ),
   );
 
   it.effect("rejects a key that is not a maps/*.pmtiles object before touching storage", () =>
-    run(
-      serveArchive,
-      new Request("http://localhost/maps/notes.txt"),
-      (response, calls) =>
-        Effect.promise(async () => {
-          assert.strictEqual(response.status, 404);
-          assert.deepStrictEqual(calls, []);
-        }),
+    run(serveArchive, new Request("http://localhost/maps/notes.txt"), (response, calls) =>
+      Effect.promise(async () => {
+        assert.strictEqual(response.status, 404);
+        assert.deepStrictEqual(calls, []);
+      }),
     ),
   );
 

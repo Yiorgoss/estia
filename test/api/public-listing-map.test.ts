@@ -109,7 +109,14 @@ describe("GET /api/listings/map", () => {
       const pin = pins.find((candidate) => candidate.id === published.id);
       assert.isDefined(pin);
       assert.deepStrictEqual(Object.keys(pin ?? {}).sort(), publicPinKeys);
-      for (const key of ["ownerId", "status", "createdAt", "updatedAt", "publishedAt", "description"]) {
+      for (const key of [
+        "ownerId",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "publishedAt",
+        "description",
+      ]) {
         assert.isFalse(key in (pin ?? {}), `a map pin exposed ${key}`);
       }
 

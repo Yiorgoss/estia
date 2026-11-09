@@ -127,7 +127,7 @@ export const toPublicListingPage = (
  */
 export const toPublicListingPin = (
   listing: typeof ListingSchema.Type,
-): typeof ListingPinPage.Type["pins"][number] => {
+): (typeof ListingPinPage.Type)["pins"][number] => {
   if (listing.lat == null || listing.lng == null) {
     throw new Error("A listing without coordinates cannot become a map pin");
   }
@@ -147,12 +147,10 @@ export const toPublicListingPin = (
 
 export const PublicListingPinPageResponse = ListingPinPage;
 export type PublicListingPinPageResponse = typeof ListingPinPage.Type;
-export const toPublicListingPinPage = (
-  rows: {
-    readonly items: ReadonlyArray<typeof ListingSchema.Type>;
-    readonly truncated: boolean;
-  },
-): typeof ListingPinPage.Type => ({
+export const toPublicListingPinPage = (rows: {
+  readonly items: ReadonlyArray<typeof ListingSchema.Type>;
+  readonly truncated: boolean;
+}): typeof ListingPinPage.Type => ({
   pins: rows.items.map(toPublicListingPin),
   truncated: rows.truncated,
 });

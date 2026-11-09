@@ -24,7 +24,9 @@ builds are pruned), extracts the region in `greece.json` with `MAXZOOM=11` into
 default.
 
 Useful overrides: `MAXZOOM` (14 is the production shape, with street labels, at
-several times the size), `REGION`, `TARGET`, `R2_BUCKET`, `R2_KEY`, `REMOTE=1`.
+several times the size), `REGION`, `TARGET`, `R2_BUCKET`, `R2_KEY`, `REMOTE=1`,
+and `PMTILES_BIN` when the Protomaps CLI is not on `PATH` (the `go install`
+above names the binary `go-pmtiles`; the script looks for both names).
 
 ## How the page finds it
 

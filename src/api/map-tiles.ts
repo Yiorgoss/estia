@@ -110,7 +110,9 @@ export const MapTilesRoute = HttpRouter.route("GET", "/maps/:key", () =>
     return pmtilesResponse(object.value, range !== undefined);
   }).pipe(
     Effect.catchTag("R2ReadError", (error) =>
-      Effect.logError("Basemap read failed", { error }).pipe(Effect.andThen(Effect.succeed(unavailable()))),
+      Effect.logError("Basemap read failed", { error }).pipe(
+        Effect.andThen(Effect.succeed(unavailable())),
+      ),
     ),
   ),
 );

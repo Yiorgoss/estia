@@ -16,8 +16,11 @@ const pin = (overrides: Partial<PublicListingPin> = {}): PublicListingPin => ({
   ...overrides,
 });
 
-const render = (pins: ReadonlyArray<PublicListingPin>, truncated = false, basemapUrl = "/maps/greece.pmtiles") =>
-  mapPage({ basemapUrl, pins, truncated });
+const render = (
+  pins: ReadonlyArray<PublicListingPin>,
+  truncated = false,
+  basemapUrl = "/maps/greece.pmtiles",
+) => mapPage({ basemapUrl, pins, truncated });
 
 describe("mapPage", () => {
   it("renders the pins the server projected and links the header to the map", () => {
