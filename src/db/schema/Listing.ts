@@ -381,5 +381,3 @@ export const ListingMapQuery = Schema.Struct({
   ),
 }).check(Schema.makeFilter(validateFilterRanges));
 export type ListingMapQuery = typeof ListingMapQuery.Type;
-
-export const ListingMapQueryCodec = Schema.toCodecStringTree(ListingMapQuery);

@@ -20,7 +20,8 @@ pnpm map:tiles:remote   # same archive, upload to the deployed bucket
 `build-metadata.protomaps.dev` (never a hard-coded build date, because old daily
 builds are pruned), extracts the region in `greece.json` with `MAXZOOM=11` into
 `greece-dev.pmtiles`, and uploads it to the existing R2 `STORAGE` bucket
-(`estia`) as `maps/greece.pmtiles`.
+(`estia`) as `maps/greece.pmtiles`, the object path `PMTILES_GREECE` names by
+default.
 
 Useful overrides: `MAXZOOM` (14 is the production shape, with street labels, at
 several times the size), `REGION`, `TARGET`, `R2_BUCKET`, `R2_KEY`, `REMOTE=1`.
@@ -28,10 +29,13 @@ several times the size), `REGION`, `TARGET`, `R2_BUCKET`, `R2_KEY`, `REMOTE=1`.
 ## How the page finds it
 
 The Worker route `GET /maps/:key` serves the archive from R2 with byte-range
-support, and `MAP_BASEMAP_URL` (a Worker var, default `/maps/greece.pmtiles`)
-tells the page where to read it. Swapping in the captain's real archive needs no
-code change: upload it to `maps/greece.pmtiles`, or point `MAP_BASEMAP_URL` at
-any PMTiles URL.
+support, and `PMTILES_GREECE` (a Worker var in `wrangler.jsonc`, default
+`/maps/greece.pmtiles`) tells the page where to read it. `pnpm map:tiles` seeds
+that same R2 object key, so the placeholder it writes is the one the page loads.
+Swapping in the supplied archive needs no code change: set `PMTILES_GREECE` to
+the archive you supply (upload it to the object the var names, or point the var
+at any PMTiles URL). If the value points at a missing archive the page keeps its
+degraded banner and still draws the pins.
 
 ## Attribution
 

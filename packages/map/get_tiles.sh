@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build the placeholder Greece basemap and put it into the local R2 bucket.
+# Build the placeholder Greece basemap and put it into the local R2 bucket at
+# the object `PMTILES_GREECE` names.
 #
 # The archive is deliberately not in git (`*.pmtiles` is ignored): a fresh
 # checkout has no basemap and `/map` shows the red "basemap could not be loaded"
@@ -23,6 +24,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 BUCKET="${R2_BUCKET:-estia}"
+# The default object `PMTILES_GREECE` points at (wrangler.jsonc): the placeholder
+# this script writes is the archive the page reads.
 KEY="${R2_KEY:-maps/greece.pmtiles}"
 REGION="${REGION:-packages/map/greece.json}"
 # 11 is the ~39 MB dev placeholder. `MAXZOOM=14` matches the production shape

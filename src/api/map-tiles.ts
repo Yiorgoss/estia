@@ -1,5 +1,5 @@
 import { StorageRepository } from "@/repos/storage.repo";
-import { Effect, Option } from "effect";
+import { Config, Context, Effect, Layer, Option } from "effect";
 import {
   Headers as HttpHeaders,
   HttpRouter,
@@ -14,10 +14,23 @@ import {
  * bucket, so PMTiles can fetch just the header and the tiles it needs instead of
  * downloading the whole archive.
  *
- * `MAP_BASEMAP_URL` defaults to this route's own path. Pointing it at an R2
- * custom domain later is a config change, not a code change.
+ * `PMTILES_GREECE` names the archive and defaults to this route's own path, so
+ * the placeholder the tile script seeds is the archive the page reads. Pointing
+ * it at an R2 custom domain later is a config change, not a code change.
  */
-export const DEFAULT_MAP_BASEMAP_URL = "/maps/greece.pmtiles";
+const DEFAULT_PMTILES_GREECE = "/maps/greece.pmtiles";
+
+/*
+ * The archive path, resolved once when the app layer is built. Reading it here
+ * rather than per request means the Worker binding `PMTILES_GREECE` is what the
+ * page sees, instead of a per-request provider lookup that would bypass it.
+ */
+export const MapBasemapUrl = Context.Service<string>("MapBasemapUrl");
+
+export const MapBasemapUrlLive = Layer.effect(
+  MapBasemapUrl,
+  Config.String("PMTILES_GREECE").pipe(Config.withDefault(DEFAULT_PMTILES_GREECE)),
+);
 
 const PMTILES_CONTENT_TYPE = "application/vnd.pmtiles";
 

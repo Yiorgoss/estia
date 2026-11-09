@@ -1,13 +1,13 @@
 import { UserCredentials } from "@/db/schema/User";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { Config, Effect, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
 import { AuthPageRoutes } from "@/handlers/public/auth-pages";
 import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
-import { DEFAULT_MAP_BASEMAP_URL, MapTilesRoute } from "@/api/map-tiles";
+import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
@@ -178,6 +178,12 @@ export const ListingsGroup = HttpApiGroup.make("listings")
    * The map is a literal route. The router resolves a static path before a
    * parametric one, so `/listings/map` can never be swallowed by `/:id`;
    * registering it before `detail` keeps the intent visible as well.
+   *
+   * The endpoint is kept deliberately even though the `/map` page reads the
+   * service directly: it is the public read contract for the map, carrying the
+   * same filter vocabulary the feed speaks, and the search page's map toggle is
+   * its planned consumer. The page embedding its own pins is an implementation
+   * choice, not a reason to drop the contract.
    */
   .add(
     HttpApiEndpoint.get("map", "/map", {
@@ -272,16 +278,15 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
 /*
  * The map page. Pins are read through the same service as the map endpoint and
  * projected through the same function, so the page and the API cannot disagree
- * about which listings exist or where their pins are. The basemap URL is read at
- * render time from `MAP_BASEMAP_URL`, so swapping the archive is a config change.
+ * about which listings exist or where their pins are. The archive URL comes from
+ * `PMTILES_GREECE`, resolved with the app layer, so swapping in the supplied
+ * archive is a config change.
  */
 const mapRoute = HttpRouter.route("GET", "/map", () =>
   Effect.gen(function* () {
     const listingService = yield* ListingService;
     const rows = yield* listingService.mapPins({}, LISTING_MAP_DEFAULT_LIMIT);
-    const basemapUrl = yield* Config.String("MAP_BASEMAP_URL").pipe(
-      Config.withDefault(DEFAULT_MAP_BASEMAP_URL),
-    );
+    const basemapUrl = yield* MapBasemapUrl;
     return HttpServerResponse.html(
       mapPage({
         basemapUrl,

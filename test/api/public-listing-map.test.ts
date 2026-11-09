@@ -1,5 +1,5 @@
 import { approximateLocation } from "@/db/schema/ListingPin";
-import { asObject, call, register, send } from "../support/api";
+import { asObject, call, callWithConfig, register, send } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
@@ -262,6 +262,27 @@ describe("GET /api/listings/map", () => {
       const detail = yield* call(`/api/listings/${String(listing.id)}`);
       assert.strictEqual(detail.status, 200, detail.body);
       assert.strictEqual(asObject(detail.json).id, listing.id);
+    }),
+  );
+
+  it.effect("renders the map page with the archive PMTILES_GREECE names", () =>
+    Effect.gen(function* () {
+      const basemapUrlOf = (html: string): unknown => {
+        const marker = html.indexOf('id="map-data">');
+        const end = html.indexOf("</script>", marker);
+        return JSON.parse(html.slice(html.indexOf(">", marker) + 1, end)).basemapUrl;
+      };
+
+      const configured = yield* callWithConfig(
+        { PMTILES_GREECE: "/maps/custom-greece.pmtiles" },
+        "/map",
+      );
+      assert.strictEqual(configured.status, 200, configured.body);
+      assert.strictEqual(basemapUrlOf(configured.body), "/maps/custom-greece.pmtiles");
+
+      const placeholder = yield* callWithConfig({}, "/map");
+      assert.strictEqual(placeholder.status, 200, placeholder.body);
+      assert.strictEqual(basemapUrlOf(placeholder.body), "/maps/greece.pmtiles");
     }),
   );
 });

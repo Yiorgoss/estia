@@ -8,9 +8,10 @@
   "assets": { "directory": "static" },
   "vars": {
     "ORIGIN": "localhost:5173",
-    // Swap the placeholder Greece cutout without a code change: put the archive
-    // in R2 at maps/greece.pmtiles, or point this at any PMTiles URL.
-    "MAP_BASEMAP_URL": "/maps/greece.pmtiles",
+    // The placeholder Greece cutout. `PMTILES_GREECE` names the archive the page
+    // reads; point it at any PMTiles URL to swap the archive you supply without
+    // a code change.
+    "PMTILES_GREECE": "/maps/greece.pmtiles",
   },
   "d1_databases": [
     {

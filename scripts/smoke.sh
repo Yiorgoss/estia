@@ -913,7 +913,7 @@ grep -q 'id="map-data"' "$WORK/map-page" || fail "map page has no pin data block
 grep -q 'maplibre-gl@6.17.0' "$WORK/map-page" || fail "map page does not load the pinned MapLibre build"
 grep -q 'pmtiles@4.5.0' "$WORK/map-page" || fail "map page does not load the pinned PMTiles build"
 grep -q '@protomaps/basemaps@5.7.2' "$WORK/map-page" || fail "map page does not load the Protomaps style"
-grep -q '/maps/greece.pmtiles' "$WORK/map-page" || fail "map page did not read MAP_BASEMAP_URL"
+grep -q '/maps/greece.pmtiles' "$WORK/map-page" || fail "map page did not read PMTILES_GREECE"
 grep -q 'within about 0.75 km' "$WORK/map-page" || fail "map page does not state the error radius"
 grep -q 'OpenStreetMap contributors' "$WORK/map-page" || fail "map page dropped the basemap attribution"
 grep -q 'href="/map"' "$WORK/map-page" || fail "the header has no map link"
