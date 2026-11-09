@@ -1,4 +1,5 @@
 import { editableProfileRole } from "@/db/schema/Profile";
+import type { EditableProfileRole } from "@/db/schema/Profile";
 import { callerUser } from "@/handlers/private/caller";
 import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import {
@@ -7,7 +8,7 @@ import {
   profileFormValues,
   profileFormValuesFrom,
 } from "@/frontend/profile-form";
-import { profilePage, profileUnavailablePage } from "@/frontend/pages/profile";
+import { profileChoicePage, profilePage, profileUnavailablePage } from "@/frontend/pages/profile";
 import { UnauthorizedError } from "@/services/auth.service";
 import {
   AdminRoleSwitchError,
@@ -29,8 +30,9 @@ import { Effect, Option } from "effect";
  * refresh cannot repeat the write.
  *
  * The role a form belongs to is always the account's stored role. Nothing in the
- * request selects it, and the switch control below uses the same service the
- * JSON endpoint does, so the role rules stay in one place.
+ * request selects it; the only choice is the switch an unassigned account makes,
+ * and it uses the same service the JSON endpoint does, so the role rules stay in
+ * one place.
  */
 
 type ProfilePageError =
@@ -50,7 +52,7 @@ interface PageError {
 const describeError = (error: ProfilePageError): PageError => {
   switch (error._tag) {
     case "ProfileUnavailableError":
-      return { title: "This account has no profile yet", message: error.message, status: 409 };
+      return { title: "An admin account has no profile", message: error.message, status: 409 };
     case "ProfileValidationError":
       return { title: "That profile could not be saved", message: error.message, status: 400 };
     case "AdminRoleSwitchError":
@@ -83,7 +85,10 @@ const errorResponse = (error: ProfilePageError): HttpServerResponse.HttpServerRe
 };
 
 const unavailableResponse = (): HttpServerResponse.HttpServerResponse =>
-  respond(profileUnavailablePage("This account has no profile yet", noProfileMessage), 409);
+  respond(profileUnavailablePage("An admin account has no profile", noProfileMessage), 409);
+
+const choiceResponse = (status: number, error?: string): HttpServerResponse.HttpServerResponse =>
+  respond(profileChoicePage(error), status);
 
 // These routes change a profile, and their forms are simple requests, so the
 // browser will post one from another site with the session attached. The shared
@@ -100,11 +105,26 @@ const readForm = (request: HttpServerRequest.HttpServerRequest) =>
 const savedFlag = (params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>) =>
   params["saved"] === "1";
 
+const completedFlag = (
+  params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
+) => params["completed"] === "1";
+
+// The profile an unassigned account chooses. It is the only switch that carries
+// a direction, because there is no current role to flip away from.
+const roleTarget = (
+  value: string | ReadonlyArray<string> | undefined,
+): EditableProfileRole | undefined => {
+  const role = typeof value === "string" ? value : value?.[0];
+  return role === "seeker" || role === "lister" ? role : undefined;
+};
+
 const getProfilePage = HttpRouter.route("GET", "/profile", (request) =>
   Effect.gen(function* () {
     const user = yield* callerUser(request);
     const role = editableProfileRole(user.role);
-    if (role === undefined) return unavailableResponse();
+    if (role === undefined) {
+      return user.role === "user" ? choiceResponse(200) : unavailableResponse();
+    }
 
     const userService = yield* UserService;
     const profile = yield* userService.readProfile(user);
@@ -115,6 +135,7 @@ const getProfilePage = HttpRouter.route("GET", "/profile", (request) =>
         role,
         values: profileFormValuesFrom(Option.getOrNull(profile)),
         saved: savedFlag(params),
+        completed: completedFlag(params),
       }),
       200,
     );
@@ -127,7 +148,11 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
 
     const user = yield* callerUser(request);
     const role = editableProfileRole(user.role);
-    if (role === undefined) return unavailableResponse();
+    if (role === undefined) {
+      return user.role === "user"
+        ? choiceResponse(400, "Choose the profile you want to fill in first.")
+        : unavailableResponse();
+    }
 
     const params = yield* readForm(request);
     const values = profileFormValues(params);
@@ -149,18 +174,22 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
 );
 
 /*
- * The switch is a form post with no fields: the direction is the stored role's
- * opposite, exactly as the JSON endpoint decides it. Landing back on the profile
- * page means the person sees the other form, pre-filled from its own row.
+ * The switch is a form post: an assigned account flips to its other profile,
+ * exactly as the JSON endpoint decides it, while an unassigned account sends the
+ * profile it chooses. Landing back on the profile page means the person sees the
+ * other form, pre-filled from its own row. When the switch only opened the
+ * account's missing current row, the page says so and keeps the control, so the
+ * first click is not a silent no-op.
  */
 const switchRole = HttpRouter.route("POST", "/profile/switch", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) return crossSiteResponse();
 
     const user = yield* callerUser(request);
+    const params = yield* readForm(request);
     const userService = yield* UserService;
-    yield* userService.switchRoles(user.id);
-    return seeOther("/profile");
+    const switched = yield* userService.switchRoles(user.id, roleTarget(params["role"]));
+    return seeOther(switched.role === user.role ? "/profile?completed=1" : "/profile");
   }).pipe(Effect.catch((error: ProfilePageError) => Effect.succeed(errorResponse(error)))),
 );
 

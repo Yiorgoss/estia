@@ -53,11 +53,21 @@ export type ListerProfileInput = typeof ListerProfileInput.Type;
 export const ProfileInput = Schema.Union([SeekerProfileInput, ListerProfileInput]);
 export type ProfileInput = typeof ProfileInput.Type;
 
-// The roles that own a profile row. An admin or an unassigned account has none,
-// which is a readable refusal rather than a guessed profile.
+// The roles that own a profile row. An admin has none, which is a readable
+// refusal rather than a guessed profile. An unassigned account has none either,
+// but it adopts one by naming the profile it wants, so the roles here are also
+// the choices a switch can carry.
 export const EditableProfileRoles = Schema.Literals(["seeker", "lister"]);
 export type EditableProfileRole = typeof EditableProfileRoles.Type;
 
 export const editableProfileRole = (
   role: typeof UserRoles.Type,
 ): EditableProfileRole | undefined => (role === "seeker" || role === "lister" ? role : undefined);
+
+// The role an account with no profile yet adopts on its first switch, or the
+// role an assigned account names to move to. Omitting it flips an assigned
+// account to its other profile.
+export const RoleSwitchQuery = Schema.Struct({
+  role: Schema.optional(EditableProfileRoles),
+});
+export type RoleSwitchQuery = typeof RoleSwitchQuery.Type;

@@ -14,11 +14,12 @@ import { Effect } from "effect";
 const me = (user: TestUser) =>
   call("/api/users/me", { headers: { cookie: user.cookie, "user-agent": "estia-tests" } });
 
-// A browser posts this from the app's own page, and the switch carries no body:
-// everything it needs is the session plus the account's stored state.
-const changeRole = (user: TestUser) =>
+// A browser posts this from the app's own page, and a switch on an assigned
+// account carries no query: everything it needs is the session plus the account's
+// stored state. An unassigned account names the role it adopts.
+const changeRole = (user: TestUser, role?: "seeker" | "lister") =>
   call(
-    "/api/users/change-role",
+    `/api/users/change-role${role === undefined ? "" : `?role=${role}`}`,
     json({
       method: "POST",
       headers: { cookie: user.cookie, origin: testOrigin },
@@ -340,6 +341,21 @@ describe("POST /api/users/change-role", () => {
     }),
   );
 
+  // A named role is honoured even when the account already holds one, so the
+  // switch answers with the profile it was asked for instead of flipping.
+  it.effect("sets the role an assigned account names", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("named-role");
+
+      const switched = yield* changeRole(user, "seeker");
+
+      assert.strictEqual(switched.status, 200, switched.body);
+      assert.strictEqual(asObject(bodyOf(switched)["newProfile"])["userId"], user.id);
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+    }),
+  );
+
   it.effect("refuses a role switch for an admin and leaves the admin role alone", () =>
     Effect.gen(function* () {
       const user = yield* freshUser("admin-guard");
@@ -354,9 +370,46 @@ describe("POST /api/users/change-role", () => {
     }),
   );
 
-  it.effect("refuses a role switch for an unassigned legacy account", () =>
+  it.effect("lets an unassigned legacy account adopt seeking", () =>
     Effect.gen(function* () {
-      const user = yield* legacyUser("unassigned-guard", "user");
+      const user = yield* legacyUser("adopt-seeker", "user");
+
+      const adopted = yield* changeRole(user, "seeker");
+
+      assert.strictEqual(adopted.status, 200, adopted.body);
+      assert.strictEqual(asObject(bodyOf(adopted)["newProfile"])["userId"], user.id);
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+      assert.strictEqual(yield* countFor("listers", user.id), 0);
+
+      const after = yield* me(user);
+      assert.strictEqual(roleOf(after), "seeker");
+    }),
+  );
+
+  it.effect("lets an unassigned legacy account adopt listing", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("adopt-lister", "user");
+
+      const adopted = yield* changeRole(user, "lister");
+
+      assert.strictEqual(adopted.status, 200, adopted.body);
+      assert.strictEqual(asObject(bodyOf(adopted)["newProfile"])["userId"], user.id);
+      assert.strictEqual(asObject(bodyOf(adopted)["newProfile"])["ownership"], "owner");
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
+      assert.strictEqual(yield* countFor("seekers", user.id), 0);
+
+      const after = yield* me(user);
+      assert.strictEqual(roleOf(after), "lister");
+    }),
+  );
+
+  // With no current role and no named choice there is nothing to infer, so the
+  // switch is refused instead of guessing a side of the market.
+  it.effect("refuses an unassigned legacy account that names no role", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("unassigned-no-choice", "user");
 
       const refused = yield* changeRole(user);
 
@@ -365,9 +418,6 @@ describe("POST /api/users/change-role", () => {
       assert.strictEqual(yield* storedRole(user.id), "user");
       assert.strictEqual(yield* countFor("listers", user.id), 0);
       assert.strictEqual(yield* countFor("seekers", user.id), 0);
-      const after = yield* me(user);
-      assert.strictEqual(roleOf(after), "user");
-      assert.isNull(profileOf(after));
     }),
   );
 

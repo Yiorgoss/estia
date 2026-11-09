@@ -1013,25 +1013,29 @@ grep -q '"userProfile":{' "$WORK/me-partial" \
   || fail "the healed account's profile call did not report the lister profile"
 pass "a partially provisioned account heals and reports its profile"
 
-# 8d. the unassigned guard is for accounts created before registration
-# provisioned profiles: it refuses the switch instead of guessing a role.
+# 8d. a legacy account from before registration provisioned profiles has the
+# unassigned role and no rows. It picks a side of the market by naming the
+# profile it adopts, which opens that row and assigns the role.
 db_exec "DELETE FROM seekers WHERE user_id='${SECOND_USER_ID}';"
 db_exec "DELETE FROM listers WHERE user_id='${SECOND_USER_ID}';"
 db_exec "UPDATE users SET role='user' WHERE id='${SECOND_USER_ID}';"
 CODE=$(curl -s -o "$WORK/change-role-unassigned" -w '%{http_code}' \
-  -X POST "${BASE_URL}/api/users/change-role" \
+  -X POST "${BASE_URL}/api/users/change-role?role=seeker" \
   -H "Origin: ${BASE_URL}" \
   -H "Cookie: access_token=${SECOND_ACCESS}")
-assert_status "$CODE" 409 "a role switch on an unassigned account is refused"
-grep -q 'UnassignedRoleSwitchError' "$WORK/change-role-unassigned" \
-  || fail "the unassigned role switch did not say why"
-UNASSIGNED_LISTERS="$(profile_rows listers "$SECOND_USER_ID")"
+assert_status "$CODE" 200 "an unassigned account adopts the profile it names"
+grep -q "\"userId\":\"${SECOND_USER_ID}\"" "$WORK/change-role-unassigned" \
+  || fail "the adoption switch returned another account's profile"
 UNASSIGNED_SEEKERS="$(profile_rows seekers "$SECOND_USER_ID")"
+UNASSIGNED_LISTERS="$(profile_rows listers "$SECOND_USER_ID")"
+[ "$UNASSIGNED_SEEKERS" = "1" ] \
+  || fail "an unassigned account did not get the seeking profile it chose (${UNASSIGNED_SEEKERS} rows)"
 [ "$UNASSIGNED_LISTERS" = "0" ] \
-  || fail "an unassigned role switch opened a lister profile (${UNASSIGNED_LISTERS} rows)"
-[ "$UNASSIGNED_SEEKERS" = "0" ] \
-  || fail "an unassigned role switch opened a seeker profile (${UNASSIGNED_SEEKERS} rows)"
-pass "an unassigned account cannot become a lister by switching"
+  || fail "an unassigned account opened an unchosen lister profile (${UNASSIGNED_LISTERS} rows)"
+grep -q '"role":"seeker"' <(curl -s "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${SECOND_ACCESS}") \
+  || fail "the adoption switch did not change the stored role"
+pass "an unassigned account adopts the profile it names"
 
 # 8e. an admin has no profile to switch between, and must never be demoted by a
 # payload-less switch.

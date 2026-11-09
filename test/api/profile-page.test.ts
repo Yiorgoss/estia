@@ -26,8 +26,22 @@ const switchRole = (user: TestUser) =>
     form({ method: "POST", headers: { cookie: user.cookie, "user-agent": "estia-tests" } }, {}),
   );
 
+const switchTo = (user: TestUser, role: "seeker" | "lister") =>
+  call(
+    "/profile/switch",
+    form({ method: "POST", headers: { cookie: user.cookie, "user-agent": "estia-tests" } }, {
+      role,
+    }),
+  );
+
 const setRole = (id: string, role: string) =>
   query("UPDATE users SET role = ? WHERE id = ?", [role, id]);
+
+const storedRole = (id: string) =>
+  Effect.map(
+    query<{ role: string }>("SELECT role FROM users WHERE id = ?", [id]),
+    (rows) => rows[0]?.role,
+  );
 
 const deleteProfile = (table: "seekers" | "listers", id: string) =>
   query(`DELETE FROM ${table} WHERE user_id = ?`, [id]);
@@ -42,6 +56,15 @@ const seekerForm = (overrides: Record<string, string> = {}): Record<string, stri
 });
 
 const freshUser = (label: string) => register(`profile-page-${label}`);
+
+const legacyUser = (label: string) =>
+  Effect.gen(function* () {
+    const user = yield* freshUser(label);
+    yield* deleteProfile("seekers", user.id);
+    yield* deleteProfile("listers", user.id);
+    yield* setRole(user.id, "user");
+    return user;
+  });
 
 describe("GET /profile", () => {
   it.effect("renders the incomplete seeking form for a fresh account", () =>
@@ -89,17 +112,33 @@ describe("GET /profile", () => {
     }),
   );
 
-  it.effect("tells an account with no profile which state it is in", () =>
+  // A legacy account with no role has no profile form to show yet, so the page
+  // offers the two profiles and lets the person pick a side of the market.
+  it.effect("offers an unassigned account the choice of profile", () =>
     Effect.gen(function* () {
-      const user = yield* freshUser("unassigned");
+      const user = yield* legacyUser("unassigned");
+
+      const response = yield* page(user);
+
+      assert.strictEqual(response.status, 200, response.body);
+      assert.include(response.body, "Choose a profile");
+      assert.include(response.body, 'action="/profile/switch"');
+      assert.include(response.body, 'value="seeker"');
+      assert.include(response.body, 'value="lister"');
+      assert.notInclude(response.body, 'action="/profile"');
+    }),
+  );
+
+  it.effect("refuses an admin account that holds no profile", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("admin");
       yield* deleteProfile("seekers", user.id);
-      yield* deleteProfile("listers", user.id);
-      yield* setRole(user.id, "user");
+      yield* setRole(user.id, "admin");
 
       const response = yield* page(user);
 
       assert.strictEqual(response.status, 409, response.body);
-      assert.include(response.body, "This account has no profile yet");
+      assert.include(response.body, "An admin account has no profile");
       assert.notInclude(response.body, 'action="/profile"');
     }),
   );
@@ -226,6 +265,75 @@ describe("POST /profile", () => {
 });
 
 describe("POST /profile/switch", () => {
+  it.effect("adopts the seeking profile an unassigned account chooses", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("adopt-seeker");
+
+      const switched = yield* switchTo(user, "seeker");
+
+      assert.strictEqual(switched.status, 303, switched.body);
+      assert.strictEqual(switched.location, "/profile");
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+
+      const form = yield* page(user);
+      assert.strictEqual(form.status, 200, form.body);
+      assert.include(form.body, "Seeking profile");
+      assert.include(form.body, 'name="dateOfBirth"');
+    }),
+  );
+
+  it.effect("adopts the listing profile an unassigned account chooses", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("adopt-lister");
+
+      const switched = yield* switchTo(user, "lister");
+
+      assert.strictEqual(switched.status, 303, switched.body);
+      assert.strictEqual(switched.location, "/profile");
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+
+      const form = yield* page(user);
+      assert.strictEqual(form.status, 200, form.body);
+      assert.include(form.body, "Listing profile");
+      assert.include(form.body, 'name="ownership"');
+    }),
+  );
+
+  // A stored lister whose lister row is missing heals that row on the first
+  // switch instead of changing the role. Saying so keeps the click honest, and
+  // the second click performs the switch.
+  it.effect("says the profile was completed when the first switch only heals it", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("heal-lister");
+      yield* deleteProfile("listers", user.id);
+      yield* setRole(user.id, "lister");
+
+      const healed = yield* switchRole(user);
+
+      assert.strictEqual(healed.status, 303, healed.body);
+      assert.strictEqual(healed.location, "/profile?completed=1");
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+      assert.strictEqual(
+        (yield* query<{ total: number }>("SELECT COUNT(*) AS total FROM listers WHERE user_id = ?", [
+          user.id,
+        ]))[0]?.total,
+        1,
+      );
+
+      const after = yield* call("/profile?completed=1", {
+        headers: { cookie: user.cookie, "user-agent": "estia-tests" },
+      });
+      assert.strictEqual(after.status, 200, after.body);
+      assert.include(after.body, "This profile was completed.");
+      assert.include(after.body, "Switch to my seeking profile");
+
+      const switched = yield* switchRole(user);
+      assert.strictEqual(switched.status, 303, switched.body);
+      assert.strictEqual(switched.location, "/profile");
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+    }),
+  );
+
   it.effect("switches the account to its other profile and back", () =>
     Effect.gen(function* () {
       const user = yield* freshUser("switch");

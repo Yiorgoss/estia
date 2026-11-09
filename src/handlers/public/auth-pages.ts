@@ -146,7 +146,7 @@ const register = HttpRouter.route("POST", "/register", (request) =>
 
     // The account exists from here on, so auto-signing in must never be reported
     // as a failed registration. Registering signs the person in, so they land on
-    // the feed instead of being asked for the password they just chose.
+    // their profile instead of being asked for the password they just chose.
     const accountCreated = () =>
       respond(
         registerPage({

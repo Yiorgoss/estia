@@ -1,6 +1,6 @@
 import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
-import { ProfileInput } from "@/db/schema/Profile";
+import { ProfileInput, RoleSwitchQuery } from "@/db/schema/Profile";
 import { ListingId, UserRoles } from "@/db/schema/brands";
 import { CurrentUser } from "@/db/schema/User";
 import {
@@ -34,7 +34,9 @@ import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
 /*
  * The caller's own profile. The role is the account's stored role, which is what
  * decides which of the two shapes the profile has; the profile is null until a
- * legacy account's missing row is opened by its first save.
+ * legacy account's missing row is opened by its first save. An unassigned
+ * account reads as a null profile with the role it still has; saving or picking
+ * a profile assigns the role.
  */
 export const ProfileResponse = Schema.Struct({
   role: UserRoles,
@@ -57,8 +59,8 @@ export const UserGroup = HttpApiGroup.make("user-group")
   .add(
     HttpApiEndpoint.get("profile", "/profile", {
       success: ProfileResponse,
-      // An admin or an account left unassigned by an older registration holds no
-      // profile to read, and says so instead of inventing one.
+      // An admin holds no profile to read, and says so instead of inventing
+      // one. An unassigned account reads as a null profile until it picks one.
       error: [ProfileUnavailableError, InternalError, UnauthorizedError],
     }),
   )
@@ -66,7 +68,8 @@ export const UserGroup = HttpApiGroup.make("user-group")
     HttpApiEndpoint.put("save-profile", "/profile", {
       // The payload is validated at the boundary: a seeking profile needs a
       // name, a date of birth and a gender, and a listing profile needs an
-      // ownership. The server applies it to the account's own role.
+      // ownership. The server applies it to the account's own role, or lets an
+      // unassigned account adopt the role the payload describes.
       payload: ProfileInput,
       success: ProfileResponse,
       error: [ProfileUnavailableError, ProfileValidationError, InternalError, UnauthorizedError],
@@ -74,11 +77,14 @@ export const UserGroup = HttpApiGroup.make("user-group")
   )
   .add(
     HttpApiEndpoint.post("change-role", "/change-role", {
+      // A switch from an unassigned account names the profile it adopts. An
+      // assigned account flips without one, or moves to the role it names.
+      query: RoleSwitchQuery,
       success: Schema.Struct({
         newProfile: Schema.Union([SeekerSchema, ListerSchema]),
       }),
-      // An admin or unassigned account has no profile to switch between, so
-      // those refusals are part of the endpoint's contract.
+      // An admin has no profile to switch between, and an unassigned account
+      // that names no role gives the switch nothing to adopt.
       error: [AdminRoleSwitchError, UnassignedRoleSwitchError, InternalError, UnauthorizedError],
     }),
   )

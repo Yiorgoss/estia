@@ -51,6 +51,12 @@ const deleteProfile = (table: "seekers" | "listers", userId: string) =>
 const setRole = (id: string, role: string) =>
   query("UPDATE users SET role = ? WHERE id = ?", [role, id]);
 
+const storedRole = (id: string) =>
+  Effect.map(
+    query<{ role: string }>("SELECT role FROM users WHERE id = ?", [id]),
+    (rows) => rows[0]?.role,
+  );
+
 const seekerRow = (userId: string) =>
   Effect.map(
     query<{
@@ -97,6 +103,17 @@ const listerPayload = (overrides: Record<string, unknown> = {}) => ({
 
 // A fresh registration is born seeking, with one row in each profile table.
 const freshUser = (label: string) => register(`profile-${label}`);
+
+// An account from before registration provisioned profiles: the unassigned role
+// and no profile rows. It picks a side of the market on its first save.
+const legacyUser = (label: string) =>
+  Effect.gen(function* () {
+    const user = yield* freshUser(label);
+    yield* deleteProfile("seekers", user.id);
+    yield* deleteProfile("listers", user.id);
+    yield* setRole(user.id, "user");
+    return user;
+  });
 
 const listingUser = (label: string) =>
   Effect.gen(function* () {
@@ -150,12 +167,25 @@ describe("GET /api/users/profile", () => {
     }),
   );
 
-  it.effect("refuses an unassigned account that holds no profile", () =>
+  // A legacy unassigned account has no current role, so it reads as a null
+  // profile rather than a refusal. The page asks it to pick one.
+  it.effect("answers an unassigned legacy account with a null profile", () =>
     Effect.gen(function* () {
-      const user = yield* freshUser("read-unassigned");
+      const user = yield* legacyUser("read-unassigned");
+
+      const response = yield* profile(user);
+
+      assert.strictEqual(response.status, 200, response.body);
+      assert.strictEqual(roleOf(response), "user");
+      assert.isNull(profileOf(response));
+    }),
+  );
+
+  it.effect("refuses an admin account that holds no profile", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("read-admin");
       yield* deleteProfile("seekers", user.id);
-      yield* deleteProfile("listers", user.id);
-      yield* setRole(user.id, "user");
+      yield* setRole(user.id, "admin");
 
       const response = yield* profile(user);
 
@@ -270,6 +300,46 @@ describe("PUT /api/users/profile", () => {
       assert.strictEqual(profileOf(saved)?.["ownership"], "leaseholder");
       assert.strictEqual(yield* countFor("listers", user.id), 1);
       assert.strictEqual((yield* listerRow(user.id))?.name, "Ada Lets");
+    }),
+  );
+
+  it.effect("lets an unassigned legacy account adopt the seeking profile it saves", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("save-legacy-seeker");
+
+      const saved = yield* saveProfile(user, seekerPayload());
+
+      assert.strictEqual(saved.status, 200, saved.body);
+      assert.strictEqual(roleOf(saved), "seeker");
+      assert.strictEqual(profileOf(saved)?.["name"], "Ada Seeker");
+      assert.strictEqual(yield* storedRole(user.id), "seeker");
+      assert.strictEqual(yield* countFor("seekers", user.id), 1);
+      assert.strictEqual(yield* countFor("listers", user.id), 0);
+
+      const read = yield* profile(user);
+      assert.strictEqual(read.status, 200, read.body);
+      assert.strictEqual(roleOf(read), "seeker");
+      assert.strictEqual(profileOf(read)?.["name"], "Ada Seeker");
+    }),
+  );
+
+  it.effect("lets an unassigned legacy account adopt the listing profile it saves", () =>
+    Effect.gen(function* () {
+      const user = yield* legacyUser("save-legacy-lister");
+
+      const saved = yield* saveProfile(user, listerPayload());
+
+      assert.strictEqual(saved.status, 200, saved.body);
+      assert.strictEqual(roleOf(saved), "lister");
+      assert.strictEqual(profileOf(saved)?.["ownership"], "leaseholder");
+      assert.strictEqual(yield* storedRole(user.id), "lister");
+      assert.strictEqual(yield* countFor("listers", user.id), 1);
+      assert.strictEqual(yield* countFor("seekers", user.id), 0);
+
+      const read = yield* profile(user);
+      assert.strictEqual(read.status, 200, read.body);
+      assert.strictEqual(roleOf(read), "lister");
+      assert.strictEqual(profileOf(read)?.["ownership"], "leaseholder");
     }),
   );
 

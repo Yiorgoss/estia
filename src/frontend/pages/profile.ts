@@ -53,6 +53,14 @@ const savedBanner = (saved: boolean) =>
     ? `<p class="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800" role="status">Your profile was saved.</p>`
     : "";
 
+// A switch that had to open the account's missing current row before it could
+// flip has not changed the role yet. Saying so keeps the first click honest and
+// leaves the switch in place for the click that actually moves roles.
+const completedBanner = (completed: boolean) =>
+  completed
+    ? `<p class="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800" role="status">This profile was completed. Use the switch again to open the other one.</p>`
+    : "";
+
 const incompleteNotice = () => `
   <div class="rounded-lg border border-amber-200 bg-amber-50 p-4" role="status">
     <p class="text-sm font-medium text-amber-900">Your seeking profile is incomplete</p>
@@ -195,6 +203,7 @@ export interface ProfilePageState {
   readonly values: ProfileFormValues;
   readonly error?: string | undefined;
   readonly saved?: boolean | undefined;
+  readonly completed?: boolean | undefined;
 }
 
 export const profilePage = (state: ProfilePageState) => {
@@ -207,14 +216,15 @@ export const profilePage = (state: ProfilePageState) => {
       <div>
         <h1 class="text-2xl font-semibold text-gray-900">Your profile</h1>
         <p class="mt-1 text-sm text-gray-600">
-          Tell people who you are. Both profiles already belong to your account;
-          this page edits the one your account is using now.
+          Tell people who you are. You can switch between a seeking and a listing
+          profile; this page edits the one your account is using now.
         </p>
       </div>
     </div>
 
     <div class="mt-4 space-y-4">
       ${savedBanner(state.saved === true)}
+      ${completedBanner(state.completed === true)}
       ${errorBanner(state.error)}
       ${incomplete ? incompleteNotice() : ""}
     </div>
@@ -240,9 +250,8 @@ export const profilePage = (state: ProfilePageState) => {
   );
 };
 
-// An account whose role holds no profile - an admin, or one left unassigned by
-// an older registration - has nothing to edit, and is told so instead of being
-// shown a form that cannot be saved.
+// An admin account has no profile to edit and is told so instead of being shown
+// a form that cannot be saved.
 export const profileUnavailablePage = (title: string, message: string) =>
   pageShell(
     title,
@@ -255,4 +264,39 @@ export const profileUnavailablePage = (title: string, message: string) =>
       <a href="/search" class="${secondaryButtonClass}">Back to listings</a>
       <a href="/login" class="${secondaryButtonClass}">Sign in with another account</a>
     </p>`,
+  );
+
+// An account left unassigned by an older registration has no profile yet, so
+// the page asks which one it wants. Each choice is a switch that adopts that
+// profile and assigns the role, after which the ordinary form is shown.
+export const profileChoicePage = (error?: string | undefined) =>
+  pageShell(
+    "Your profile",
+    `
+    <h1 class="text-2xl font-semibold text-gray-900">Your profile</h1>
+    <p class="mt-1 text-sm text-gray-600">
+      Tell people who you are. Choose the profile you want to fill in; you can
+      switch to the other one at any time.
+    </p>
+
+    <div class="mt-4">${errorBanner(error)}</div>
+
+    <section class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <h2 class="text-base font-semibold text-gray-900">Choose a profile</h2>
+      <p class="mt-1 text-sm text-gray-600">
+        A seeking profile is for answering listings. A listing profile is for
+        posting them.
+      </p>
+
+      <div class="mt-6 flex flex-wrap items-center gap-3">
+        <form method="post" action="/profile/switch">
+          <input type="hidden" name="role" value="seeker" />
+          <button type="submit" class="${primaryButtonClass}">Fill in my seeking profile</button>
+        </form>
+        <form method="post" action="/profile/switch">
+          <input type="hidden" name="role" value="lister" />
+          <button type="submit" class="${secondaryButtonClass}">Fill in my listing profile</button>
+        </form>
+      </div>
+    </section>`,
   );
