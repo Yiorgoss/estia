@@ -5,7 +5,8 @@ import { header } from "../header";
 /*
  * Sign-in and registration are server-rendered forms: the browser posts the
  * fields back to the page's own URL and the route answers with a redirect to the
- * listing feed, or with this page again carrying the reason it was rejected.
+ * listing feed, or to the profile page after registering, or with this page
+ * again carrying the reason it was rejected.
  *
  * They are not htmx forms. The `/api/auth` endpoints are a JSON API, and htmx
  * posts form-encoded bodies by default, so a page pointed at them cannot work;

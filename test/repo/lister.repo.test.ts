@@ -78,4 +78,30 @@ layer(TestLive, { concurrent: false })("ListerRepository", (it) => {
       assert.strictEqual(second.userId, "u-lister-twice");
     }),
   );
+
+  // The save path writes a profile that already exists, and opens one that does
+  // not, so a legacy account is repaired rather than refused.
+  it.effect("upsertForUser writes an existing profile and opens a missing one", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-lister-upsert", "lister-upsert@test.local", "lister");
+      const repo = yield* ListerRepository;
+
+      const opened = yield* repo.upsertForUser(userId("u-lister-upsert"), {
+        name: "Ada Lister",
+        ownership: "leaseholder",
+      });
+      assert.strictEqual(opened.userId, "u-lister-upsert");
+      assert.strictEqual(opened.name, "Ada Lister");
+      assert.strictEqual(opened.ownership, "leaseholder");
+
+      // A save replaces the whole profile: an emptied name is written as null.
+      const rewritten = yield* repo.upsertForUser(userId("u-lister-upsert"), {
+        name: null,
+        ownership: "owner",
+      });
+      assert.strictEqual(rewritten.id, opened.id);
+      assert.isNull(rewritten.name);
+      assert.strictEqual(rewritten.ownership, "owner");
+    }),
+  );
 });

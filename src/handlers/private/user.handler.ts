@@ -7,10 +7,11 @@ import { HttpApiBuilder } from "effect/http-api";
 import { Effect, Option } from "effect";
 
 /*
- * The signed-in account's own view. Both handlers start from the stored user, so
- * the answer always describes the account as it is now: the role comes from the
- * row, the profile is whatever that role points at, and a profile that does not
- * exist yet is a null rather than a made-up error.
+ * The signed-in account's own view. Every handler starts from the stored user,
+ * so the answer always describes the account as it is now: the role comes from
+ * the row, the profile is whatever that role points at, and a profile that does
+ * not exist yet is a null rather than a made-up error. Saving is an upsert, so
+ * the same call opens a missing row and lets an unassigned account pick a side.
  */
 export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handlers) =>
   handlers
@@ -33,12 +34,31 @@ export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handl
         };
       }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
     )
-    .handle("change-role", ({ request }) =>
+    .handle("profile", ({ request }) =>
       Effect.gen(function* () {
         const user = yield* callerUser(request);
         const userService = yield* UserService;
-        const newProfile = yield* userService.switchRoles(user.id);
-        return { newProfile };
+        const profile = yield* userService.readProfile(user);
+        return { role: user.role, profile: Option.getOrNull(profile) };
+      }),
+    )
+    .handle("save-profile", ({ payload, request }) =>
+      Effect.gen(function* () {
+        // An assigned account's role is read from the stored row, so a caller
+        // cannot save a listing profile by saying it is one. An unassigned
+        // account has no role to match, so the payload is the choice it makes.
+        const user = yield* callerUser(request);
+        const userService = yield* UserService;
+        const saved = yield* userService.saveProfile(user, payload);
+        return { role: saved.role, profile: saved.profile };
+      }),
+    )
+    .handle("change-role", ({ query, request }) =>
+      Effect.gen(function* () {
+        const user = yield* callerUser(request);
+        const userService = yield* UserService;
+        const switched = yield* userService.switchRoles(user.id, query.role);
+        return { newProfile: switched.profile };
       }),
     ),
 );
