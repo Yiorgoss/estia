@@ -11,6 +11,7 @@ import {
   ListingTitle,
   UpdateListingInput,
 } from "@/db/schema/Listing";
+import { ListingPinRows } from "@/db/schema/ListingPin";
 import { ListingRepository } from "@/repos/listing.repo";
 import { InternalError } from "@/services/user.service";
 import { Context, Effect, Layer, Option, Schema } from "effect";
@@ -165,6 +166,16 @@ export interface ListingService {
     filters: typeof ListingSearchFilters.Type,
     page: typeof ListingPageRequest.Type,
   ) => Effect.Effect<typeof ListingPage.Type, InternalError>;
+
+  /*
+   * The map's read: published pins only, newest first, bounded by `limit`. It
+   * deliberately returns whole rows - the wire projection is the only place a
+   * coordinate is rounded, so the service cannot publish one by accident.
+   */
+  readonly mapPins: (
+    filters: typeof ListingSearchFilters.Type,
+    limit: number,
+  ) => Effect.Effect<typeof ListingPinRows.Type, InternalError>;
 }
 
 export const ListingService = Context.Service<ListingService>("ListingService");
@@ -275,6 +286,7 @@ export const ListingServiceLive = Layer.effect(
         }),
       listMine: (ownerId, page) => fromSql(repo.listByOwner(ownerId, page)),
       search: (filters, page) => fromSql(repo.search(filters, page)),
+      mapPins: (filters, limit) => fromSql(repo.listPinned(filters, limit)),
     } satisfies ListingService;
   }),
 );

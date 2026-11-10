@@ -1,7 +1,10 @@
 import { MultipartError } from "effect/http/Multipart";
-import { Context, Effect, Layer, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
 
 export class R2UploadError extends Schema.TaggedError<R2UploadError>()("R2UploadError", {
+  cause: Schema.Unknown,
+}) {}
+export class R2ReadError extends Schema.TaggedError<R2ReadError>()("R2ReadError", {
   cause: Schema.Unknown,
 }) {}
 export class R2MultipartKeyError extends Schema.TaggedError<R2MultipartKeyError>()(
@@ -26,6 +29,16 @@ export interface StorageRepository {
     key: string,
     value: ReadableStream | ArrayBuffer | string,
   ) => Effect.Effect<R2Object, R2UploadError>;
+  /*
+   * A single object read. `range` is the request's `Range` header verbatim (or
+   * undefined), handed to R2 so the runtime answers with the slice and reports
+   * it in `object.range`; the Worker never does byte arithmetic itself. A
+   * missing key is `None`, not an error.
+   */
+  readonly get: (
+    key: string,
+    range: string | undefined,
+  ) => Effect.Effect<Option.Option<R2ObjectBody>, R2ReadError>;
   readonly newMultipart: (
     key: string,
     value: Stream.Stream<Uint8Array, MultipartError>,
@@ -48,6 +61,15 @@ export const StorageRepositoryLive = (bucket: R2Bucket) =>
             () => new R2UploadError({ cause: "Preconditions Failed" }),
           ),
         ),
+      get: (key, range) =>
+        Effect.tryPromise({
+          try: () =>
+            bucket.get(
+              key,
+              range === undefined ? undefined : { range: new Headers({ Range: range }) },
+            ),
+          catch: (e) => new R2ReadError({ cause: e }),
+        }).pipe(Effect.map(Option.fromNullishOr)),
       newMultipart: (key, stream) =>
         Effect.gen(function* () {
           yield* Effect.logInfo(`Starting upload: ${key}`);

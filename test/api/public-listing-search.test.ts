@@ -66,6 +66,7 @@ const service = (result: typeof ListingPage.Type): ListingService => ({
   getPublic: () => Effect.die("not used"),
   listMine: () => Effect.die("not used"),
   search: () => Effect.succeed(result),
+  mapPins: () => Effect.die("not used"),
 });
 
 type PublicBody = {

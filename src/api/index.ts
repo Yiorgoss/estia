@@ -1,5 +1,6 @@
 import { Layer } from "effect";
 import { PublicApi, PublicRoutes } from "./public";
+import { MapBasemapUrlLive } from "./map-tiles";
 import { HttpApiBuilder } from "effect/http-api";
 import { JWTServiceLive } from "@/services/jwt.service";
 import { UserRepositoryLive } from "@/repos/user.repo";
@@ -69,7 +70,11 @@ export const PublicApiRouterLive = HttpApiBuilder.layer(PublicApi).pipe(
   Layer.provide(Layer.mergeAll(PublicApiLive, PublicListingHandler)),
 );
 
-export const PublicRouterLive = Layer.mergeAll(PublicApiRouterLive, PublicRoutes);
+export const PublicRouterLive = Layer.mergeAll(
+  PublicApiRouterLive,
+  PublicRoutes,
+  MapBasemapUrlLive,
+);
 
 /*
  * PRIVATE API

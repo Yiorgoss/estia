@@ -8,6 +8,10 @@
   "assets": { "directory": "static" },
   "vars": {
     "ORIGIN": "localhost:5173",
+    // The placeholder Greece cutout. `PMTILES_GREECE` names the archive the page
+    // reads; point it at any PMTiles URL to swap the archive you supply without
+    // a code change.
+    "PMTILES_GREECE": "/maps/greece.pmtiles",
   },
   "d1_databases": [
     {

@@ -1,4 +1,9 @@
-import { PublicApi, toPublicListing, toPublicListingPage } from "@/api/public";
+import {
+  PublicApi,
+  toPublicListing,
+  toPublicListingPage,
+  toPublicListingPinPage,
+} from "@/api/public";
 import { ListingService } from "@/services/listing.service";
 import { HttpApiBuilder } from "effect/http-api";
 import { Effect } from "effect";
@@ -20,6 +25,17 @@ export const ListingHandler = HttpApiBuilder.group(PublicApi, "listings", (handl
         const { limit, cursor, ...filters } = query;
         const page = yield* listingService.search(filters, { limit, cursor });
         return toPublicListingPage(page);
+      }),
+    )
+    .handle("map", ({ query }) =>
+      Effect.gen(function* () {
+        const listingService = yield* ListingService;
+        // The filters are the feed's own vocabulary; `limit` bounds the pins
+        // instead of paging them. The projection rounds every coordinate, so
+        // the handler never sees - let alone returns - a raw pair.
+        const { limit, ...filters } = query;
+        const rows = yield* listingService.mapPins(filters, limit);
+        return toPublicListingPinPage(rows);
       }),
     )
     .handle("detail", ({ params }) =>

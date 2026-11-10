@@ -6,18 +6,22 @@ import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.serv
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
 import { AuthPageRoutes } from "@/handlers/public/auth-pages";
-import { mapDemo } from "@/frontend/map-demo";
+import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
+import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
 import {
   decodeListingId,
+  LISTING_MAP_DEFAULT_LIMIT,
   ListingCursorFromString,
+  ListingMapQuery,
   ListingPage,
   ListingSchema,
   ListingSearchQuery,
   ListingSearchQueryCodec,
 } from "@/db/schema/Listing";
+import { approximateLocation, ListingPinPage } from "@/db/schema/ListingPin";
 import { ListingNotFoundError, ListingService } from "@/services/listing.service";
 import {
   listingDetailPage,
@@ -115,6 +119,43 @@ export const toPublicListingPage = (
 });
 
 /*
+ * The map's projection, and the only place a stored coordinate is rounded. A
+ * pin carries the rounded pair itself - there is no raw coordinate anywhere on
+ * the wire, no debug field, and no second projection that could skip the rule.
+ * A row without a coordinate is a repository bug (the SQL already requires
+ * both), so it dies here instead of publishing a `null` pin.
+ */
+export const toPublicListingPin = (
+  listing: typeof ListingSchema.Type,
+): (typeof ListingPinPage.Type)["pins"][number] => {
+  if (listing.lat == null || listing.lng == null) {
+    throw new Error("A listing without coordinates cannot become a map pin");
+  }
+  const approximate = approximateLocation(listing.lat, listing.lng);
+  return {
+    id: listing.id,
+    kind: listing.kind,
+    title: listing.title,
+    priceMinor: listing.priceMinor,
+    currency: listing.currency,
+    regionCode: listing.regionCode,
+    sizeSqm: listing.sizeSqm,
+    lat: approximate.lat,
+    lng: approximate.lng,
+  };
+};
+
+export const PublicListingPinPageResponse = ListingPinPage;
+export type PublicListingPinPageResponse = typeof ListingPinPage.Type;
+export const toPublicListingPinPage = (rows: {
+  readonly items: ReadonlyArray<typeof ListingSchema.Type>;
+  readonly truncated: boolean;
+}): typeof ListingPinPage.Type => ({
+  pins: rows.items.map(toPublicListingPin),
+  truncated: rows.truncated,
+});
+
+/*
  * `search` is the bare `/` under the `/listings` prefix and `detail` is
  * `/:id`, so the two can never shadow each other: the search route has no
  * second segment to capture, and the router prefers the registered literal
@@ -125,6 +166,24 @@ export const ListingsGroup = HttpApiGroup.make("listings")
     HttpApiEndpoint.get("search", "/", {
       query: ListingSearchQuery,
       success: PublicListingPageResponse,
+      error: [InternalError],
+    }),
+  )
+  /*
+   * The map is a literal route. The router resolves a static path before a
+   * parametric one, so `/listings/map` can never be swallowed by `/:id`;
+   * registering it before `detail` keeps the intent visible as well.
+   *
+   * The endpoint is kept deliberately even though the `/map` page reads the
+   * service directly: it is the public read contract for the map, carrying the
+   * same filter vocabulary the feed speaks, and the search page's map toggle is
+   * its planned consumer. The page embedding its own pins is an implementation
+   * choice, not a reason to drop the contract.
+   */
+  .add(
+    HttpApiEndpoint.get("map", "/map", {
+      query: ListingMapQuery,
+      success: PublicListingPinPageResponse,
       error: [InternalError],
     }),
   )
@@ -211,9 +270,46 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
   ),
 );
 
+/*
+ * The map page. Pins are read through the same service as the map endpoint and
+ * projected through the same function, so the page and the API cannot disagree
+ * about which listings exist or where their pins are. The archive URL comes from
+ * `PMTILES_GREECE`, resolved with the app layer, so swapping in the supplied
+ * archive is a config change.
+ */
+const mapRoute = HttpRouter.route("GET", "/map", () =>
+  Effect.gen(function* () {
+    const listingService = yield* ListingService;
+    const rows = yield* listingService.mapPins({}, LISTING_MAP_DEFAULT_LIMIT);
+    const basemapUrl = yield* MapBasemapUrl;
+    return HttpServerResponse.html(
+      mapPage({
+        basemapUrl,
+        pins: rows.items.map(toPublicListingPin),
+        truncated: rows.truncated,
+      }),
+    );
+  }).pipe(
+    Effect.catchTag("InternalError", (error) =>
+      Effect.logError("Map page failed", { error }).pipe(
+        Effect.andThen(
+          Effect.succeed(
+            HttpServerResponse.text(mapUnavailablePage(), {
+              status: 500,
+              contentType: "text/html",
+            }),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
 export const PublicRoutes = HttpRouter.addAll([
   searchResultsRoute,
   listingDetailRoute,
+  mapRoute,
+  MapTilesRoute,
   HttpRouter.route("GET", "/search", Effect.succeed(HttpServerResponse.html(searchPage))),
   HttpRouter.route(
     "GET",
@@ -232,7 +328,6 @@ export const PublicRoutes = HttpRouter.addAll([
   HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage()))),
   HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage()))),
   ...AuthPageRoutes,
-  HttpRouter.route("GET", "/map", Effect.succeed(HttpServerResponse.html(mapDemo))),
   HttpRouter.route(
     "GET",
     "/test",

@@ -23,6 +23,13 @@ export const header = `
         </a>
 
         <a
+          href="/map"
+          class="text-sm font-medium text-gray-700 hover:text-blue-600"
+        >
+          Map
+        </a>
+
+        <a
           href="/listings/mine"
           class="text-sm font-medium text-gray-700 hover:text-blue-600"
         >

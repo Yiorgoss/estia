@@ -794,6 +794,183 @@ grep -Eq 'Showing [0-9]+ listings?, newest first' "$WORK/mine-rejected" \
   || fail "the rejection did not re-render the owner's feed count"
 pass "a rejected transition is explained on the mine page"
 
+# 5f. the listings map
+#
+# Three published pins - two sharing one ~1 km grid cell in Athens and one in
+# Crete - plus every state that must never reach the map: a draft with a
+# coordinate, a published listing without one, and a published room-wanted ad.
+MAP_EUR=$(( ($(date +%s) % 4000) + 45000 ))
+MAP_MINOR=$((MAP_EUR * 100))
+MAP_ATHENS_A="Smoke map athens a ${SMOKE_TAG}"
+MAP_ATHENS_B="Smoke map athens b ${SMOKE_TAG}"
+MAP_CRETE="Smoke map crete ${SMOKE_TAG}"
+MAP_DRAFT="Smoke map draft ${SMOKE_TAG}"
+MAP_BARE="Smoke map bare ${SMOKE_TAG}"
+MAP_WANTED="Smoke map wanted ${SMOKE_TAG}"
+
+pnpm exec wrangler d1 execute "$DB_BINDING" --local \
+  --command "INSERT INTO listings (kind, owner_id, status, title, description, price_minor, currency, region_code, lat, lng, size_sqm, available_from, furnished, ensuite, smoking, pets, created_at, updated_at, published_at) VALUES
+    ('room', '${USER_ID}', 'published', '${MAP_ATHENS_A}', NULL, ${MAP_MINOR}, 'EUR', 'attica', 37.9838, 23.7275, 30, NULL, 1, 0, 0, 0, $((NOW_MS + 4000)), $((NOW_MS + 4000)), $((NOW_MS + 4000))),
+    ('whole_property', '${USER_ID}', 'published', '${MAP_ATHENS_B}', NULL, ${MAP_MINOR}, 'EUR', 'attica', 37.9812, 23.7291, 90, NULL, 0, 0, 0, 1, $((NOW_MS + 5000)), $((NOW_MS + 5000)), $((NOW_MS + 5000))),
+    ('room', '${USER_ID}', 'published', '${MAP_CRETE}', NULL, ${MAP_MINOR}, 'EUR', 'crete', 35.2401, 25.7219, 45, NULL, 0, 0, 0, 0, $((NOW_MS + 6000)), $((NOW_MS + 6000)), $((NOW_MS + 6000))),
+    ('room', '${USER_ID}', 'draft', '${MAP_DRAFT}', NULL, ${MAP_MINOR}, 'EUR', 'attica', 37.98, 23.73, 30, NULL, 0, 0, 0, 0, $((NOW_MS + 7000)), $((NOW_MS + 7000)), NULL),
+    ('room', '${USER_ID}', 'published', '${MAP_BARE}', NULL, ${MAP_MINOR}, 'EUR', 'attica', NULL, NULL, 30, NULL, 0, 0, 0, 0, $((NOW_MS + 8000)), $((NOW_MS + 8000)), $((NOW_MS + 8000))),
+    ('room_wanted', '${USER_ID}', 'published', '${MAP_WANTED}', NULL, ${MAP_MINOR}, 'EUR', 'attica', 37.98, 23.73, NULL, NULL, 0, 0, 0, 0, $((NOW_MS + 9000)), $((NOW_MS + 9000)), $((NOW_MS + 9000)));" \
+  >/dev/null 2>&1 || fail "seed map listings"
+pass "seed map listings"
+
+MAP_A_ID="$(listing_id "$MAP_ATHENS_A")"
+MAP_B_ID="$(listing_id "$MAP_ATHENS_B")"
+MAP_C_ID="$(listing_id "$MAP_CRETE")"
+MAP_DRAFT_ID="$(listing_id "$MAP_DRAFT")"
+MAP_BARE_ID="$(listing_id "$MAP_BARE")"
+MAP_WANTED_ID="$(listing_id "$MAP_WANTED")"
+[ -n "$MAP_A_ID" ] && [ -n "$MAP_B_ID" ] && [ -n "$MAP_C_ID" ] && [ -n "$MAP_DRAFT_ID" ] \
+  && [ -n "$MAP_BARE_ID" ] && [ -n "$MAP_WANTED_ID" ] || fail "map listing ids"
+pass "map listing ids"
+
+pin_ids() {
+  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const body = JSON.parse(s); process.stdout.write(body.pins.map((pin) => pin.id).join(",")); })'
+}
+
+pin_field() {
+  # $1: pin id, $2: field name, stdin: map response JSON
+  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const body = JSON.parse(s); const pin = body.pins.find((item) => String(item.id) === process.argv[1]); process.stdout.write(pin === undefined || pin[process.argv[2]] == null ? "" : String(pin[process.argv[2]])); })' "$1" "$2"
+}
+
+MAP_QUERY="minPriceMinor=${MAP_MINOR}&maxPriceMinor=${MAP_MINOR}"
+
+CODE=$(curl -s -o "$WORK/map-pins" -w '%{http_code}' "${BASE_URL}/api/listings/map?${MAP_QUERY}")
+assert_status "$CODE" 200 "listings map endpoint"
+MAP_IDS="$(pin_ids < "$WORK/map-pins")"
+for id in "$MAP_A_ID" "$MAP_B_ID" "$MAP_C_ID"; do
+  case ",${MAP_IDS}," in
+    *",${id},"*) ;;
+    *) fail "listings map is missing published pin ${id} (got ${MAP_IDS})" ;;
+  esac
+done
+pass "listings map returns the published pins"
+case ",${MAP_IDS}," in
+  *",${MAP_DRAFT_ID},"*) fail "listings map returned a draft" ;;
+  *) pass "listings map excludes drafts" ;;
+esac
+case ",${MAP_IDS}," in
+  *",${MAP_BARE_ID},"*) fail "listings map returned a listing without a coordinate" ;;
+  *) pass "listings map requires a coordinate" ;;
+esac
+case ",${MAP_IDS}," in
+  *",${MAP_WANTED_ID},"*) fail "listings map returned a room-wanted ad" ;;
+  *) pass "listings map excludes room-wanted ads" ;;
+esac
+
+# The wire pin is the rounded pair and nothing else: no owner id, no status, no
+# raw coordinate, no debug field.
+[ "$(pin_field "$MAP_A_ID" lat < "$WORK/map-pins")" = "37.98" ] \
+  || fail "athens pin latitude is not rounded to the grid"
+[ "$(pin_field "$MAP_A_ID" lng < "$WORK/map-pins")" = "23.73" ] \
+  || fail "athens pin longitude is not rounded to the grid"
+[ "$(pin_field "$MAP_C_ID" lat < "$WORK/map-pins")" = "35.24" ] \
+  || fail "crete pin latitude is not rounded to the grid"
+pass "map pins carry the rounded coordinate"
+for KEY in ownerId status lat_unrounded exactLocation description publishedAt createdAt updatedAt; do
+  if grep -q "\"${KEY}\"" "$WORK/map-pins"; then
+    fail "map pin exposed ${KEY}"
+  fi
+done
+pass "map pins expose no private field"
+
+CODE=$(curl -s -o "$WORK/map-crete" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/map?${MAP_QUERY}&regionCode=crete")
+assert_status "$CODE" 200 "listings map region filter"
+CRETE_PIN_IDS="$(pin_ids < "$WORK/map-crete")"
+[ "$CRETE_PIN_IDS" = "$MAP_C_ID" ] || fail "region filter did not narrow the map (got ${CRETE_PIN_IDS})"
+pass "listings map narrows by region"
+
+CODE=$(curl -s -o "$WORK/map-kind" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/map?${MAP_QUERY}&kind=whole_property")
+assert_status "$CODE" 200 "listings map kind filter"
+KIND_PIN_IDS="$(pin_ids < "$WORK/map-kind")"
+[ "$KIND_PIN_IDS" = "$MAP_B_ID" ] || fail "kind filter did not narrow the map (got ${KIND_PIN_IDS})"
+pass "listings map narrows by kind"
+
+CODE=$(curl -s -o "$WORK/map-furnished" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/map?${MAP_QUERY}&furnished=true&minSizeSqm=30&maxSizeSqm=30")
+assert_status "$CODE" 200 "listings map flag and size filters"
+FLAG_PIN_IDS="$(pin_ids < "$WORK/map-furnished")"
+[ "$FLAG_PIN_IDS" = "$MAP_A_ID" ] || fail "flag/size filters did not narrow the map (got ${FLAG_PIN_IDS})"
+pass "listings map narrows by flags and size"
+
+CODE=$(curl -s -o "$WORK/map-capped" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/map?${MAP_QUERY}&limit=2")
+assert_status "$CODE" 200 "listings map with a limit"
+grep -q '"truncated":true' "$WORK/map-capped" || fail "map limit did not report truncation"
+[ "$(node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s).pins.length)))' < "$WORK/map-capped")" = "2" ] \
+  || fail "map limit was not respected"
+pass "listings map caps the set and reports truncation"
+
+CODE=$(curl -s -o "$WORK/map-exact" -w '%{http_code}' \
+  "${BASE_URL}/api/listings/map?${MAP_QUERY}&limit=3")
+assert_status "$CODE" 200 "listings map at the exact size"
+grep -q '"truncated":false' "$WORK/map-exact" || fail "map reported truncation with nothing left over"
+pass "listings map reports an untruncated set"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/map?limit=501")
+assert_status "$CODE" 400 "listings map rejects a limit above 500"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/map?minPriceMinor=abc")
+assert_status "$CODE" 400 "listings map rejects a malformed filter"
+
+# The literal route cannot be shadowed by /:id, and the detail route still works.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/map")
+assert_status "$CODE" 200 "listings map is not shadowed by the detail route"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/listings/${MAP_A_ID}")
+assert_status "$CODE" 200 "listing detail still opens"
+
+# The page: server-rendered pins, the configured archive, the promise, and the
+# ODbL attribution.
+CODE=$(curl -s -o "$WORK/map-page" -w '%{http_code}' "${BASE_URL}/map")
+assert_status "$CODE" 200 "map page"
+grep -q "${MAP_ATHENS_A}" "$WORK/map-page" || fail "map page did not render the pins"
+grep -q 'id="map-data"' "$WORK/map-page" || fail "map page has no pin data block"
+grep -q 'maplibre-gl@6.17.0' "$WORK/map-page" || fail "map page does not load the pinned MapLibre build"
+grep -q 'pmtiles@4.5.0' "$WORK/map-page" || fail "map page does not load the pinned PMTiles build"
+grep -q '@protomaps/basemaps@5.7.2' "$WORK/map-page" || fail "map page does not load the Protomaps style"
+grep -q '/maps/greece.pmtiles' "$WORK/map-page" || fail "map page did not embed the default PMTILES_GREECE path"
+grep -q 'within about 0.75 km' "$WORK/map-page" || fail "map page does not state the error radius"
+grep -q 'OpenStreetMap contributors' "$WORK/map-page" || fail "map page dropped the basemap attribution"
+grep -q 'href="/map"' "$WORK/map-page" || fail "the header has no map link"
+pass "map page renders pins, the map stack, the promise, and the attribution"
+
+# The archive route: a byte range when the placeholder is present, and a clean
+# 404 when a fresh checkout has not run `pnpm map:tiles` yet.
+CODE=$(curl -s -D "$WORK/map-archive.h" -o "$WORK/map-archive" -w '%{http_code}' \
+  -H 'Range: bytes=0-126' "${BASE_URL}/maps/greece.pmtiles")
+case "$CODE" in
+  206)
+    grep -qi '^content-type: application/vnd.pmtiles' "$WORK/map-archive.h" \
+      || fail "basemap range response has the wrong content type"
+    grep -qi '^content-range: bytes 0-126/' "$WORK/map-archive.h" \
+      || fail "basemap range response has no content-range"
+    [ "$(head -c 7 "$WORK/map-archive")" = "PMTiles" ] \
+      || fail "basemap range response is not a PMTiles archive"
+    pass "basemap route serves a PMTiles byte range"
+    ;;
+  404)
+    # The archive is gitignored by design; a fresh checkout shows the degraded
+    # banner instead of tiles. That is a valid state, not a failure.
+    pass "basemap archive absent (run pnpm map:tiles to serve real tiles)"
+    ;;
+  *)
+    fail "basemap route answered HTTP ${CODE}"
+    ;;
+esac
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/maps/..%2Fsecret.pmtiles")
+assert_status "$CODE" 404 "basemap route rejects a path traversal"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/maps/notes.txt")
+assert_status "$CODE" 404 "basemap route rejects a non-pmtiles key"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/maps/missing.pmtiles")
+assert_status "$CODE" 404 "basemap route reports a missing archive"
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")
