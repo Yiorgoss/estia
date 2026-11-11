@@ -15,11 +15,9 @@ import { clearedCookie } from "./session-cookies";
 //   "InvalidRefreshTokenError",
 //   {},) { }
 
-/*
- * The refresh cookie's attributes, in one place. Issuing a token and clearing it
- * must agree on the path and the flags, or the browser keeps the old cookie
- * beside the new one, so both go through this record.
- */
+// The refresh cookie's attributes. `asCookie` and `clearCookie` both pass this
+// record, so the issued and the cleared cookie cannot disagree; `clearedCookie`
+// owns the rule for ending one.
 const refreshCookieOptions = {
   httpOnly: true,
   secure: true,
