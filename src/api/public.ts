@@ -6,6 +6,7 @@ import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.serv
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
 import { AuthPageRoutes } from "@/handlers/public/auth-pages";
+import { SessionRoutes } from "@/handlers/public/session";
 import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
 import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
@@ -328,6 +329,7 @@ export const PublicRoutes = HttpRouter.addAll([
   HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage()))),
   HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage()))),
   ...AuthPageRoutes,
+  ...SessionRoutes,
   HttpRouter.route(
     "GET",
     "/test",
