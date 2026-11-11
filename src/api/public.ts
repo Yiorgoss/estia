@@ -67,7 +67,12 @@ const AuthGroup = HttpApiGroup.make("auth")
  * account id, the exact coordinates, and the `status`/`updatedAt` bookkeeping
  * never reach the wire here. The projection is a wire concern only -
  * `ListingService` keeps returning the full row for owner-scoped reads and
- * mutations, and every public surface maps through `toPublicListing`.
+ * mutations, and every public surface maps through this module.
+ *
+ * Each photo field means one thing on one read. `primaryPhotoUrl` is the
+ * search card's image and travels on the feed only; `photos` is the complete
+ * ordered gallery and travels on the detail read only.
+ *
  * `publishedAt` is the timestamp a visitor reads as recency; the newest-first
  * sort key is `createdAt`, which only travels inside the encoded `nextCursor`.
  */
@@ -76,7 +81,7 @@ const PublicListingPhoto = Schema.Struct({
   url: Schema.String,
 });
 
-const PublicListingSchema = Schema.Struct({
+const PublicListingFields = {
   id: ListingSchema.fields.id,
   kind: ListingSchema.fields.kind,
   title: ListingSchema.fields.title,
@@ -91,18 +96,25 @@ const PublicListingSchema = Schema.Struct({
   pets: ListingSchema.fields.pets,
   availableFrom: ListingSchema.fields.availableFrom,
   publishedAt: ListingSchema.fields.publishedAt,
-  // The first photo is the search card's thumbnail; `photos` carries the
-  // gallery the detail page renders. Both are projected from the photo rows,
-  // so neither can leak a storage key or a bucket name.
-  thumbnailUrl: Schema.NullishOr(Schema.String),
+};
+
+const PublicListingFeedItemSchema = Schema.Struct({
+  ...PublicListingFields,
+  // The feed's card image: the gallery's first photo, or null without one.
+  primaryPhotoUrl: Schema.NullishOr(Schema.String),
+});
+export type PublicListingFeedItem = typeof PublicListingFeedItemSchema.Type;
+
+const PublicListingSchema = Schema.Struct({
+  ...PublicListingFields,
+  // The whole gallery, in the order the detail page renders it.
   photos: Schema.Array(PublicListingPhoto),
 });
 export type PublicListing = typeof PublicListingSchema.Type;
 
-export const toPublicListing = (
+const toPublicListingFields = (
   listing: typeof ListingSchema.Type,
-  photos: ReadonlyArray<ListingPhoto> = [],
-): typeof PublicListingSchema.Type => ({
+): Omit<typeof PublicListingSchema.Type, "photos"> => ({
   id: listing.id,
   kind: listing.kind,
   title: listing.title,
@@ -117,27 +129,45 @@ export const toPublicListing = (
   pets: listing.pets,
   availableFrom: listing.availableFrom,
   publishedAt: listing.publishedAt,
-  thumbnailUrl: photos[0] === undefined ? null : listingPhotoUrl(listing.id, photos[0].id),
-  photos: photos.map((photo) => ({
-    id: photo.id,
-    url: listingPhotoUrl(listing.id, photo.id),
-  })),
+});
+
+const toPublicPhoto = (
+  listingId: typeof ListingId.Type,
+  photo: ListingPhoto,
+): (typeof PublicListingSchema.Type)["photos"][number] => ({
+  id: photo.id,
+  url: listingPhotoUrl(listingId, photo.id),
+});
+
+export const toPublicListing = (
+  listing: typeof ListingSchema.Type,
+  photos: ReadonlyArray<ListingPhoto>,
+): PublicListing => ({
+  ...toPublicListingFields(listing),
+  photos: photos.map((photo) => toPublicPhoto(listing.id, photo)),
+});
+
+export const toPublicListingFeedItem = (
+  listing: typeof ListingSchema.Type,
+  primaryPhoto: ListingPhoto | undefined,
+): PublicListingFeedItem => ({
+  ...toPublicListingFields(listing),
+  primaryPhotoUrl: primaryPhoto === undefined ? null : listingPhotoUrl(listing.id, primaryPhoto.id),
 });
 
 export const PublicListingPageResponse = Schema.Struct({
-  items: Schema.Array(PublicListingSchema),
+  items: Schema.Array(PublicListingFeedItemSchema),
   nextCursor: Schema.NullishOr(ListingCursorFromString),
 });
 export type PublicListingPageResponse = typeof PublicListingPageResponse.Type;
 
 export const toPublicListingPage = (
   page: typeof ListingPage.Type,
-  firstPhotos: ReadonlyMap<number, ListingPhoto> = new Map(),
-): typeof PublicListingPageResponse.Type => ({
-  items: page.items.map((listing) => {
-    const photo = firstPhotos.get(Number(listing.id));
-    return toPublicListing(listing, photo === undefined ? [] : [photo]);
-  }),
+  firstPhotos: ReadonlyMap<number, ListingPhoto>,
+): PublicListingPageResponse => ({
+  items: page.items.map((listing) =>
+    toPublicListingFeedItem(listing, firstPhotos.get(Number(listing.id))),
+  ),
   nextCursor: page.nextCursor,
 });
 

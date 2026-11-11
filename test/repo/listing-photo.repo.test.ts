@@ -20,36 +20,44 @@ const seedListing = (id: number, owner: string) =>
   });
 
 layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
-  it.effect("inserts, lists in position order, and counts a listing's photos", () =>
+  it.effect("appends photos in order and refuses to exceed the cap", () =>
     Effect.gen(function* () {
       yield* seedListing(701, "u-photo-repo-701");
       const repo = yield* ListingPhotoRepository;
 
-      const first = yield* repo.insert(listingId(701), {
-        storageKey: "listings/701/photos/a.jpg",
-        contentType: "image/jpeg",
-        byteSize: 10,
-        position: 0,
-      });
-      const second = yield* repo.insert(listingId(701), {
-        storageKey: "listings/701/photos/b.png",
-        contentType: "image/png",
-        byteSize: 20,
-        position: 1,
-      });
+      const first = yield* repo.append(
+        listingId(701),
+        { storageKey: "listings/701/photos/a.jpg", contentType: "image/jpeg", byteSize: 10 },
+        2,
+      );
+      const second = yield* repo.append(
+        listingId(701),
+        { storageKey: "listings/701/photos/b.png", contentType: "image/png", byteSize: 20 },
+        2,
+      );
 
-      assert.strictEqual(first.position, 0);
-      assert.strictEqual(second.position, 1);
-      assert.strictEqual(second.contentType, "image/png");
-      assert.strictEqual(yield* repo.countByListing(listingId(701)), 2);
+      assert.isTrue(Option.isSome(first));
+      assert.isTrue(Option.isSome(second));
+      const firstPhoto = Option.getOrThrow(first);
+      const secondPhoto = Option.getOrThrow(second);
+      assert.strictEqual(firstPhoto.position, 0);
+      assert.strictEqual(secondPhoto.position, 1);
+      assert.strictEqual(secondPhoto.contentType, "image/png");
+
+      const full = yield* repo.append(
+        listingId(701),
+        { storageKey: "listings/701/photos/c.jpg", contentType: "image/jpeg", byteSize: 30 },
+        2,
+      );
+      assert.isTrue(Option.isNone(full));
 
       const listed = yield* repo.listByListing(listingId(701));
       assert.deepStrictEqual(
         listed.map((photo) => photo.id),
-        [first.id, second.id],
+        [firstPhoto.id, secondPhoto.id],
       );
 
-      const found = yield* repo.findById(listingId(701), second.id);
+      const found = yield* repo.findById(listingId(701), secondPhoto.id);
       assert.isTrue(Option.isSome(found));
       assert.strictEqual(Option.getOrThrow(found).storageKey, "listings/701/photos/b.png");
     }),
@@ -69,12 +77,12 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
       // A delete scoped to the wrong listing removes nothing.
       const missed = yield* repo.deleteById(listingId(703), photoId(7201));
       assert.isTrue(Option.isNone(missed));
-      assert.strictEqual(yield* repo.countByListing(listingId(702)), 2);
+      assert.lengthOf(yield* repo.listByListing(listingId(702)), 2);
 
       const removed = yield* repo.deleteById(listingId(702), photoId(7201));
       assert.isTrue(Option.isSome(removed));
       assert.strictEqual(Option.getOrThrow(removed).id, 7201);
-      assert.strictEqual(yield* repo.countByListing(listingId(702)), 1);
+      assert.lengthOf(yield* repo.listByListing(listingId(702)), 1);
     }),
   );
 
@@ -100,6 +108,28 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
     }),
   );
 
+  it.effect("compacts positions from the order the gallery holds", () =>
+    Effect.gen(function* () {
+      yield* seedListing(709, "u-photo-repo-709");
+      yield* insertListingPhoto(7901, 709, { position: 4 });
+      yield* insertListingPhoto(7902, 709, { position: 2 });
+      yield* insertListingPhoto(7903, 709, { position: 9 });
+
+      const repo = yield* ListingPhotoRepository;
+      yield* repo.compactPositions(listingId(709));
+
+      const listed = yield* repo.listByListing(listingId(709));
+      assert.deepStrictEqual(
+        listed.map((photo) => [photo.id, photo.position]),
+        [
+          [7902, 0],
+          [7901, 1],
+          [7903, 2],
+        ],
+      );
+    }),
+  );
+
   it.effect(
     "firstForListings returns one first photo per listing, and none for a photo-less one",
     () =>
@@ -107,15 +137,21 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
         yield* seedListing(705, "u-photo-repo-705");
         yield* seedListing(706, "u-photo-repo-706");
         yield* seedListing(707, "u-photo-repo-707");
+        yield* seedListing(710, "u-photo-repo-710");
         yield* insertListingPhoto(7501, 705, { position: 0 });
         yield* insertListingPhoto(7502, 705, { position: 1 });
         yield* insertListingPhoto(7601, 706, { position: 0 });
+        // Drifted positions must not hide a gallery from the search cards: the
+        // first photo is the one the gallery order puts first.
+        yield* insertListingPhoto(7701, 707, { position: 3 });
+        yield* insertListingPhoto(7702, 707, { position: 1 });
 
         const repo = yield* ListingPhotoRepository;
         const first = yield* repo.firstForListings([
           listingId(705),
           listingId(706),
           listingId(707),
+          listingId(710),
         ]);
 
         assert.deepStrictEqual(
@@ -123,6 +159,7 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
           [
             [705, 7501],
             [706, 7601],
+            [707, 7702],
           ],
         );
         assert.deepStrictEqual(yield* repo.firstForListings([]), []);

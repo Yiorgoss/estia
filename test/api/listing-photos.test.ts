@@ -152,8 +152,10 @@ describe("POST /listings/:id/photos", () => {
       const detail = yield* call(`/api/listings/${id}`);
       assert.strictEqual(detail.status, 200, detail.body);
       const body = asObject(detail.json);
-      assert.strictEqual(body.thumbnailUrl, `/listings/${id}/photos/${String(first?.id)}`);
-      assert.lengthOf(body.photos as ReadonlyArray<unknown>, 2);
+      const gallery = body.photos as ReadonlyArray<{ id: number; url: string }>;
+      assert.lengthOf(gallery, 2);
+      assert.strictEqual(gallery[0]?.url, `/listings/${id}/photos/${String(first?.id)}`);
+      assert.isFalse("primaryPhotoUrl" in body);
 
       const detailPage = yield* call(`/listings/${id}`);
       assert.strictEqual(detailPage.status, 200, detailPage.body);
@@ -167,7 +169,8 @@ describe("POST /listings/:id/photos", () => {
         (entry) => entry.id === id,
       );
       assert.isDefined(item);
-      assert.strictEqual(item?.thumbnailUrl, `/listings/${id}/photos/${String(first?.id)}`);
+      assert.strictEqual(item?.primaryPhotoUrl, `/listings/${id}/photos/${String(first?.id)}`);
+      assert.isFalse("photos" in (item ?? {}));
     }),
   );
 
@@ -437,16 +440,16 @@ describe("a listing with no photo still renders", () => {
 
       const api = yield* call(`/api/listings/${id}`);
       const body = asObject(api.json);
-      assert.isNull(body.thumbnailUrl);
       assert.deepStrictEqual(body.photos, []);
+      assert.isFalse("primaryPhotoUrl" in body);
 
       const search = yield* call(`/api/listings?regionCode=attica`);
       const item = (search.json as { items: ReadonlyArray<Record<string, unknown>> }).items.find(
         (entry) => entry.id === id,
       );
       assert.isDefined(item);
-      assert.isNull(item?.thumbnailUrl);
-      assert.deepStrictEqual(item?.photos, []);
+      assert.isNull(item?.primaryPhotoUrl);
+      assert.isFalse("photos" in (item ?? {}));
     }),
   );
 });

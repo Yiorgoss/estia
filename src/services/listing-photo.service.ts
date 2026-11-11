@@ -129,8 +129,6 @@ export interface ListingPhotoService {
 
 export const ListingPhotoService = Context.Service<ListingPhotoService>("ListingPhotoService");
 
-const extensionOf = (contentType: PhotoContentType): string => photoExtension(contentType);
-
 const normalizeContentType = (declared: string): PhotoContentType | undefined => {
   const mediaType = declared.toLowerCase().split(";")[0]?.trim() ?? "";
   return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp"
@@ -270,28 +268,35 @@ export const ListingPhotoServiceLive = Layer.effect(
             );
           }
 
-          const count = yield* fromSql(photoRepo.countByListing(listingId));
-          if (count >= LISTING_PHOTO_MAX_PER_LISTING) {
-            return yield* Effect.fail(
-              new ListingPhotoLimitError({ limit: LISTING_PHOTO_MAX_PER_LISTING }),
-            );
-          }
-
-          const key = `listings/${listingId}/photos/${crypto.randomUUID()}.${extensionOf(sniffed)}`;
+          const key = `listings/${listingId}/photos/${crypto.randomUUID()}.${photoExtension(sniffed)}`;
           yield* fromStorage(storage.put(key, upload.bytes));
 
-          return yield* fromSql(
-            photoRepo.insert(listingId, {
-              storageKey: key,
-              contentType: sniffed,
-              byteSize: upload.bytes.length,
-              position: count,
-            }),
+          // The cap and the new position are decided by the insert itself, so
+          // two uploads racing cannot both pass a count check and claim the
+          // same position.
+          const inserted = yield* fromSql(
+            photoRepo.append(
+              listingId,
+              {
+                storageKey: key,
+                contentType: sniffed,
+                byteSize: upload.bytes.length,
+              },
+              LISTING_PHOTO_MAX_PER_LISTING,
+            ),
           ).pipe(
             // The row is what makes the object reachable, so a failed insert
             // removes the orphan rather than leaving bytes no row can name.
             Effect.tapError(() => storage.delete(key).pipe(Effect.ignore)),
           );
+
+          if (Option.isNone(inserted)) {
+            yield* storage.delete(key).pipe(Effect.ignore);
+            return yield* Effect.fail(
+              new ListingPhotoLimitError({ limit: LISTING_PHOTO_MAX_PER_LISTING }),
+            );
+          }
+          return inserted.value;
         }),
       move: (ownerId, listingId, photoId, direction) =>
         Effect.gen(function* () {
@@ -321,19 +326,19 @@ export const ListingPhotoServiceLive = Layer.effect(
       remove: (ownerId, listingId, photoId) =>
         Effect.gen(function* () {
           yield* loadOwned(ownerId, listingId);
-          const photo = yield* requirePhoto(listingId, photoId);
           const deleted = yield* fromSql(photoRepo.deleteById(listingId, photoId));
           if (Option.isNone(deleted)) {
             return yield* Effect.fail(new ListingPhotoNotFoundError({ listingId, photoId }));
           }
           // Close the gap the deleted position left, so positions stay 0..n-1.
-          const remaining = yield* ordered(listingId);
-          yield* reorderTo(listingId, remaining);
+          // The database renumbers from the order it actually holds, so the
+          // result does not depend on a read the service did earlier.
+          yield* fromSql(photoRepo.compactPositions(listingId));
           // The row is gone, so no route can name these bytes any more. A
           // failed delete leaves an unreachable orphan, which is logged rather
           // than turned into a failed request the owner cannot act on.
           yield* storage
-            .delete(photo.storageKey)
+            .delete(deleted.value.storageKey)
             .pipe(
               Effect.catchTag("R2DeleteError", (error) =>
                 Effect.logError("Deleted photo left an unreachable object", { error }),
