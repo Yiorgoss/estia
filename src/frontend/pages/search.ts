@@ -4,7 +4,11 @@ import { kindLabels, regionLabels } from "../listing-labels";
 import { head } from "../head";
 import { header } from "../header";
 import { savedSearchesPanel } from "../saved-search";
-import { emptySearchFormValues, type SearchFormValues } from "../search-form";
+import {
+  emptySearchFormValues,
+  type SearchFlagValue,
+  type SearchFormValues,
+} from "../search-form";
 import { escapeHtml } from "@/utils";
 
 const numberField = (
@@ -52,17 +56,17 @@ const selectField = (
     </select>
   </div>`;
 
-const flagField = (name: string, label: string, checked: boolean) => `
-  <label class="flex items-center gap-2 text-sm text-gray-700">
-    <input
-      type="checkbox"
-      name="${name}"
-      value="true"
-      ${checked ? "checked" : ""}
-      class="size-4 accent-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-    />
-    ${label}
-  </label>`;
+const flagField = (name: string, label: string, selected: SearchFlagValue) =>
+  selectField(
+    name,
+    label,
+    "Any",
+    [
+      { value: "true", label: "Yes" },
+      { value: "false", label: "No" },
+    ],
+    selected,
+  );
 
 const regionOptions = GreekRegionCodes.map((code) => ({
   value: code,
@@ -83,7 +87,6 @@ export interface SearchPageOptions {
   // Present only for a signed-in caller: the saved-search list and the save
   // control are the account's own, and a visitor sees neither.
   readonly savedSearches?: ReadonlyArray<SavedSearch>;
-  readonly savedNotice?: string;
   readonly savedError?: string;
   readonly appliedSavedSearchId?: number;
 }
@@ -95,7 +98,6 @@ export const searchPage = (options: SearchPageOptions = {}) => {
     options.savedSearches === undefined
       ? ""
       : savedSearchesPanel(options.savedSearches, {
-          notice: options.savedNotice,
           error: options.savedError,
           appliedId: options.appliedSavedSearchId,
         });

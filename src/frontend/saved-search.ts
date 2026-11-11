@@ -154,12 +154,14 @@ export const savedSearchesPanel = (
     ${options.error === undefined ? "" : notice(options.error, "error")}
 
     ${
-      items.length === 0
-        ? `<p class="mt-3 text-sm text-gray-600">
-             No saved searches yet. Search the listings, then save the criteria from the results.
-           </p>`
-        : `<ul class="mt-3 divide-y divide-gray-100">
+      items.length > 0
+        ? `<ul class="mt-3 divide-y divide-gray-100">
              ${items.map((item) => savedSearchRow(item, options.appliedId)).join("")}
            </ul>`
+        : options.error === undefined
+          ? `<p class="mt-3 text-sm text-gray-600">
+             No saved searches yet. Search the listings, then save the criteria from the results.
+           </p>`
+          : ""
     }
   </section>`;

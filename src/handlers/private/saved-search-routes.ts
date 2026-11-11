@@ -39,6 +39,21 @@ const seeOther = (location: string): HttpServerResponse.HttpServerResponse =>
 const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
   request.headers["hx-request"] === "true";
 
+/*
+ * htmx only swaps 2xx responses, so a refused htmx save or delete has to answer
+ * the list section with a 200 and the error banner; a 4xx would leave the old
+ * list in place and the person would see nothing happen. A request without htmx
+ * is a navigation and keeps the status that describes it.
+ */
+const refuse = (
+  request: HttpServerRequest.HttpServerRequest,
+  message: string,
+  status: number,
+): HttpServerResponse.HttpServerResponse =>
+  isHtmx(request)
+    ? respond(savedSearchesPanel([], { error: message }), 200)
+    : respond(message, status);
+
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
 
@@ -73,7 +88,7 @@ const panelFor = (
 const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) {
-      return respond(savedSearchesPanel([], { error: crossSiteFormMessage }), 403);
+      return refuse(request, crossSiteFormMessage, 403);
     }
 
     const ownerId = yield* callerId(request);
@@ -118,7 +133,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
     );
   }).pipe(
     Effect.catchTag("UnauthorizedError", () =>
-      Effect.succeed(respond("Sign in to save a search.", 401)),
+      Effect.succeed(refuse(request, "Sign in to save a search.", 401)),
     ),
   ),
 );
@@ -126,7 +141,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
 const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) {
-      return respond(savedSearchesPanel([], { error: crossSiteFormMessage }), 403);
+      return refuse(request, crossSiteFormMessage, 403);
     }
 
     const ownerId = yield* callerId(request);
@@ -151,7 +166,7 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
     return yield* panelFor(ownerId, { notice: "Saved search deleted." });
   }).pipe(
     Effect.catchTag("UnauthorizedError", () =>
-      Effect.succeed(respond("Sign in to delete a saved search.", 401)),
+      Effect.succeed(refuse(request, "Sign in to delete a saved search.", 401)),
     ),
   ),
 );

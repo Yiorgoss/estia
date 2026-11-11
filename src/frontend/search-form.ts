@@ -3,8 +3,12 @@ import type { SavedSearch } from "@/db/schema/SavedSearch";
 /*
  * The values the search form shows. Every field is a string because that is what
  * an input holds; converting the saved search's minor units and dates here keeps
- * the page template free of that arithmetic.
+ * the page template free of that arithmetic. A flag is tri-state - `"true"`,
+ * `"false"`, or `""` for "any" - because a saved search stores a negative flag
+ * as a filter and the form has to be able to express it again.
  */
+export type SearchFlagValue = "" | "true" | "false";
+
 export interface SearchFormValues {
   readonly query: string;
   readonly regionCode: string;
@@ -14,10 +18,10 @@ export interface SearchFormValues {
   readonly minSizeSqm: string;
   readonly maxSizeSqm: string;
   readonly availableFrom: string;
-  readonly furnished: boolean;
-  readonly ensuite: boolean;
-  readonly smoking: boolean;
-  readonly pets: boolean;
+  readonly furnished: SearchFlagValue;
+  readonly ensuite: SearchFlagValue;
+  readonly smoking: SearchFlagValue;
+  readonly pets: SearchFlagValue;
 }
 
 export const emptySearchFormValues: SearchFormValues = {
@@ -29,10 +33,10 @@ export const emptySearchFormValues: SearchFormValues = {
   minSizeSqm: "",
   maxSizeSqm: "",
   availableFrom: "",
-  furnished: false,
-  ensuite: false,
-  smoking: false,
-  pets: false,
+  furnished: "",
+  ensuite: "",
+  smoking: "",
+  pets: "",
 };
 
 // A whole price shows no decimals and a price with cents keeps them, so the
@@ -47,6 +51,9 @@ const textFromNumber = (value: number | null | undefined): string =>
 const dateInputValue = (value: Date | null | undefined): string =>
   value == null ? "" : value.toISOString().slice(0, 10);
 
+const flagValue = (value: boolean | null | undefined): SearchFlagValue =>
+  value == null ? "" : value ? "true" : "false";
+
 export const searchFormValuesFromSavedSearch = (saved: SavedSearch): SearchFormValues => ({
   query: saved.query ?? "",
   regionCode: saved.regionCode ?? "",
@@ -56,8 +63,8 @@ export const searchFormValuesFromSavedSearch = (saved: SavedSearch): SearchFormV
   minSizeSqm: textFromNumber(saved.minSizeSqm),
   maxSizeSqm: textFromNumber(saved.maxSizeSqm),
   availableFrom: dateInputValue(saved.availableFrom),
-  furnished: saved.furnished === true,
-  ensuite: saved.ensuite === true,
-  smoking: saved.smoking === true,
-  pets: saved.pets === true,
+  furnished: flagValue(saved.furnished),
+  ensuite: flagValue(saved.ensuite),
+  smoking: flagValue(saved.smoking),
+  pets: flagValue(saved.pets),
 });

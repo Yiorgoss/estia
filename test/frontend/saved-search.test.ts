@@ -69,11 +69,23 @@ describe("searchPage", () => {
     assert.include(html, 'value="400"');
     assert.include(html, 'value="1200.5"');
     assert.include(html, 'value="2026-03-01"');
-    assert.include(html, "checked");
+    assert.include(html, "<option value=\"true\" selected>Yes</option>");
+    assert.include(html, "<option value=\"false\" selected>No</option>");
     assert.include(html, 'aria-current="page"');
     assert.include(html, "query=balcony");
     assert.include(html, "regionCode=attica");
     assert.include(html, "hx-get=\"/search/results?");
+  });
+
+  it("keeps a negative flag expressible when the form is reopened", () => {
+    const saved = savedSearch({ furnished: null, ensuite: null, smoking: null, pets: false });
+    const values = searchFormValuesFromSavedSearch(saved);
+    const html = searchPage({ values, savedSearches: [saved] });
+
+    assert.strictEqual(values.pets, "false");
+    assert.strictEqual(values.furnished, "");
+    assert.include(html, "<option value=\"false\" selected>No</option>");
+    assert.include(savedSearchResultsHref(saved), "pets=false");
   });
 });
 
@@ -109,7 +121,9 @@ describe("savedSearchesPanel", () => {
 
   it("renders a notice and an error when given one", () => {
     assert.include(savedSearchesPanel([], { notice: "Saved." }), "Saved.");
-    assert.include(savedSearchesPanel([], { error: "Could not load." }), "Could not load.");
+    const failed = savedSearchesPanel([], { error: "Could not load." });
+    assert.include(failed, "Could not load.");
+    assert.notInclude(failed, "No saved searches yet.");
   });
 });
 
