@@ -1,4 +1,5 @@
-import { ListingId, UserId } from "@/db/schema/brands";
+import { ListingId, ListingPhotoId, UserId } from "@/db/schema/brands";
+import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import { ListingSchema } from "@/db/schema/Listing";
 import {
   decodeCreateListingForm,
@@ -139,6 +140,16 @@ describe("decodeUpdateListingForm", () => {
   });
 });
 
+const photo = (id: number, position: number): ListingPhoto => ({
+  id: Schema.decodeSync(ListingPhotoId)(id),
+  listingId: Schema.decodeSync(ListingId)(12),
+  storageKey: `listings/12/photos/${id}.jpg`,
+  contentType: "image/jpeg",
+  byteSize: 3,
+  position,
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
+});
+
 const listing = (overrides: Partial<typeof ListingSchema.Type>) => ({
   id: Schema.decodeSync(ListingId)(12),
   kind: "whole_property" as const,
@@ -235,6 +246,39 @@ describe("listing pages", () => {
     );
     assert.include(unpublished, "/listings/12/publish");
     assert.notInclude(unpublished, "/listings/12/unlist");
+  });
+
+  it("shows the gallery, its controls, and the upload form", () => {
+    const page = editListingPage(listing({}), listingFormValuesFor(listing({})), undefined, [
+      photo(101, 0),
+      photo(102, 1),
+    ]);
+
+    assert.include(page, "Photos");
+    assert.include(page, "2 of 10");
+    assert.include(page, 'enctype="multipart/form-data"');
+    assert.include(page, "multiple");
+    // The first photo is labelled, not offered as its own promotion.
+    assert.notInclude(page, "/listings/12/photos/101/first");
+    assert.include(page, "/listings/12/photos/102/first");
+    assert.include(page, "/listings/12/photos/101/move");
+    assert.include(page, "/listings/12/photos/102/delete");
+    assert.include(page, 'src="/listings/12/photos/101"');
+  });
+
+  it("explains an empty gallery and hides the upload form at the limit", () => {
+    const empty = editListingPage(listing({}), listingFormValuesFor(listing({})), undefined, []);
+    assert.include(empty, "No photos yet.");
+    assert.include(empty, 'enctype="multipart/form-data"');
+
+    const full = editListingPage(
+      listing({}),
+      listingFormValuesFor(listing({})),
+      undefined,
+      Array.from({ length: 10 }, (_, index) => photo(200 + index, index)),
+    );
+    assert.include(full, "10 of 10");
+    assert.notInclude(full, 'enctype="multipart/form-data"');
   });
 
   it("shows the status and the reason a submit was rejected", () => {

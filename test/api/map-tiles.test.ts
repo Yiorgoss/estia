@@ -68,7 +68,7 @@ const run = <A>(
         calls.push({ key, range });
         return get(key, range);
       }),
-    newMultipart: () => Effect.die("not used"),
+    delete: () => Effect.die("not used"),
   });
 
   return Effect.acquireUseRelease(

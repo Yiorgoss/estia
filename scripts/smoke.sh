@@ -1453,14 +1453,133 @@ SECOND_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE use
 [ "$SECOND_LIVE" = "0" ] || fail "the form action left ${SECOND_LIVE} live token(s) for its account"
 pass "the profile page control redirects to sign-in, clears cookies, and ends every session"
 
-# 7. multipart upload
-printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
-CODE=$(curl -s -o "$WORK/multipart" -w '%{http_code}' \
+# 7. the listing photo gallery
+#
+# The only way bytes enter storage is an authenticated, owner-scoped upload. The
+# anonymous upload endpoint this checklist used to exercise is gone, so the
+# first check is that it really is gone; the rest drives the real multipart
+# route against the real local R2 binding.
+printf 'not an image at all\n' > "$WORK/not-an-image.txt"
+
+CODE=$(curl -s -o "$WORK/no-anonymous-upload" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/auth/test-post" \
-  -F "file=@$WORK/smoke.txt;type=text/plain")
-assert_status "$CODE" 200 "multipart upload"
-grep -q 'Successful' "$WORK/multipart" || fail "multipart upload response body"
-pass "multipart upload response body"
+  -F "file=@$WORK/not-an-image.txt;type=text/plain")
+assert_status "$CODE" 404 "the anonymous multipart endpoint is gone"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/test")
+assert_status "$CODE" 404 "the anonymous upload test page is gone"
+
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0xff,0xd8,0xff,0xe0,1,2,3,4]))' \
+  "$WORK/photo-one.jpg"
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,1,2,3,4]))' \
+  "$WORK/photo-two.png"
+
+# An anonymous upload is refused before any row or object is written.
+BEFORE_PHOTOS="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+CODE=$(curl -s -o "$WORK/anon-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 401 "an anonymous gallery upload is refused"
+AFTER_PHOTOS="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+[ "$BEFORE_PHOTOS" = "$AFTER_PHOTOS" ] || fail "an anonymous upload wrote a photo row"
+pass "an anonymous upload wrote nothing"
+
+# A file that claims to be a JPEG but is not one is refused on the server.
+CODE=$(curl -s -o "$WORK/wrong-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/not-an-image.txt;type=image/jpeg")
+assert_status "$CODE" 400 "a file whose bytes are not the declared image type is refused"
+
+# The owner's upload succeeds and redirects back to the edit page.
+CODE=$(curl -s -D "$WORK/photo-upload.h" -o "$WORK/photo-upload" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 303 "an owner's photo upload"
+[ "$(header_value "$WORK/photo-upload.h" location)" = "/listings/${CRETE_ID}/edit" ] \
+  || fail "the photo upload did not redirect to the edit page"
+PHOTO_ONE_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+PHOTO_ONE_KEY="$(db_scalar "SELECT storage_key AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+PHOTO_ONE_TYPE="$(db_scalar "SELECT content_type AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+[ "$PHOTO_ONE_TYPE" = "image/jpeg" ] || fail "the stored content type is not the sniffed one"
+case "$PHOTO_ONE_KEY" in
+  listings/"${CRETE_ID}"/photos/*.jpg) ;;
+  *) fail "the storage key is not server-generated under the listing: ${PHOTO_ONE_KEY}" ;;
+esac
+pass "an owner's upload stores a sniffed jpeg under a server-generated key"
+
+# The bytes are reachable through the listing and photo ids, not through a key.
+CODE=$(curl -s -D "$WORK/photo.h" -o "$WORK/photo" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}")
+assert_status "$CODE" 200 "a published listing's photo"
+grep -qi '^content-type: image/jpeg' "$WORK/photo.h" || fail "the photo response lost its content type"
+grep -qi '^x-content-type-options: nosniff' "$WORK/photo.h" || fail "the photo response is not nosniff"
+cmp -s "$WORK/photo" "$WORK/photo-one.jpg" || fail "the served bytes do not match the uploaded bytes"
+pass "the photo is served by id with the validated type and the exact bytes"
+
+# The detail page and the search card both use the gallery.
+CODE=$(curl -s -o "$WORK/photo-detail" -w '%{http_code}' "${BASE_URL}/listings/${CRETE_ID}")
+assert_status "$CODE" 200 "the photo listing's detail page"
+grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}\"" "$WORK/photo-detail" \
+  || fail "the detail page did not render the gallery"
+CODE=$(curl -s -o "$WORK/photo-card" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}&regionCode=crete")
+assert_status "$CODE" 200 "the search fragment with a photo"
+grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}\"" "$WORK/photo-card" \
+  || fail "the search card did not use the first photo as its thumbnail"
+pass "the detail gallery and the search thumbnail use the first photo"
+
+# A second photo appends, moves, becomes first, and can be deleted.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-two.png;type=image/png")
+assert_status "$CODE" 303 "a second photo upload"
+PHOTO_TWO_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position DESC, id DESC LIMIT 1;")"
+[ "$PHOTO_TWO_ID" != "$PHOTO_ONE_ID" ] || fail "the second upload did not create a second row"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}/move" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d "direction=up")
+assert_status "$CODE" 303 "moving a photo up"
+FIRST_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+[ "$FIRST_ID" = "$PHOTO_TWO_ID" ] || fail "moving the second photo up did not make it first"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/first" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 303 "picking a first photo"
+FIRST_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+[ "$FIRST_ID" = "$PHOTO_ONE_ID" ] || fail "the first-photo action did not promote the chosen photo"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}/delete" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 303 "deleting a photo"
+GALLERY_COUNT="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+[ "$GALLERY_COUNT" = "1" ] || fail "deleting a photo left ${GALLERY_COUNT} rows"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}")
+assert_status "$CODE" 404 "a deleted photo"
+pass "append, reorder, first-photo selection, and delete keep the gallery contiguous"
+
+# Another account's listing is refused, not merely hidden.
+CODE=$(curl -s -o "$WORK/foreign-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 403 "another account's gallery upload"
+grep -q "belongs to another account" "$WORK/foreign-photo" || fail "the refusal did not name ownership"
+pass "another account cannot add a photo to someone else's listing"
 
 # 8. the payload-less role switch on the JSON API
 #

@@ -123,7 +123,10 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
           transformResultNames: String.snakeToCamel,
         }),
       ),
-      HttpRouter.provideRequest(StorageRepositoryLive(bindings.STORAGE)),
+      // Object storage is a Worker binding, so it is built with the app and is
+      // also visible to the services that capture it (the photo service), not
+      // only to route effects that read it per request.
+      Layer.provideMerge(StorageRepositoryLive(bindings.STORAGE)),
       Layer.provide(configProviderLayer),
       Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
     ),
