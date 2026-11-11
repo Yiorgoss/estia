@@ -4,21 +4,23 @@ import { Effect } from "effect";
 import { createHash } from "node:crypto";
 
 /*
- * The two ends of a session, driven through the real public router and the real
- * `AuthMiddleware`, so a test sees exactly what a browser or an API client sees.
- * Several of these rules are about what a request did to a refresh-token row, so
- * the database is read through the same in-memory client the handlers use
- * rather than inferred from a later response.
+ * The ends of a session, and a deliberate renewal, driven through the real
+ * public router and the real `AuthMiddleware`, so a test sees exactly what a
+ * browser or an API client sees. Several of these rules are about what a request
+ * did to a refresh-token row, so the database is read through the same in-memory
+ * client the handlers use rather than inferred from a later response.
  *
- * Neither route is behind the auth middleware on purpose: logout keys on the
- * refresh token, which outlives the access token by a month, and refresh exists
- * precisely because the access token has run out.
+ * None of these routes is behind the auth middleware on purpose: logout keys on
+ * the refresh token, which outlives the access token by a month, refresh exists
+ * precisely because the access token has run out, and signing out of every
+ * device is identified by the same cookie pair.
  */
 
 const PASSWORD = "correct horse battery staple";
 
 interface Session {
   readonly id: string;
+  readonly email: string;
   readonly access: string;
   readonly refresh: string;
 }
@@ -27,20 +29,39 @@ let sessionCounter = 0;
 const uniqueEmail = (label: string) =>
   `session-${label}-${Date.now()}-${(sessionCounter += 1)}@test.local`;
 
+// Both session-opening routes answer with the cookie pair the app actually
+// issues, so the tests read the session from the response, never from a guess.
+const sessionFrom = (
+  response: { readonly cookies: Readonly<Record<string, string>>; readonly status: number },
+  email: string,
+): Session => {
+  assert.strictEqual(response.status, 200, `sign in ${email}`);
+  const access = response.cookies["access_token"];
+  const refresh = response.cookies["refresh_token"];
+  assert.isString(access);
+  assert.isString(refresh);
+  const claims = JSON.parse(Buffer.from(access.split(".")[1] ?? "", "base64url").toString());
+  return { id: String(claims.id), email, access, refresh };
+};
+
 // A real registration, so both cookies are the pair the app actually issues.
 const signIn = (label: string): Effect.Effect<Session> =>
   Effect.gen(function* () {
+    const email = uniqueEmail(label);
     const response = yield* send("POST", "/api/auth/register", {
-      payload: { email: uniqueEmail(label), password: PASSWORD },
+      payload: { email, password: PASSWORD },
     });
-    assert.strictEqual(response.status, 200, response.body);
+    return sessionFrom(response, email);
+  });
 
-    const access = response.cookies["access_token"];
-    const refresh = response.cookies["refresh_token"];
-    assert.isString(access);
-    assert.isString(refresh);
-    const claims = JSON.parse(Buffer.from(access.split(".")[1] ?? "", "base64url").toString());
-    return { id: String(claims.id), access, refresh };
+// The same account signing in again, which is what another device, or a second
+// visit later, does. Every sign-in gets its own refresh token.
+const logIn = (email: string): Effect.Effect<Session> =>
+  Effect.gen(function* () {
+    const response = yield* send("POST", "/api/auth/login", {
+      payload: { email, password: PASSWORD },
+    });
+    return sessionFrom(response, email);
   });
 
 const bothCookies = (session: Session) =>
@@ -68,6 +89,15 @@ const tokenRow = (token: string) =>
 
 const expireToken = (token: string) =>
   query("UPDATE refresh_tokens SET expires_at = ? WHERE token_hash = ?", [1, hashOf(token)]);
+
+const liveTokenCount = (userId: string) =>
+  Effect.map(
+    query<{ total: number }>(
+      "SELECT COUNT(*) AS total FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL",
+      [userId],
+    ),
+    (rows) => rows[0]?.total ?? 0,
+  );
 
 const headerNamed = (setCookies: ReadonlyArray<string>, name: string) =>
   setCookies.find((header) => header.toLowerCase().startsWith(`${name}=`));
@@ -113,6 +143,32 @@ const browserLogout = (session: Session) =>
       {
         method: "POST",
         headers: { cookie: bothCookies(session), accept: "text/html,application/xhtml+xml" },
+      },
+      {},
+    ),
+  );
+
+// The all-devices action, driven the same two ways: a JSON client, and a browser
+// posting the control on the profile page.
+const logoutEverywhere = (session?: Session) =>
+  call("/api/auth/logout-all", {
+    method: "POST",
+    headers: {
+      "user-agent": "estia-tests",
+      ...(session === undefined ? {} : { cookie: bothCookies(session) }),
+    },
+  });
+
+const browserLogoutEverywhere = (session: Session) =>
+  call(
+    "/api/auth/logout-all",
+    form(
+      {
+        method: "POST",
+        headers: {
+          cookie: bothCookies(session),
+          accept: "text/html,application/xhtml+xml",
+        },
       },
       {},
     ),
@@ -228,6 +284,196 @@ describe("POST /api/auth/logout", () => {
 
       assert.strictEqual(response.status, 403, response.body);
       assert.isNull((yield* tokenRow(session.refresh))?.revokedAt);
+    }),
+  );
+});
+
+describe("POST /api/auth/logout-all", () => {
+  // Signing out of every device means every session the account has: another
+  // device's sign-in, and the sessions earlier visits left behind, die with the
+  // one performing the action.
+  it.effect("revokes every outstanding refresh token the account has", () =>
+    Effect.gen(function* () {
+      const first = yield* signIn("everywhere");
+      const second = yield* logIn(first.email);
+      const third = yield* logIn(first.email);
+      assert.strictEqual(yield* liveTokenCount(first.id), 3);
+
+      const response = yield* logoutEverywhere(first);
+
+      assert.strictEqual(response.status, 204, response.body);
+      assert.strictEqual(response.body, "");
+      assertClearedCookie(response.setCookies, "access_token");
+      assertClearedCookie(response.setCookies, "refresh_token");
+
+      for (const token of [first.refresh, second.refresh, third.refresh]) {
+        assert.isNotNull((yield* tokenRow(token))?.revokedAt);
+      }
+      assert.strictEqual(yield* liveTokenCount(first.id), 0);
+    }),
+  );
+
+  // The token each session holds is revoked, not merely forgotten by the one
+  // device that asked: replaying any of them is a 401 with no cookies on it.
+  it.effect("answers a replay of any revoked refresh token with 401", () =>
+    Effect.gen(function* () {
+      const first = yield* signIn("everywhere-replay");
+      const second = yield* logIn(first.email);
+      assert.strictEqual((yield* logoutEverywhere(first)).status, 204);
+
+      for (const token of [first.refresh, second.refresh]) {
+        const replay = yield* refreshWith(token);
+        assert.strictEqual(replay.status, 401, replay.body);
+        assert.strictEqual(replay.body, "UnauthorizedError");
+        assert.deepStrictEqual(replay.setCookies, []);
+      }
+    }),
+  );
+
+  // Ending every session of one account says nothing about any other account.
+  it.effect("leaves another account's sessions alone", () =>
+    Effect.gen(function* () {
+      const owner = yield* signIn("everywhere-owner");
+      const ownerSecondDevice = yield* logIn(owner.email);
+      const bystander = yield* signIn("everywhere-bystander");
+
+      assert.strictEqual((yield* logoutEverywhere(owner)).status, 204);
+
+      assert.strictEqual(yield* liveTokenCount(owner.id), 0);
+      assert.isNotNull((yield* tokenRow(ownerSecondDevice.refresh))?.revokedAt);
+      assert.strictEqual(yield* liveTokenCount(bystander.id), 1);
+      const stillLive = yield* refreshWith(bystander.refresh);
+      assert.strictEqual(stillLive.status, 200, stillLive.body);
+    }),
+  );
+
+  // The caller lands signed out of this device too: both cookies are cleared and
+  // the session it was using cannot be replayed.
+  it.effect("signs the calling device out as part of the action", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-this-device");
+
+      const response = yield* logoutEverywhere(session);
+
+      assert.strictEqual(response.status, 204, response.body);
+      assertClearedCookie(response.setCookies, "access_token");
+      assertClearedCookie(response.setCookies, "refresh_token");
+      assert.isNotNull((yield* tokenRow(session.refresh))?.revokedAt);
+      assert.strictEqual((yield* refreshWith(session.refresh)).status, 401);
+    }),
+  );
+
+  it.effect("answers a browser form post with a redirect to the sign-in page", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-browser");
+      const second = yield* logIn(session.email);
+
+      const response = yield* browserLogoutEverywhere(session);
+
+      assert.strictEqual(response.status, 303, response.body);
+      assert.strictEqual(response.location, "/login");
+      assertClearedCookie(response.setCookies, "access_token");
+      assertClearedCookie(response.setCookies, "refresh_token");
+      assert.isNotNull((yield* tokenRow(second.refresh))?.revokedAt);
+      assert.strictEqual(yield* liveTokenCount(session.id), 0);
+    }),
+  );
+
+  // The access cookie may already have expired by the time the control is
+  // clicked. A live refresh token identifies the account on its own.
+  it.effect("ends every session when only the refresh cookie is presented", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-refresh-only");
+      const second = yield* logIn(session.email);
+
+      const response = yield* call("/api/auth/logout-all", {
+        method: "POST",
+        headers: {
+          "user-agent": "estia-tests",
+          cookie: `refresh_token=${session.refresh}`,
+        },
+      });
+
+      assert.strictEqual(response.status, 204, response.body);
+      assert.isNotNull((yield* tokenRow(session.refresh))?.revokedAt);
+      assert.isNotNull((yield* tokenRow(second.refresh))?.revokedAt);
+    }),
+  );
+
+  // A browser that lost its refresh cookie while its access cookie is still
+  // live is still signed in on this device, so the action can still find the
+  // account and end its sessions.
+  it.effect("ends every session when only the access cookie is presented", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-access-only");
+      const second = yield* logIn(session.email);
+
+      const response = yield* call("/api/auth/logout-all", {
+        method: "POST",
+        headers: { "user-agent": "estia-tests", cookie: `access_token=${session.access}` },
+      });
+
+      assert.strictEqual(response.status, 204, response.body);
+      assertClearedCookie(response.setCookies, "refresh_token");
+      assert.isNotNull((yield* tokenRow(session.refresh))?.revokedAt);
+      assert.isNotNull((yield* tokenRow(second.refresh))?.revokedAt);
+    }),
+  );
+
+  // What the action honestly cannot reach, pinned so the profile page's copy
+  // cannot promise more than the app does: there is no revocation list for the
+  // access tokens already issued, so one keeps opening private routes until it
+  // expires, within an hour.
+  it.effect("cannot recall an access token that was already issued", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-access-token");
+
+      assert.strictEqual((yield* logoutEverywhere(session)).status, 204);
+
+      const me = yield* call("/api/users/me", {
+        headers: { cookie: `access_token=${session.access}`, "user-agent": "estia-tests" },
+      });
+      assert.strictEqual(me.status, 200, me.body);
+      assert.strictEqual(asObject(asObject(me.json)["user"])["id"], session.id);
+    }),
+  );
+
+  it.effect("is harmless for a caller who is already signed out", () =>
+    Effect.gen(function* () {
+      const response = yield* logoutEverywhere();
+
+      assert.strictEqual(response.status, 204, response.body);
+      assert.strictEqual(response.body, "");
+      assertClearedCookie(response.setCookies, "access_token");
+      assertClearedCookie(response.setCookies, "refresh_token");
+    }),
+  );
+
+  // Ending every session is a write, so a page on another site cannot post it
+  // with the session attached.
+  it.effect("refuses a form post from another site instead of ending the sessions", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-cross-site");
+      const second = yield* logIn(session.email);
+
+      const response = yield* call(
+        "/api/auth/logout-all",
+        form(
+          {
+            method: "POST",
+            headers: {
+              cookie: bothCookies(session),
+              origin: "https://evil.example",
+              accept: "text/html",
+            },
+          },
+          {},
+        ),
+      );
+
+      assert.strictEqual(response.status, 403, response.body);
+      assert.isNull((yield* tokenRow(second.refresh))?.revokedAt);
+      assert.strictEqual(yield* liveTokenCount(session.id), 2);
     }),
   );
 });

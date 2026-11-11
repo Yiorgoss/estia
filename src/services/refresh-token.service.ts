@@ -48,6 +48,22 @@ export interface RefreshTokenService {
    * has the same answer either way.
    */
   revokeToken: (token: typeof RefreshTokenValue.Type) => Effect.Effect<void, InternalError>;
+  /*
+   * The account a presented refresh token belongs to, when that token is still
+   * live. A token that is unknown, already revoked, or expired names no
+   * account; every case is the same answer.
+   */
+  userIdForToken: (
+    token: typeof RefreshTokenValue.Type,
+  ) => Effect.Effect<Option.Option<typeof UserId.Type>, InternalError>;
+  /*
+   * Ends every session the account has: every live refresh-token row it owns is
+   * revoked at once, so the tokens held by other devices and the leftovers of
+   * earlier sign-ins stop working too. The count is how many sessions this call
+   * ended. Access tokens already issued are not recalled - there is no
+   * revocation list for them - so they stay valid until they expire.
+   */
+  revokeAllSessions: (id: typeof UserId.Type) => Effect.Effect<number, InternalError>;
   consumeToken: (
     token: typeof RefreshTokenValue.Type,
   ) => Effect.Effect<
@@ -85,6 +101,23 @@ export const RefreshTokenServiceLive = Layer.effect(
         }).pipe(
           Effect.catchTags({
             HashError: () => Effect.fail(new InternalError()),
+            SqlError: () => Effect.fail(new InternalError()),
+          }),
+        ),
+      userIdForToken: (token) =>
+        Effect.gen(function* () {
+          const hash = yield* hasher.hashRefreshToken(token);
+          const valid = yield* refreshTokenRepo.findValidByHash(hash);
+          return Option.map(valid, (record) => record.userId);
+        }).pipe(
+          Effect.catchTags({
+            HashError: () => Effect.fail(new InternalError()),
+            SqlError: () => Effect.fail(new InternalError()),
+          }),
+        ),
+      revokeAllSessions: (id) =>
+        refreshTokenRepo.revokeAllForUser(id).pipe(
+          Effect.catchTags({
             SqlError: () => Effect.fail(new InternalError()),
           }),
         ),

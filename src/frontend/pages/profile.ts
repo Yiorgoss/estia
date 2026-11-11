@@ -203,10 +203,45 @@ const switchControl = (role: EditableProfileRole) => {
  * a form post rather than a link because signing out writes: the route revokes
  * the refresh token and clears both session cookies, then redirects to the
  * sign-in page.
+ *
+ * This button ends the one session, which is what most visits want, so the
+ * all-devices action lives in its own card below instead of next to it.
  */
 const logoutControl = () => `<form method="post" action="/api/auth/logout">
         <button type="submit" class="${secondaryButtonClass}">Log out</button>
       </form>`;
+
+// The wider action gets its own colour so it does not read as the everyday
+// log-out beside it.
+const dangerButtonClass =
+  "rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2";
+
+/*
+ * The wider way out. It is separate from the log-out control above because it
+ * ends sessions the person is not looking at, and the copy says what each one
+ * does. The last paragraph records what this cannot reach: the app has no
+ * revocation list for the short-lived access tokens it has already handed out,
+ * so a session that is open right now can keep working until its access token
+ * expires - within an hour. Nothing emails the other devices either.
+ */
+const signOutEverywhereControl =
+  () => `<section class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <h2 class="text-base font-semibold text-gray-900">Sign out of all devices</h2>
+      <p class="mt-1 text-sm text-gray-600">
+        Log out ends only this session; your other devices stay signed in.
+        Signing out of all devices ends every session on this account - in other
+        browsers, on phones and computers, and the earlier sign-ins this account
+        left behind. Each of them has to sign in again.
+      </p>
+      <form method="post" action="/api/auth/logout-all" class="mt-4">
+        <button type="submit" class="${dangerButtonClass}">Sign out of all devices</button>
+      </form>
+      <p class="mt-3 text-xs text-gray-500">
+        A session that is open right now can keep working for up to an hour,
+        until the credentials it was handed expire. No email is sent when a
+        device is signed out.
+      </p>
+    </section>`;
 
 export interface ProfilePageState {
   readonly role: EditableProfileRole;
@@ -257,7 +292,9 @@ export const profilePage = (state: ProfilePageState) => {
           <a href="/search" class="${secondaryButtonClass}">Back to listings</a>
         </div>
       </form>
-    </section>`,
+    </section>
+
+    ${signOutEverywhereControl()}`,
   );
 };
 
@@ -311,5 +348,7 @@ export const profileChoicePage = (error?: string | undefined) =>
           <button type="submit" class="${secondaryButtonClass}">Fill in my listing profile</button>
         </form>
       </div>
-    </section>`,
+    </section>
+
+    ${signOutEverywhereControl()}`,
   );
