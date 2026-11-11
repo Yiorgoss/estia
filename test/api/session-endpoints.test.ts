@@ -449,6 +449,47 @@ describe("POST /api/auth/logout-all", () => {
     }),
   );
 
+  // The success answers above promise that the sessions on the other devices
+  // are over. When the database refuses the revocation they are not, so the
+  // route has to answer an error - while still signing this device out - rather
+  // than redirecting to the sign-in page or answering 204 as if it had.
+  it.effect("answers a refused revocation with an error and still signs this device out", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("everywhere-revocation-refused");
+      const second = yield* logIn(session.email);
+
+      const withRefusedRevocation = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        Effect.gen(function* () {
+          yield* query(
+            `CREATE TRIGGER logout_all_revocation_refused
+               BEFORE UPDATE ON refresh_tokens
+             BEGIN
+               SELECT RAISE(ABORT, 'revocation unavailable');
+             END`,
+          );
+          return yield* effect;
+        }).pipe(Effect.ensuring(query("DROP TRIGGER IF EXISTS logout_all_revocation_refused")));
+
+      const jsonResponse = yield* withRefusedRevocation(logoutEverywhere(session));
+      assert.strictEqual(jsonResponse.status, 500, jsonResponse.body);
+      assert.strictEqual(jsonResponse.location, null);
+      assertClearedCookie(jsonResponse.setCookies, "access_token");
+      assertClearedCookie(jsonResponse.setCookies, "refresh_token");
+
+      const htmlResponse = yield* withRefusedRevocation(browserLogoutEverywhere(session));
+      assert.strictEqual(htmlResponse.status, 500, htmlResponse.body);
+      assert.strictEqual(htmlResponse.location, null);
+      assert.include(htmlResponse.body, "Signing out of every device failed");
+      assertClearedCookie(htmlResponse.setCookies, "access_token");
+      assertClearedCookie(htmlResponse.setCookies, "refresh_token");
+
+      // The refusal was real: neither this device's token nor the other
+      // device's token was revoked, so the 500 is not a false alarm.
+      assert.isNull((yield* tokenRow(session.refresh))?.revokedAt);
+      assert.isNull((yield* tokenRow(second.refresh))?.revokedAt);
+    }),
+  );
+
   // Ending every session is a write, so a page on another site cannot post it
   // with the session attached.
   it.effect("refuses a form post from another site instead of ending the sessions", () =>

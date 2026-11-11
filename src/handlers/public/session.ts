@@ -157,9 +157,11 @@ const refresh = HttpRouter.route("POST", "/api/auth/refresh", (request) =>
  * session at all names no account; there is nothing to end and the answer is the
  * signed-out one.
  *
- * Clearing the cookies is the promise this route makes, so it happens even when
- * the rows cannot be revoked; a database failure is logged, and the person still
- * lands signed out of this device instead of stuck with a working token.
+ * Clearing the cookies is part of the promise this route makes, and this device
+ * is signed out either way. Ending the sessions on the other devices is the rest
+ * of it, so a failure to revoke them is answered as a failure - with this
+ * device's cookies still cleared - rather than as the signed-out page, which
+ * would leave month-long refresh tokens alive while claiming they had ended.
  *
  * What this cannot reach is the access tokens already handed out: there is no
  * revocation list for them, so a session that is open right now may keep reading
@@ -181,30 +183,44 @@ const logoutEverywhere = HttpRouter.route("POST", "/api/auth/logout-all", (reque
       request.cookies["access_token"],
     ).pipe(Effect.catchTags({ SchemaError: () => Effect.succeed(null) }));
 
-    yield* auth
-      .endAllSessions({
-        refreshToken: Option.getOrNull(presented),
-        accessToken,
-      })
-      .pipe(
-        Effect.tap((revoked) =>
-          Effect.logInfo(`Signing out of every device ended ${revoked} session(s)`),
+    const outcome = yield* Effect.result(
+      auth
+        .endAllSessions({
+          refreshToken: Option.getOrNull(presented),
+          accessToken,
+        })
+        .pipe(
+          Effect.tap((revoked) =>
+            Effect.logInfo(`Signing out of every device ended ${revoked} session(s)`),
+          ),
+          Effect.tapError((error) =>
+            Effect.logError("Signing out of every device could not revoke the refresh tokens", {
+              error,
+            }),
+          ),
         ),
-        Effect.catchTag("InternalError", (error) =>
-          Effect.logError("Signing out of every device could not revoke the refresh tokens", {
-            error,
-          }).pipe(Effect.as(0)),
+    );
+
+    const clearedCookies = [
+      yield* jwtService.clearCookie(),
+      yield* refreshTokenService.clearCookie(),
+    ];
+
+    if (Result.isFailure(outcome)) {
+      return yield* HttpServerResponse.setCookies(
+        HttpServerResponse.text(
+          "Signing out of every device failed. The sessions on other devices may still be live; try again.",
+          { status: 500 },
         ),
-      );
+        clearedCookies,
+      ).pipe(Effect.orDie);
+    }
 
     const response = prefersHtml(request)
       ? HttpServerResponse.redirect("/login", { status: 303 })
       : HttpServerResponse.empty({ status: 204 });
 
-    return yield* HttpServerResponse.setCookies(response, [
-      yield* jwtService.clearCookie(),
-      yield* refreshTokenService.clearCookie(),
-    ]).pipe(Effect.orDie);
+    return yield* HttpServerResponse.setCookies(response, clearedCookies).pipe(Effect.orDie);
   }),
 );
 
