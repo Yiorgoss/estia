@@ -90,6 +90,18 @@ describe("GET /profile", () => {
     }),
   );
 
+  it.effect("offers a way to log out that posts the logout route", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("logout-control");
+
+      const response = yield* page(user);
+
+      assert.strictEqual(response.status, 200, response.body);
+      assert.include(response.body, 'action="/api/auth/logout"');
+      assert.include(response.body, ">Log out</button>");
+    }),
+  );
+
   it.effect("asks an unauthenticated visitor to sign in instead of answering a 401 body", () =>
     Effect.gen(function* () {
       const response = yield* call("/profile");
@@ -129,6 +141,8 @@ describe("GET /profile", () => {
       assert.include(response.body, 'value="seeker"');
       assert.include(response.body, 'value="lister"');
       assert.notInclude(response.body, 'action="/profile"');
+      // The choice page is still the profile page, so it still has the way out.
+      assert.include(response.body, 'action="/api/auth/logout"');
     }),
   );
 

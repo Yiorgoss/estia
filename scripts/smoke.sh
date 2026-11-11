@@ -70,6 +70,19 @@ db_exec() {
     || fail "database statement failed: $1"
 }
 
+# One value read back from the local database, for the checks that have to prove
+# what a request did to a row instead of inferring it from a later response.
+db_scalar() {
+  pnpm exec wrangler d1 execute "$DB_BINDING" --local --json --command "$1" 2>/dev/null \
+    | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(String(JSON.parse(s)[0].results[0].value)))'
+}
+
+# The digest a refresh token is stored under: the app hashes the token and keys
+# the row on the hash, so a check that names a row has to hash it the same way.
+token_hash() {
+  printf '%s' "$1" | sha256sum | cut -d' ' -f1
+}
+
 EMAIL="smoke-$(date +%s)@test.local"
 PASSWORD="correct horse battery staple"
 
@@ -1065,6 +1078,101 @@ printf '%s' "$ROTATED_REFRESH_H" | grep -qi 'samesite=lax' \
 printf '%s' "$(cookie_flags "$WORK/rotate.h" access_token)" | grep -qi 'samesite=lax' \
   || fail "rotated access_token missing SameSite=Lax"
 pass "refresh rotation issued new access + refresh cookies (HttpOnly+Secure+SameSite=Lax)"
+
+# 6b. a deliberate refresh, and a proper end to the session
+#
+# The refresh route is the way a client renews on purpose instead of waiting for
+# a private request to fail first. It consumes the presented refresh token and
+# rotates it exactly as the middleware just did, answering with a fresh pair of
+# cookies and the current user. The session it just rotated is the one signing
+# out below ends for good: logout revokes the refresh token and clears both
+# cookies, so the month-long credential cannot be replayed from the device.
+CODE=$(curl -s -D "$WORK/api-refresh.h" -o "$WORK/api-refresh" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/refresh" \
+  -H "Cookie: refresh_token=${ROTATED_REFRESH}")
+assert_status "$CODE" 200 "api refresh"
+grep -q "\"id\":\"${USER_ID}\"" "$WORK/api-refresh" \
+  || fail "api refresh did not answer with the current user"
+grep -q '"role":"seeker"' "$WORK/api-refresh" \
+  || fail "api refresh did not answer with the stored role"
+FRESH_ACCESS="$(cookie_value "$WORK/api-refresh.h" access_token)"
+FRESH_REFRESH="$(cookie_value "$WORK/api-refresh.h" refresh_token)"
+[ -n "$FRESH_ACCESS" ] && [ -n "$FRESH_REFRESH" ] || fail "api refresh did not set both cookies"
+[ "$FRESH_REFRESH" != "$ROTATED_REFRESH" ] || fail "api refresh did not rotate the token"
+FRESH_REFRESH_H=$(cookie_flags "$WORK/api-refresh.h" refresh_token)
+printf '%s' "$FRESH_REFRESH_H" | grep -qi 'httponly' || fail "api refresh refresh_token missing HttpOnly"
+printf '%s' "$FRESH_REFRESH_H" | grep -qi 'secure' || fail "api refresh refresh_token missing Secure"
+printf '%s' "$FRESH_REFRESH_H" | grep -qi 'samesite=lax' \
+  || fail "api refresh refresh_token missing SameSite=Lax"
+printf '%s' "$(cookie_flags "$WORK/api-refresh.h" access_token)" | grep -qi 'samesite=lax' \
+  || fail "api refresh access_token missing SameSite=Lax"
+pass "api refresh returns fresh cookies and the current user"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me" \
+  -H "Cookie: access_token=${FRESH_ACCESS}")
+assert_status "$CODE" 200 "the access cookie a refresh issued opens a private route"
+
+# The token the refresh consumed is dead: replaying it is a 401 with no cookies.
+CODE=$(curl -s -D "$WORK/api-refresh-replay.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/refresh" \
+  -H "Cookie: refresh_token=${ROTATED_REFRESH}")
+assert_status "$CODE" 401 "api refresh rejects a replayed token"
+[ -z "$(cookie_flags "$WORK/api-refresh-replay.h" refresh_token)" ] \
+  || fail "a replayed refresh token set a cookie"
+pass "a replayed refresh token answers 401 and sets nothing"
+
+# The control on the profile page is the browser's way out.
+CODE=$(curl -s -o "$WORK/profile-logout" -w '%{http_code}' "${BASE_URL}/profile" \
+  -H "Cookie: access_token=${FRESH_ACCESS}")
+assert_status "$CODE" 200 "the profile page"
+grep -q 'action="/api/auth/logout"' "$WORK/profile-logout" \
+  || fail "the profile page offers no way to log out"
+grep -q '>Log out</button>' "$WORK/profile-logout" \
+  || fail "the profile page logout control is not labelled Log out"
+pass "the profile page offers a log out control"
+
+# A browser posts that control: a redirect to the sign-in page and both cookies
+# cleared. The access cookie is deliberately absent, because the person may click
+# log out after it has already expired.
+CODE=$(curl -s -D "$WORK/logout-form.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/logout" \
+  -H 'Accept: text/html' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: refresh_token=${FRESH_REFRESH}")
+assert_status "$CODE" 303 "form logout"
+LOGOUT_LOCATION=$(grep -i '^location:' "$WORK/logout-form.h" | head -1 | tr -d '\r' | sed -E 's/^[Ll]ocation: //')
+[ "$LOGOUT_LOCATION" = "/login" ] \
+  || fail "form logout did not redirect to /login (got ${LOGOUT_LOCATION:-no Location header})"
+for NAME in access_token refresh_token; do
+  CLEARED_H=$(cookie_flags "$WORK/logout-form.h" "$NAME")
+  [ -n "$CLEARED_H" ] || fail "logout did not clear ${NAME}"
+  printf '%s' "$CLEARED_H" | grep -qi 'max-age=0' || fail "cleared ${NAME} has a lifetime left"
+  printf '%s' "$CLEARED_H" | grep -qi 'path=/' || fail "cleared ${NAME} has the wrong path"
+  printf '%s' "$CLEARED_H" | grep -qi 'httponly' || fail "cleared ${NAME} missing HttpOnly"
+  printf '%s' "$CLEARED_H" | grep -qi 'secure' || fail "cleared ${NAME} missing Secure"
+  printf '%s' "$CLEARED_H" | grep -qi 'samesite=lax' || fail "cleared ${NAME} missing SameSite=Lax"
+done
+pass "form logout redirects to the sign-in page and clears both cookies"
+
+# The row is revoked in the database, not merely forgotten by the browser, and
+# the token a signed-out device still holds is refused if it is replayed.
+FRESH_REFRESH_HASH="$(token_hash "$FRESH_REFRESH")"
+REVOKED="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE token_hash='${FRESH_REFRESH_HASH}' AND revoked_at IS NOT NULL;")"
+[ "$REVOKED" = "1" ] || fail "logout did not revoke the refresh token row (${REVOKED} revoked rows)"
+CODE=$(curl -s -D "$WORK/api-refresh-after-logout.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/refresh" \
+  -H "Cookie: refresh_token=${FRESH_REFRESH}")
+assert_status "$CODE" 401 "api refresh rejects a token replayed after logout"
+[ -z "$(cookie_flags "$WORK/api-refresh-after-logout.h" refresh_token)" ] \
+  || fail "a token replayed after logout set a cookie"
+pass "logout revokes the row and a replayed token answers 401 with no cookies"
+
+# Signed out already: a 204 and nothing to revoke is the same harmless answer.
+CODE=$(curl -s -o "$WORK/logout-signed-out" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/logout")
+assert_status "$CODE" 204 "logout while signed out"
+[ ! -s "$WORK/logout-signed-out" ] || fail "logout while signed out answered with a body"
+pass "logging out while signed out is harmless"
 
 # 7. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"

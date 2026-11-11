@@ -4,6 +4,7 @@ import { Cookies } from "effect/http";
 import { Config, Context, Effect, Layer, Schema } from "effect";
 import { jwtVerify, SignJWT } from "jose";
 import { JWTClaimValidationFailed, JWTExpired } from "jose/errors";
+import { clearedCookie } from "./session-cookies";
 
 // export type JWT = typeof JWTSchema.Type
 
@@ -32,10 +33,29 @@ export const JWTObjectSchema = Schema.Struct({
     alg: Schema.String,
   }),
 });
+
+// The access cookie's attributes. `asCookie` and `clearCookie` both pass this
+// record, so the issued and the cleared cookie cannot disagree; `clearedCookie`
+// owns the rule for ending one.
+const accessCookieOptions = {
+  httpOnly: true,
+  secure: true,
+  path: "/",
+  maxAge: 60 * 60 * 1000,
+  // `Lax` keeps the session on top-level navigations and off a cross-site form
+  // post. The origin check in `@/handlers/same-origin` is the other half of that
+  // defence.
+  sameSite: "lax",
+} as const satisfies NonNullable<Cookies.Cookie["options"]>;
+
 export interface JWTService {
   asCookie(
     token: typeof JWTSchema.Type,
   ): Effect.Effect<[name: string, value: string, options?: Cookies.Cookie["options"]], never>;
+  clearCookie(): Effect.Effect<
+    [name: string, value: string, options?: Cookies.Cookie["options"]],
+    never
+  >;
   signUser(user: User): Effect.Effect<typeof JWTSchema.Type, JWTSigningError>;
   verify(
     token: typeof JWTSchema.Type,
@@ -56,21 +76,8 @@ export const JWTServiceLive = Layer.effect(
     const secretU8 = new TextEncoder().encode(secret);
 
     return {
-      asCookie: (token) =>
-        Effect.succeed([
-          "access_token",
-          token,
-          {
-            httpOnly: true,
-            secure: true,
-            path: "/",
-            maxAge: 60 * 60 * 1000,
-            // `Lax` keeps the session on top-level navigations and off a
-            // cross-site form post. The origin check in `@/handlers/same-origin`
-            // is the other half of that defence.
-            sameSite: "lax",
-          },
-        ]),
+      asCookie: (token) => Effect.succeed(["access_token", token, accessCookieOptions]),
+      clearCookie: () => clearedCookie("access_token", accessCookieOptions),
       signUser: (user: User) =>
         Effect.tryPromise({
           try: () =>

@@ -198,6 +198,16 @@ const switchControl = (role: EditableProfileRole) => {
       </form>`;
 };
 
+/*
+ * The way out of a session, on the page a signed-in person already visits. It is
+ * a form post rather than a link because signing out writes: the route revokes
+ * the refresh token and clears both session cookies, then redirects to the
+ * sign-in page.
+ */
+const logoutControl = () => `<form method="post" action="/api/auth/logout">
+        <button type="submit" class="${secondaryButtonClass}">Log out</button>
+      </form>`;
+
 export interface ProfilePageState {
   readonly role: EditableProfileRole;
   readonly values: ProfileFormValues;
@@ -220,6 +230,7 @@ export const profilePage = (state: ProfilePageState) => {
           profile; this page edits the one your account is using now.
         </p>
       </div>
+      ${logoutControl()}
     </div>
 
     <div class="mt-4 space-y-4">
@@ -278,6 +289,8 @@ export const profileChoicePage = (error?: string | undefined) =>
       Tell people who you are. Choose the profile you want to fill in; you can
       switch to the other one at any time.
     </p>
+
+    <div class="mt-4 flex justify-end">${logoutControl()}</div>
 
     <div class="mt-4">${errorBanner(error)}</div>
 
