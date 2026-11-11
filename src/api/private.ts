@@ -2,6 +2,7 @@ import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { ProfileInput, RoleSwitchQuery } from "@/db/schema/Profile";
 import { ListingId, UserRoles } from "@/db/schema/brands";
+import { CreateSavedSearchInput, SavedSearchSchema } from "@/db/schema/SavedSearch";
 import { CurrentUser } from "@/db/schema/User";
 import {
   CreateListingInput,
@@ -30,6 +31,7 @@ import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
 import { ListingPageRoutes } from "@/handlers/private/listing-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
+import { SavedSearchRoutes } from "@/handlers/private/saved-search-routes";
 
 /*
  * The caller's own profile. The role is the account's stored role, which is what
@@ -174,10 +176,33 @@ export const ListingGroup = HttpApiGroup.make("listing-group")
   )
   .prefix("/listings");
 
+/*
+ * The caller's saved searches. They are keyed on the account the session
+ * proves, never on an owner id in the request, so one account can neither list
+ * nor delete another's. The list carries the whole criteria set, which is what
+ * the results page needs to re-run a search without a second read.
+ */
+export const SavedSearchGroup = HttpApiGroup.make("saved-search-group")
+  .add(
+    HttpApiEndpoint.post("create", "/", {
+      payload: CreateSavedSearchInput,
+      success: SavedSearchSchema,
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("list", "/", {
+      success: Schema.Struct({ items: Schema.Array(SavedSearchSchema) }),
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
+  .prefix("/saved-searches");
+
 // The api prefix only applies to the groups added before it.
 export const PrivateApi = HttpApi.make("private-api")
   .add(UserGroup)
   .add(ListingGroup)
+  .add(SavedSearchGroup)
   .prefix("/api");
 
 export const PrivateRoutes = HttpRouter.addAll([
@@ -195,4 +220,5 @@ export const PrivateRoutes = HttpRouter.addAll([
   ),
   ...ListingPageRoutes,
   ...ProfilePageRoutes,
+  ...SavedSearchRoutes,
 ]);

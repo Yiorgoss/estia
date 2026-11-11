@@ -143,12 +143,31 @@ export const UpdateListingInput = Schema.Struct({
 export type UpdateListingInput = typeof UpdateListingInput.Type;
 
 /*
+ * The free-text query a search can carry. It is trimmed and bounded, and it is
+ * matched against the listing title and description. A blank value is no filter
+ * at all, so the search page drops empty fields before decoding.
+ */
+export const LISTING_SEARCH_TEXT_MAX_LENGTH = 200;
+
+export const ListingSearchText = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.NonEmptyString.check(Schema.isMaxLength(LISTING_SEARCH_TEXT_MAX_LENGTH)),
+    SchemaTransformation.transform({
+      decode: (value: string) => value.trim(),
+      encode: (value: string) => value,
+    }),
+  ),
+);
+
+/*
  * Search filters. Price and size bounds are inclusive, the bit flags filter on
  * their exact value (a `false` flag is a real filter, not an absent one), and
  * `availableFrom` means "available on or after" - rows with no availability
- * date are excluded when it is set.
+ * date are excluded when it is set. `query` is the free-text search over the
+ * title and description.
  */
 export const ListingSearchFilters = Schema.Struct({
+  query: Schema.optional(ListingSearchText),
   kind: Schema.optional(ListingKind),
   regionCode: Schema.optional(GreekRegion),
   minPriceMinor: Schema.optional(Schema.Int),
@@ -294,6 +313,7 @@ const pagingQueryFields = {
  * what keeps those surfaces from drifting apart.
  */
 const searchFilterQueryFields = {
+  query: Schema.optional(ListingSearchText),
   kind: Schema.optional(ListingKind),
   regionCode: Schema.optional(GreekRegion),
   minPriceMinor: Schema.optional(NonNegativeIntFromString),
@@ -308,8 +328,9 @@ const searchFilterQueryFields = {
 };
 
 // An inverted range is a client mistake, not an empty result: it fails the
-// whole request instead of silently matching nothing.
-const validateFilterRanges = (query: {
+// whole request instead of silently matching nothing. A saved search is checked
+// with the same rule, so a stored range can always be re-run.
+export const validateFilterRanges = (query: {
   readonly minPriceMinor?: number | undefined;
   readonly maxPriceMinor?: number | undefined;
   readonly minSizeSqm?: number | undefined;

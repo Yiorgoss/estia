@@ -86,6 +86,12 @@ const toInsertBit = (value: boolean | undefined): number => (value === true ? 1 
 // when its value is not `undefined`; an explicit `null` clears it.
 const provided = (value: unknown): number => (value === undefined ? 0 : 1);
 
+// A free-text query is a substring match over the title and description. The
+// characters LIKE treats as wildcards are escaped, so a query containing `%` or
+// `_` matches those characters literally instead of widening the search.
+const likePattern = (value: string): string =>
+  `%${value.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
 // Fetch one extra row to learn whether another page exists without a `COUNT`.
 const toPage = (
   rows: ReadonlyArray<Record<string, unknown>>,
@@ -135,6 +141,7 @@ export const ListingRepositoryLive = Layer.effect(
      * what "matching listing" means.
      */
     const filterClause = (filters: typeof ListingSearchFilters.Type) => sql`
+      ${filters.query != null ? sql`AND (title LIKE ${likePattern(filters.query)} ESCAPE '\\' OR description LIKE ${likePattern(filters.query)} ESCAPE '\\')` : sql``}
       ${filters.kind != null ? sql`AND kind = ${filters.kind}` : sql``}
       ${filters.regionCode != null ? sql`AND region_code = ${filters.regionCode}` : sql``}
       ${filters.minPriceMinor != null ? sql`AND price_minor >= ${filters.minPriceMinor}` : sql``}

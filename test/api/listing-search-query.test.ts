@@ -86,6 +86,16 @@ describe("ListingSearchQuery", () => {
     assertDecoded({}, { limit: 20 });
   });
 
+  it("trims the free-text query and keeps its internal spaces", () => {
+    assertDecoded({ query: "  bright balcony  " }, { query: "bright balcony", limit: 20 });
+  });
+
+  it("rejects a blank or over-long free-text query", () => {
+    assertRejected({ query: "" });
+    assertRejected({ query: "   " });
+    assertRejected({ query: "x".repeat(201) });
+  });
+
   it("keeps an explicit false boolean as a real filter", () => {
     assertDecoded(
       { furnished: "false", ensuite: "false", smoking: "false", pets: "false" },
