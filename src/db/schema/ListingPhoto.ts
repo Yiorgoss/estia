@@ -8,10 +8,11 @@ import { Schema } from "effect";
  * storage is never listed, so the gallery is the only way in and the only way
  * out.
  *
- * The byte limit is enforced by the service on the bytes it receives, not just
- * by the browser's `accept` attribute, and the ten-photo cap by the gallery's
- * insert statement. The same numbers are mirrored by the database CHECK in
- * `0007_listing_photos.sql`.
+ * The byte limit and the accepted content types are enforced by the service on
+ * the bytes it receives, not just by the browser's `accept` attribute, and
+ * mirrored by the database CHECK in `0007_listing_photos.sql`. The ten-photo
+ * cap has no CHECK because it counts siblings, so the gallery's insert
+ * statement decides it.
  */
 export const LISTING_PHOTO_MAX_PER_LISTING = 10;
 export const LISTING_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
