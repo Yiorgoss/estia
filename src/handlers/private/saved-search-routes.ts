@@ -48,11 +48,10 @@ const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
 const refuse = (
   request: HttpServerRequest.HttpServerRequest,
   message: string,
-  status: number,
 ): HttpServerResponse.HttpServerResponse =>
   isHtmx(request)
     ? respond(savedSearchesPanel([], { error: message }), 200)
-    : respond(message, status);
+    : respond(message, 403);
 
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
@@ -88,10 +87,10 @@ const panelFor = (
 const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) {
-      return refuse(request, crossSiteFormMessage, 403);
+      return refuse(request, crossSiteFormMessage);
     }
 
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const params = yield* readForm(request);
     const { name: rawName, ...rawCriteria } = params;
 
@@ -131,20 +130,16 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
       { notice: `Saved: ${created.success.name}` },
       clearedNameInput(),
     );
-  }).pipe(
-    Effect.catchTag("UnauthorizedError", () =>
-      Effect.succeed(refuse(request, "Sign in to save a search.", 401)),
-    ),
-  ),
+  }),
 );
 
 const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) {
-      return refuse(request, crossSiteFormMessage, 403);
+      return refuse(request, crossSiteFormMessage);
     }
 
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const id = yield* Effect.map(HttpRouter.params, (params) =>
       decodeSavedSearchId(params["id"]),
     );
@@ -164,11 +159,7 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
 
     if (!isHtmx(request)) return seeOther("/search");
     return yield* panelFor(ownerId, { notice: "Saved search deleted." });
-  }).pipe(
-    Effect.catchTag("UnauthorizedError", () =>
-      Effect.succeed(refuse(request, "Sign in to delete a saved search.", 401)),
-    ),
-  ),
+  }),
 );
 
 /*
@@ -190,7 +181,7 @@ const deleteSavedSearchApi = HttpRouter.route("DELETE", "/api/saved-searches/:id
       return HttpServerResponse.text("SavedSearchNotFoundError", { status: 404 });
     }
 
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const savedSearchService = yield* SavedSearchService;
     const outcome = yield* Effect.result(savedSearchService.delete(ownerId, id));
     if (Result.isSuccess(outcome)) {
@@ -199,11 +190,7 @@ const deleteSavedSearchApi = HttpRouter.route("DELETE", "/api/saved-searches/:id
     return outcome.failure._tag === "SavedSearchNotFoundError"
       ? HttpServerResponse.text("SavedSearchNotFoundError", { status: 404 })
       : HttpServerResponse.text("InternalError", { status: 500 });
-  }).pipe(
-    Effect.catchTag("UnauthorizedError", () =>
-      Effect.succeed(HttpServerResponse.text("UnauthorizedError", { status: 401 })),
-    ),
-  ),
+  }),
 );
 
 // Exported as routes rather than a layer so the private router can register

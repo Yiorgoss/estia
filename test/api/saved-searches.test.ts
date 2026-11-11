@@ -279,44 +279,60 @@ describe("DELETE /api/saved-searches/:id", () => {
 });
 
 describe("the browser's saved-search routes", () => {
-  it.effect("renders an htmx save's expired-session error in the panel", () =>
+  it.effect("saves an htmx post whose access token aged out", () =>
     Effect.gen(function* () {
       const session = yield* signIn("htmx-expired-save");
 
       const response = yield* browserSave(staleAccess(session), { pets: "false" });
       assert.strictEqual(response.status, 200, response.body);
       assert.include(response.body, 'id="saved-searches"');
-      assert.include(response.body, "Sign in to save a search.");
+      assert.include(response.body, "Saved:");
 
-      // The middleware renewed the session on the same response, so the person
-      // can try again; nothing was saved silently.
-      const listed = yield* savedSearches(`access_token=${response.cookies["access_token"]}`);
-      assert.deepStrictEqual(listed, []);
+      const access = response.cookies["access_token"];
+      const refresh = response.cookies["refresh_token"];
+      assert.isDefined(access);
+      assert.isDefined(refresh);
+      assert.notStrictEqual(access, "an.expired.token");
+      assert.notStrictEqual(refresh, session.refresh);
+
+      const listed = yield* savedSearches(`access_token=${access}`);
+      assert.lengthOf(listed, 1);
+      assert.strictEqual(listed[0]?.pets, false);
+
+      // The rotated pair, not the consumed refresh token, is the credential the
+      // next click carries.
+      const next = yield* browserSave(
+        `access_token=${access}; refresh_token=${refresh}`,
+        { pets: "false" },
+      );
+      assert.strictEqual(next.status, 200, next.body);
+      assert.include(next.body, "Saved:");
     }),
   );
 
-  it.effect("keeps the 401 for a save that navigates without htmx", () =>
+  it.effect("saves for a navigation without htmx and rotates the session", () =>
     Effect.gen(function* () {
       const session = yield* signIn("forms-expired-save");
 
       const response = yield* call(
         "/search/saved",
-        form(
-          { method: "POST", headers: { cookie: staleAccess(session) } },
-          { pets: "false" },
-        ),
+        form({ method: "POST", headers: { cookie: staleAccess(session) } }, { pets: "false" }),
       );
-      assert.strictEqual(response.status, 401, response.body);
-      assert.strictEqual(response.body, "Sign in to save a search.");
+      assert.strictEqual(response.status, 303, response.body);
+      assert.strictEqual(response.location, "/search");
+      assert.notStrictEqual(response.cookies["refresh_token"], session.refresh);
+
+      const listed = yield* savedSearches(`access_token=${response.cookies["access_token"]}`);
+      assert.lengthOf(listed, 1);
     }),
   );
 
-  it.effect("renders an htmx delete's expired-session error in the panel", () =>
+  it.effect("deletes an htmx post whose access token aged out", () =>
     Effect.gen(function* () {
       const session = yield* signIn("htmx-expired-delete");
       const created = yield* send("POST", "/api/saved-searches", {
         cookie: `access_token=${session.access}`,
-        payload: { name: "Kept after a stale delete" },
+        payload: { name: "Removed after a stale click" },
       });
       assert.strictEqual(created.status, 200, created.body);
       const id = asObject(created.json)["id"];
@@ -332,10 +348,11 @@ describe("the browser's saved-search routes", () => {
         ),
       );
       assert.strictEqual(response.status, 200, response.body);
-      assert.include(response.body, "Sign in to delete a saved search.");
+      assert.include(response.body, "Saved search deleted.");
+      assert.notStrictEqual(response.cookies["refresh_token"], session.refresh);
 
       const listed = yield* savedSearches(`access_token=${response.cookies["access_token"]}`);
-      assert.include(
+      assert.notInclude(
         listed.map((saved) => saved.id),
         id,
       );
@@ -531,6 +548,34 @@ describe("a stale access token on the public search routes", () => {
       const results = yield* call("/search/results");
       assert.strictEqual(results.status, 200, results.body);
       assert.notInclude(results.body, 'hx-post="/search/saved"');
+    }),
+  );
+});
+
+describe("a stale access token on the private API", () => {
+  it.effect("names the caller and rotates the pair", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("private-rotation");
+      const created = yield* send("POST", "/api/saved-searches", {
+        cookie: `access_token=${session.access}`,
+        payload: { name: "Read after the access token aged out" },
+      });
+      assert.strictEqual(created.status, 200, created.body);
+
+      const listed = yield* send("GET", "/api/saved-searches", { cookie: staleAccess(session) });
+      assert.strictEqual(listed.status, 200, listed.body);
+
+      const access = listed.cookies["access_token"];
+      const refresh = listed.cookies["refresh_token"];
+      assert.isDefined(access);
+      assert.isDefined(refresh);
+      assert.notStrictEqual(access, "an.expired.token");
+      assert.notStrictEqual(refresh, session.refresh);
+
+      const names = (asObject(listed.json)["items"] as ReadonlyArray<Record<string, unknown>>).map(
+        (item) => item["name"],
+      );
+      assert.include(names, "Read after the access token aged out");
     }),
   );
 });

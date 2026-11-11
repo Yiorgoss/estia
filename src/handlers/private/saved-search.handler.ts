@@ -14,16 +14,16 @@ export const SavedSearchHandler = HttpApiBuilder.group(
   "saved-search-group",
   (handlers) =>
     handlers
-      .handle("create", ({ payload, request }) =>
+      .handle("create", ({ payload }) =>
         Effect.gen(function* () {
-          const ownerId = yield* callerId(request);
+          const ownerId = yield* callerId;
           const savedSearchService = yield* SavedSearchService;
           return yield* savedSearchService.create(ownerId, payload);
         }),
       )
-      .handle("list", ({ request }) =>
+      .handle("list", () =>
         Effect.gen(function* () {
-          const ownerId = yield* callerId(request);
+          const ownerId = yield* callerId;
           const savedSearchService = yield* SavedSearchService;
           return { items: yield* savedSearchService.list(ownerId) };
         }),
