@@ -209,7 +209,7 @@ const logoutEverywhere = HttpRouter.route("POST", "/api/auth/logout-all", (reque
     if (Result.isFailure(outcome)) {
       return yield* HttpServerResponse.setCookies(
         HttpServerResponse.text(
-          "Signing out of every device failed. The sessions on other devices may still be live; try again.",
+          "Signing out of every device did not complete on our side. The sessions on other devices may still be signed in. Sign in again and repeat the action to end them.",
           { status: 500 },
         ),
         clearedCookies,

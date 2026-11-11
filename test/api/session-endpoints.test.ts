@@ -479,9 +479,18 @@ describe("POST /api/auth/logout-all", () => {
       const htmlResponse = yield* withRefusedRevocation(browserLogoutEverywhere(session));
       assert.strictEqual(htmlResponse.status, 500, htmlResponse.body);
       assert.strictEqual(htmlResponse.location, null);
-      assert.include(htmlResponse.body, "Signing out of every device failed");
       assertClearedCookie(htmlResponse.setCookies, "access_token");
       assertClearedCookie(htmlResponse.setCookies, "refresh_token");
+
+      // The cookies are gone, so a bare retry would name no account and be
+      // answered as a success while the other devices stayed signed in. The
+      // message has to say so and point at signing in again instead.
+      for (const response of [jsonResponse, htmlResponse]) {
+        assert.include(response.body, "did not complete on our side");
+        assert.include(response.body, "other devices may still be signed in");
+        assert.include(response.body, "Sign in again and repeat the action");
+        assert.notInclude(response.body.toLowerCase(), "try again");
+      }
 
       // The refusal was real: neither this device's token nor the other
       // device's token was revoked, so the 500 is not a false alarm.
