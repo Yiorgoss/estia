@@ -22,16 +22,16 @@ export const insertLister = (
   options: {
     readonly name?: string | null;
     readonly ownership?: "owner" | "leaseholder";
+    readonly contact?: string | null;
   } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql.unsafe("INSERT INTO listers (id, user_id, name, ownership) VALUES (?, ?, ?, ?)", [
-      id,
-      userId,
-      options.name ?? "Lister",
-      options.ownership ?? "owner",
-    ]);
+    const name = options.name === undefined ? "Lister" : options.name;
+    yield* sql.unsafe(
+      "INSERT INTO listers (id, user_id, name, ownership, contact) VALUES (?, ?, ?, ?, ?)",
+      [id, userId, name, options.ownership ?? "owner", options.contact ?? null],
+    );
   });
 
 export const insertSeeker = (
@@ -43,13 +43,14 @@ export const insertSeeker = (
     readonly gender?: "male" | "female" | "NB";
     readonly smoking?: boolean;
     readonly pets?: boolean;
+    readonly contact?: string | null;
   } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql.unsafe(
-      `INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets, contact)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         options.name ?? "Seeker",
@@ -58,6 +59,7 @@ export const insertSeeker = (
         options.gender ?? "NB",
         options.smoking === true ? 1 : 0,
         options.pets === true ? 1 : 0,
+        options.contact ?? null,
       ],
     );
   });
@@ -115,6 +117,30 @@ export const insertListing = (
         createdAt,
         options.updatedAt ?? createdAt,
         options.publishedAt ?? (status === "published" ? createdAt : null),
+      ],
+    );
+  });
+
+export const insertEnquiry = (options: {
+  readonly listingId: number;
+  readonly senderId: string;
+  readonly senderName: string;
+  readonly senderContact: string;
+  readonly message?: string;
+  readonly createdAt?: number;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql.unsafe(
+      `INSERT INTO enquiries (listing_id, sender_id, message, sender_name, sender_contact, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        options.listingId,
+        options.senderId,
+        options.message ?? "Is this still available?",
+        options.senderName,
+        options.senderContact,
+        options.createdAt ?? 1_700_000_000_000,
       ],
     );
   });

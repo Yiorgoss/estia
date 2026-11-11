@@ -130,6 +130,77 @@ describe("listingDetailPage", () => {
   });
 });
 
+describe("listingDetailPage contact path", () => {
+  it("prompts an anonymous reader to sign in and renders no contact details", () => {
+    const html = listingDetailPage(listing());
+
+    assert.include(html, "Contact the lister");
+    assert.include(html, "Sign in to contact");
+    assert.include(html, 'href="/login"');
+    // The form and the lister's published line are signed-in surfaces only.
+    assert.notInclude(html, 'action="/listings/7/enquiries"');
+    assert.notInclude(html, "ada@example.test");
+  });
+
+  it("shows a signed-in reader the lister's published contact line and the enquiry form", () => {
+    const html = listingDetailPage(listing(), {
+      signedIn: true,
+      listerName: "Ada Lets",
+      listerContact: "ada@example.test",
+    });
+
+    assert.include(html, "Listed by");
+    assert.include(html, "Ada Lets");
+    assert.include(html, "Contact:");
+    assert.include(html, "ada@example.test");
+    assert.include(html, 'action="/listings/7/enquiries"');
+    assert.include(html, 'name="message"');
+    assert.include(html, "Send enquiry");
+    assert.include(
+      html,
+      "The lister sees the display name and contact details from your profile, or your account email when those are not published.",
+    );
+    assert.notInclude(html, "Sign in to contact");
+  });
+
+  it("says so when the lister published no contact details and still offers the form", () => {
+    const html = listingDetailPage(listing(), {
+      signedIn: true,
+      listerName: null,
+      listerContact: null,
+    });
+
+    assert.include(html, "has not published contact details");
+    assert.include(html, 'action="/listings/7/enquiries"');
+  });
+
+  it("offers the owner their enquiries instead of a form to themselves", () => {
+    const html = listingDetailPage(listing(), { signedIn: true, isOwner: true });
+
+    assert.include(html, "This is your listing");
+    assert.include(html, 'href="/enquiries"');
+    assert.notInclude(html, 'action="/listings/7/enquiries"');
+  });
+
+  it("escapes a published contact line, the typed message, and the refusal", () => {
+    const html = listingDetailPage(listing(), {
+      signedIn: true,
+      listerName: `<img src=x onerror=alert(1)>`,
+      listerContact: `<script>alert("contact")</script>`,
+      enquiryMessage: `<script>alert("message")</script>`,
+      enquiryError: `<b>no</b>`,
+    });
+
+    assert.notInclude(html, "<img src=x");
+    assert.notInclude(html, "<script>");
+    assert.notInclude(html, "<b>no</b>");
+    assert.include(html, "&lt;img src=x onerror=alert(1)&gt;");
+    assert.include(html, "&lt;script&gt;alert(&quot;contact&quot;)&lt;/script&gt;");
+    assert.include(html, "&lt;script&gt;alert(&quot;message&quot;)&lt;/script&gt;");
+    assert.include(html, "&lt;b&gt;no&lt;/b&gt;");
+  });
+});
+
 describe("listingNotFoundPage", () => {
   it("renders a clean not-found page with a way back to search", () => {
     const html = listingNotFoundPage();

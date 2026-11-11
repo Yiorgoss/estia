@@ -23,6 +23,7 @@ export interface ProfileFormValues {
   readonly dateOfBirth: string;
   readonly gender: string;
   readonly bio: string;
+  readonly contact: string;
   readonly smoking: boolean;
   readonly pets: boolean;
   readonly ownership: string;
@@ -33,6 +34,7 @@ export const emptyProfileFormValues: ProfileFormValues = {
   dateOfBirth: "",
   gender: "",
   bio: "",
+  contact: "",
   smoking: false,
   pets: false,
   ownership: "",
@@ -57,6 +59,7 @@ export const profileFormValues = (params: ProfileFormParams): ProfileFormValues 
   dateOfBirth: text(params, "dateOfBirth"),
   gender: text(params, "gender"),
   bio: text(params, "bio"),
+  contact: text(params, "contact"),
   smoking: checked(params, "smoking"),
   pets: checked(params, "pets"),
   ownership: text(params, "ownership"),
@@ -74,13 +77,19 @@ export const profileFormValuesFrom = (
 ): ProfileFormValues => {
   if (profile === null) return emptyProfileFormValues;
   if ("ownership" in profile) {
-    return { ...emptyProfileFormValues, name: profile.name ?? "", ownership: profile.ownership };
+    return {
+      ...emptyProfileFormValues,
+      name: profile.name ?? "",
+      contact: profile.contact ?? "",
+      ownership: profile.ownership,
+    };
   }
   return {
     name: profile.name ?? "",
     dateOfBirth: dateValue(profile.dateOfBirth),
     gender: profile.gender ?? "",
     bio: profile.bio ?? "",
+    contact: profile.contact ?? "",
     smoking: profile.smoking,
     pets: profile.pets,
     ownership: "",
@@ -120,16 +129,25 @@ const dateOfBirthMillis = (raw: string): Result.Result<number, FormFailure> => {
  * rejected keeps that failure readable instead of echoing the decoder's
  * technical message.
  */
+// An emptiable box is an absence: the contact line is only published when the
+// person typed something into it.
+const contactOrNull = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+};
+
 const seekerFieldMessages: Record<string, string> = {
   name: "Enter your name, up to 120 characters.",
   dateOfBirth: "Enter your date of birth as a calendar date.",
   gender: "Choose your gender.",
   bio: "Keep the bio to 2000 characters or fewer.",
+  contact: "Keep your contact details to 200 characters or fewer.",
 };
 
 const listerFieldMessages: Record<string, string> = {
   name: "Keep the display name to 120 characters or fewer.",
   ownership: "Choose whether you own the place or hold its lease.",
+  contact: "Keep your contact details to 200 characters or fewer.",
 };
 
 const issueFields = (issue: SchemaIssue.Issue): ReadonlyArray<string> => {
@@ -187,6 +205,7 @@ export const decodeSeekerProfileForm = (
         dateOfBirth,
         gender,
         bio: bio.trim() === "" ? null : bio,
+        contact: contactOrNull(text(params, "contact")),
         smoking: bit(checked(params, "smoking")),
         pets: bit(checked(params, "pets")),
       });
@@ -212,6 +231,7 @@ export const decodeListerProfileForm = (
       const decoded = Schema.decodeUnknownResult(ListerProfileInput)({
         name: name.trim() === "" ? null : name,
         ownership,
+        contact: contactOrNull(text(params, "contact")),
       });
       return yield* Result.mapError(decoded, (failure) =>
         schemaFailure(failure, listerFieldMessages),

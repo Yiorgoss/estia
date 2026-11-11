@@ -15,6 +15,7 @@ import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
 import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
 import { optionalCaller, retrySessionResponse } from "@/handlers/optional-caller";
+import { renderListingDetail } from "@/handlers/listing-detail-view";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, ListingPhotoId, RefreshTokenValue } from "@/db/schema/brands";
 import {
@@ -38,7 +39,6 @@ import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import { ListingPhotoService } from "@/services/listing-photo.service";
 import type { PhotoVariant } from "@/services/listing-photo.service";
 import {
-  listingDetailPage,
   listingNotFoundPage,
   listingUnavailablePage,
 } from "@/frontend/pages/listing-detail";
@@ -375,16 +375,34 @@ const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
 const notFoundResponse = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(listingNotFoundPage(), { status: 404, contentType: "text/html" });
 
-const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
+const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
   Effect.gen(function* () {
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return notFoundResponse();
+
+    // The session is read through the same seam the saved-search page uses, so
+    // an expired access token is rotated before this page decides who is
+    // reading, and the rotated pair travels back on whatever response the route
+    // ends with. The contact path must not go dark an hour into a session.
+    const session = yield* optionalCaller(request);
+    if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "caller") {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
+      );
+    }
+    const viewerId = session._tag === "caller" ? Option.some(session.caller) : Option.none();
 
     const listingService = yield* ListingService;
     const listing = yield* listingService.getPublic(id);
     const photoService = yield* ListingPhotoService;
     const photos = yield* photoService.listPublic(id);
-    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos)));
+    const html = yield* renderListingDetail(
+      toPublicListing(listing, photos),
+      listing.ownerId,
+      viewerId,
+    );
+    return HttpServerResponse.html(html);
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),

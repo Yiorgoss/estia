@@ -232,6 +232,7 @@ export const testOrigin = TEST_ORIGIN;
 
 export interface TestUser {
   readonly id: string;
+  readonly email: string;
   readonly cookie: string;
   // The live refresh token the registration issued, for tests that drive a
   // session rotation from a browser that still holds it.
@@ -313,6 +314,7 @@ export const register = (label: string): Effect.Effect<TestUser> =>
     const claims = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
     return {
       id: String(claims.id),
+      email,
       cookie: `access_token=${accessToken}`,
       refreshToken,
     };

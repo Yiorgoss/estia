@@ -59,11 +59,12 @@ export const ListerRepositoryLive = Layer.effect(
         ),
       upsertForUser: (userId, input) =>
         sql<Record<string, unknown>>`
-            INSERT INTO listers (user_id, name, ownership)
-                 VALUES (${userId}, ${input.name ?? null}, ${input.ownership})
+            INSERT INTO listers (user_id, name, ownership, contact)
+                 VALUES (${userId}, ${input.name ?? null}, ${input.ownership}, ${input.contact ?? null})
             ON CONFLICT (user_id) DO UPDATE SET
                     name = excluded.name,
-               ownership = excluded.ownership
+               ownership = excluded.ownership,
+                 contact = excluded.contact
              RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map((row) => Schema.decodeUnknownSync(ListerSchema)(row)),

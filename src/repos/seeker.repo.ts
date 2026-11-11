@@ -64,21 +64,23 @@ export const SeekerRepositoryLive = Layer.effect(
         ),
       upsertForUser: (userId, input) =>
         sql<Record<string, unknown>>`
-            INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets)
+            INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets, contact)
                  VALUES (${userId},
                          ${input.name},
                          ${input.bio ?? null},
                          ${input.dateOfBirth.getTime()},
                          ${input.gender},
                          ${input.smoking === true ? 1 : 0},
-                         ${input.pets === true ? 1 : 0})
+                         ${input.pets === true ? 1 : 0},
+                         ${input.contact ?? null})
             ON CONFLICT (user_id) DO UPDATE SET
                     name = excluded.name,
                      bio = excluded.bio,
            date_of_birth = excluded.date_of_birth,
                 gender = excluded.gender,
                smoking = excluded.smoking,
-                  pets = excluded.pets
+                  pets = excluded.pets,
+               contact = excluded.contact
              RETURNING *;`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row)),

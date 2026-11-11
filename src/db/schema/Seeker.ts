@@ -10,6 +10,8 @@ export const SeekerSchema = Schema.Struct({
   id: SeekerId,
   userId: UserId,
   name: Schema.NullishOr(Schema.String),
+  // The contact line this person chose to publish, or null when they have not.
+  contact: Schema.NullishOr(Schema.String),
   bio: Schema.NullishOr(Schema.String),
   dateOfBirth: Schema.NullishOr(Schema.DateFromMillis),
   gender: Schema.NullishOr(GenderEnum),

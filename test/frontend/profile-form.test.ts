@@ -128,6 +128,7 @@ describe("profile form values", () => {
         id: 1,
         userId: "u-1",
         name: "Ada Seeker",
+        contact: null,
         bio: null,
         dateOfBirth: Date.UTC(1995, 3, 12),
         gender: "female",
@@ -151,12 +152,14 @@ describe("profile form values", () => {
         id: 1,
         userId: "u-1",
         name: "Ada Lets",
+        contact: "ada@example.test",
         ownership: "leaseholder",
         createdAt: 0,
       }),
     );
 
     assert.strictEqual(values.name, "Ada Lets");
+    assert.strictEqual(values.contact, "ada@example.test");
     assert.strictEqual(values.ownership, "leaseholder");
   });
 
@@ -182,6 +185,10 @@ describe("profilePage", () => {
     assert.include(html, "Add your name, date of birth and gender");
     assert.include(html, 'action="/profile"');
     assert.include(html, "Switch to my listing profile");
+    assert.include(
+      html,
+      "Shown to a lister when you send them an enquiry. Your account email is shown instead when this is empty.",
+    );
     assert.notInclude(html, "Your profile was saved.");
   });
 

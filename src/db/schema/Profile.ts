@@ -31,6 +31,26 @@ const ProfileName = Schema.String.pipe(
 const ProfileBio = Schema.String.check(Schema.isMaxLength(2000));
 
 /*
+ * A contact line is free text - a phone number, an email address, a handle -
+ * because it is whatever the person chose to publish. It is trimmed before it
+ * is bounded, so a padded value is stored trimmed; an emptied box becomes null
+ * in the service, the same way an emptied bio does.
+ */
+const ProfileContact = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.String.check(Schema.isMaxLength(200)),
+    SchemaTransformation.transform({
+      decode: (value: string) => value.trim(),
+      encode: (value: string) => value,
+    }),
+  ),
+);
+
+// The contact line is optional on both profiles. What a blank one discloses to a
+// reader is the enquiry path's rule (`EnquiryService.send`), not a schema fact.
+const optionalContact = Schema.optional(Schema.NullishOr(ProfileContact));
+
+/*
  * A seeking profile is only meaningful once it names a person of a known age and
  * gender, so those three are required. The bio and the two habit flags are the
  * extras a person may leave out.
@@ -40,6 +60,7 @@ export const SeekerProfileInput = Schema.Struct({
   dateOfBirth: Schema.DateFromMillis,
   gender: GenderEnum,
   bio: Schema.optional(Schema.NullishOr(ProfileBio)),
+  contact: optionalContact,
   smoking: Schema.optional(Schema.BooleanFromBit),
   pets: Schema.optional(Schema.BooleanFromBit),
 });
@@ -50,6 +71,7 @@ export type SeekerProfileInput = typeof SeekerProfileInput.Type;
 export const ListerProfileInput = Schema.Struct({
   name: Schema.optional(Schema.NullishOr(ProfileName)),
   ownership: OwnershipEnum,
+  contact: optionalContact,
 });
 export type ListerProfileInput = typeof ListerProfileInput.Type;
 

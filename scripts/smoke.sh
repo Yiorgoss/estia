@@ -1869,4 +1869,210 @@ grep -q '"role":"admin"' <(curl -s "${BASE_URL}/api/users/me" \
   || fail "the refused switch demoted the admin"
 pass "an admin cannot be switched and stays admin"
 
+# 9. the contact path: a signed-in seeker reads the lister's published contact
+# details, sends an enquiry from the listing page, and both sides can read what
+# was recorded. Anonymous readers never see either side.
+CONTACT_STAMP="$(date +%s)"
+CONTACT_LISTER_EMAIL="smoke-contact-lister-${CONTACT_STAMP}@test.local"
+CONTACT_SEEKER_EMAIL="smoke-contact-seeker-${CONTACT_STAMP}@test.local"
+CONTACT_LISTER_CONTACT="smoke-lister-contact-${CONTACT_STAMP}@test.local"
+CONTACT_SEEKER_CONTACT="smoke-seeker-contact-${CONTACT_STAMP}@test.local"
+CONTACT_MESSAGE="smoke enquiry ${CONTACT_STAMP}"
+
+CODE=$(curl -s -D "$WORK/contact-lister.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${CONTACT_LISTER_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+assert_status "$CODE" 200 "contact path: register a lister"
+CONTACT_LISTER_ACCESS="$(cookie_value "$WORK/contact-lister.h" access_token)"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/users/change-role" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}")
+assert_status "$CODE" 200 "contact path: switch the lister account"
+CODE=$(curl -s -o "$WORK/contact-lister-profile" -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}" \
+  -d "{\"name\":\"Smoke Contact Lets\",\"ownership\":\"owner\",\"contact\":\"${CONTACT_LISTER_CONTACT}\"}")
+assert_status "$CODE" 200 "contact path: save the lister's contact details"
+grep -q "\"contact\":\"${CONTACT_LISTER_CONTACT}\"" "$WORK/contact-lister-profile" \
+  || fail "the lister's contact details were not stored"
+pass "a lister publishes contact details"
+
+CODE=$(curl -s -D "$WORK/contact-seeker.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${CONTACT_SEEKER_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+assert_status "$CODE" 200 "contact path: register a seeker"
+CONTACT_SEEKER_ACCESS="$(cookie_value "$WORK/contact-seeker.h" access_token)"
+CONTACT_SEEKER_REFRESH="$(cookie_value "$WORK/contact-seeker.h" refresh_token)"
+CONTACT_SEEKER_ID="$(user_id_from_token "$CONTACT_SEEKER_ACCESS")"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X PUT "${BASE_URL}/api/users/profile" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${CONTACT_SEEKER_ACCESS}" \
+  -d "{\"name\":\"Smoke Contact Seeker\",\"dateOfBirth\":788918400000,\"gender\":\"female\",\"contact\":\"${CONTACT_SEEKER_CONTACT}\"}")
+assert_status "$CODE" 200 "contact path: save the seeker's contact details"
+pass "a seeker publishes contact details"
+
+CONTACT_PRICE=$((900000 + CONTACT_STAMP % 100000))
+CODE=$(curl -s -o "$WORK/contact-listing" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}" \
+  -d "{\"kind\":\"room\",\"title\":\"Smoke contact room\",\"priceMinor\":${CONTACT_PRICE},\"regionCode\":\"attica\",\"sizeSqm\":20}")
+assert_status "$CODE" 200 "contact path: create the lister's listing"
+CONTACT_LISTING_ID=$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s).id)))' < "$WORK/contact-listing")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${CONTACT_LISTING_ID}/publish" \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}")
+assert_status "$CODE" 200 "contact path: publish the listing"
+
+# The detail page carries two signed-in-aware sections: the photo gallery main
+# added and the contact path this change adds. Attach a real photo through the
+# owner route so the combined page is exercised, not only each half.
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0xff,0xd8,0xff,0xe0,1,2,3,4]))' \
+  "$WORK/contact-photo.jpg"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CONTACT_LISTING_ID}/photos" \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}" \
+  -F "photos=@$WORK/contact-photo.jpg;type=image/jpeg")
+assert_status "$CODE" 303 "contact path: attach a gallery photo"
+CONTACT_PHOTO_ID=$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CONTACT_LISTING_ID} ORDER BY position ASC, id ASC LIMIT 1;")
+[ -n "$CONTACT_PHOTO_ID" ] || fail "the contact listing has no gallery photo"
+pass "a gallery photo is attached to the contact listing"
+
+CODE=$(curl -s -o "$WORK/contact-anon-page" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CONTACT_LISTING_ID}")
+assert_status "$CODE" 200 "contact path: anonymous listing page"
+grep -q 'Sign in to contact' "$WORK/contact-anon-page" \
+  || fail "an anonymous reader was not asked to sign in to contact the lister"
+grep -q "/listings/${CONTACT_LISTING_ID}/photos/${CONTACT_PHOTO_ID}" "$WORK/contact-anon-page" \
+  || fail "the anonymous detail page lost its photo gallery"
+if grep -q "${CONTACT_LISTER_CONTACT}" "$WORK/contact-anon-page"; then
+  fail "an anonymous listing page exposed the lister's contact details"
+fi
+if grep -q "action=\"/listings/${CONTACT_LISTING_ID}/enquiries\"" "$WORK/contact-anon-page"; then
+  fail "an anonymous listing page exposed the enquiry form"
+fi
+pass "an anonymous listing page hides contact details and the enquiry form"
+
+CODE=$(curl -s -o "$WORK/contact-search" -w '%{http_code}' \
+  "${BASE_URL}/api/listings?minPriceMinor=${CONTACT_PRICE}&maxPriceMinor=${CONTACT_PRICE}")
+assert_status "$CODE" 200 "contact path: the search feed"
+if grep -q "${CONTACT_LISTER_CONTACT}" "$WORK/contact-search"; then
+  fail "the search feed exposed a lister's contact details"
+fi
+if grep -q '"contact"' "$WORK/contact-search"; then
+  fail "the search feed carried a contact field"
+fi
+pass "contact details are absent from the search feed"
+
+CODE=$(curl -s -o "$WORK/contact-seeker-page" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CONTACT_LISTING_ID}" \
+  -H "Cookie: access_token=${CONTACT_SEEKER_ACCESS}")
+assert_status "$CODE" 200 "contact path: a signed-in listing page"
+grep -q "${CONTACT_LISTER_CONTACT}" "$WORK/contact-seeker-page" \
+  || fail "a signed-in seeker did not see the lister's contact details"
+grep -q "/listings/${CONTACT_LISTING_ID}/photos/${CONTACT_PHOTO_ID}" "$WORK/contact-seeker-page" \
+  || fail "the signed-in detail page lost its photo gallery"
+grep -q "action=\"/listings/${CONTACT_LISTING_ID}/enquiries\"" "$WORK/contact-seeker-page" \
+  || fail "a signed-in seeker did not get the enquiry form"
+pass "a signed-in seeker sees the contact details and the form"
+
+CODE=$(curl -s -D "$WORK/contact-send.h" -o "$WORK/contact-send" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CONTACT_LISTING_ID}/enquiries" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${CONTACT_SEEKER_ACCESS}" \
+  --data-urlencode "message=${CONTACT_MESSAGE}")
+assert_status "$CODE" 303 "contact path: submit the enquiry form"
+CONTACT_SENT_LOCATION="$(header_value "$WORK/contact-send.h" location)"
+[ "$CONTACT_SENT_LOCATION" = "/enquiries?sent=1" ] \
+  || fail "the enquiry form did not land on the enquiries page (got ${CONTACT_SENT_LOCATION:-no Location header})"
+pass "the enquiry form redirects to the enquiries page"
+
+CODE=$(curl -s -o "$WORK/contact-received" -w '%{http_code}' \
+  "${BASE_URL}/api/enquiries/received" \
+  -H "Cookie: access_token=${CONTACT_LISTER_ACCESS}")
+assert_status "$CODE" 200 "contact path: the lister's received enquiries"
+grep -q "${CONTACT_MESSAGE}" "$WORK/contact-received" \
+  || fail "the lister did not see the enquiry"
+grep -q 'Smoke Contact Seeker' "$WORK/contact-received" \
+  || fail "the lister did not see who sent the enquiry"
+grep -q "${CONTACT_SEEKER_CONTACT}" "$WORK/contact-received" \
+  || fail "the lister did not see the seeker's published contact details"
+pass "a lister reads the enquiry with the sender's identity"
+
+CODE=$(curl -s -o "$WORK/contact-sent" -w '%{http_code}' \
+  "${BASE_URL}/api/enquiries/sent" \
+  -H "Cookie: access_token=${CONTACT_SEEKER_ACCESS}")
+assert_status "$CODE" 200 "contact path: the seeker's sent enquiries"
+grep -q "${CONTACT_MESSAGE}" "$WORK/contact-sent" \
+  || fail "the seeker could not read what they sent"
+pass "a seeker reads what they sent"
+
+# A returning browser whose access cookie has expired still holds its refresh
+# cookie. The shared optional-caller seam must rotate that pair on the private
+# enquiries page instead of answering the sign-in dead end, and the fresh pair
+# must be delivered on the response.
+CONTACT_JWT_SECRET="$(sed -nE 's/^JWT_SECRET=//p' .dev.vars | head -1)"
+CONTACT_DOMAIN="$(sed -nE 's/^DOMAIN=//p' .dev.vars | head -1)"
+[ -n "$CONTACT_JWT_SECRET" ] && [ -n "$CONTACT_DOMAIN" ] \
+  || fail "the local .dev.vars has no JWT_SECRET/DOMAIN for the session-rotation check"
+CONTACT_EXPIRED_ACCESS=$(node -e '
+  const { SignJWT } = require("jose");
+  const [secret, domain, id] = process.argv.slice(1);
+  (async () => {
+    const now = Math.floor(Date.now() / 1000);
+    process.stdout.write(
+      await new SignJWT({ id, role: "seeker" })
+        .setSubject(id)
+        .setProtectedHeader({ alg: "HS256" })
+        .setIssuedAt(now - 7200)
+        .setIssuer(domain + "/login")
+        .setAudience(domain)
+        .setExpirationTime(now - 3600)
+        .sign(new TextEncoder().encode(secret)),
+    );
+  })();
+' "$CONTACT_JWT_SECRET" "$CONTACT_DOMAIN" "$CONTACT_SEEKER_ID")
+CODE=$(curl -s -D "$WORK/contact-rotated.h" -o "$WORK/contact-rotated" -w '%{http_code}' \
+  "${BASE_URL}/enquiries" \
+  -H "Cookie: access_token=${CONTACT_EXPIRED_ACCESS}; refresh_token=${CONTACT_SEEKER_REFRESH}")
+assert_status "$CODE" 200 "contact path: an expired access token is rotated on the enquiries page"
+grep -q 'Enquiries your listings received' "$WORK/contact-rotated" \
+  || fail "the rotated session did not land on the enquiries page"
+CONTACT_ROTATED_ACCESS="$(cookie_value "$WORK/contact-rotated.h" access_token)"
+CONTACT_ROTATED_REFRESH="$(cookie_value "$WORK/contact-rotated.h" refresh_token)"
+[ -n "$CONTACT_ROTATED_ACCESS" ] && [ -n "$CONTACT_ROTATED_REFRESH" ] \
+  || fail "the rotated session pair was not delivered on the page response"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/refresh" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: refresh_token=${CONTACT_SEEKER_REFRESH}")
+assert_status "$CODE" 401 "contact path: the consumed refresh token is rejected"
+pass "an expired-access browser is rotated back into the enquiries page"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/listings/${CONTACT_LISTING_ID}/enquiries" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"anonymous"}')
+assert_status "$CODE" 401 "contact path: anonymous send refused"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/enquiries/received")
+assert_status "$CODE" 401 "contact path: anonymous received list refused"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/enquiries/sent")
+assert_status "$CODE" 401 "contact path: anonymous sent list refused"
+pass "anonymous requests cannot reach enquiries"
+
+CODE=$(curl -s -o "$WORK/contact-other" -w '%{http_code}' \
+  "${BASE_URL}/api/enquiries/received" \
+  -H "Cookie: access_token=${CONTACT_SEEKER_ACCESS}")
+assert_status "$CODE" 200 "contact path: another account's received list"
+if grep -q "${CONTACT_MESSAGE}" "$WORK/contact-other"; then
+  fail "an enquiry was readable from an account that is neither its sender nor its listing's owner"
+fi
+pass "enquiries are not readable across accounts"
+
 echo "smoke checklist passed"

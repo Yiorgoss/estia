@@ -78,3 +78,19 @@ export const formatDate = (date: Date | null | undefined) =>
         year: "numeric",
         timeZone: "UTC",
       });
+
+// An enquiry is read with a time attached, not just a day: two messages on the
+// same afternoon are told apart. UTC keeps the server-rendered page stable
+// wherever it is read.
+export const formatDateTime = (date: Date | null | undefined) =>
+  date == null
+    ? null
+    : date.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+        timeZoneName: "short",
+      });

@@ -37,6 +37,13 @@ export const header = `
         </a>
 
         <a
+          href="/enquiries"
+          class="text-sm font-medium text-gray-700 hover:text-blue-600"
+        >
+          Enquiries
+        </a>
+
+        <a
           href="/profile"
           class="text-sm font-medium text-gray-700 hover:text-blue-600"
         >

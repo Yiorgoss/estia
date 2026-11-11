@@ -1,6 +1,7 @@
 import { ListingId, UserId } from "@/db/schema/brands";
 import { BooleanFromString, NonBlankFiniteFromString } from "@/db/schema/codecs";
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { encodeKeysetCursor, KeysetCursor, KeysetCursorFromString } from "@/db/schema/cursor";
+import { Effect, Schema, SchemaTransformation } from "effect";
 
 /*
  * One listing table covers all three kinds of ad, so every schema here is
@@ -163,16 +164,11 @@ export const ListingSearchFilters = Schema.Struct({
 });
 export type ListingSearchFilters = typeof ListingSearchFilters.Type;
 
-/*
- * Keyset cursor: the `(created_at, id)` of the last row a caller received. It is
- * encoded at the HTTP boundary; the service and repository take the struct so
- * neither has to know the wire encoding.
- */
-export const ListingCursor = Schema.Struct({
-  createdAt: Schema.Number,
-  id: ListingId,
-});
+export const ListingCursor = KeysetCursor;
 export type ListingCursor = typeof ListingCursor.Type;
+
+export const encodeListingCursor = encodeKeysetCursor;
+export const ListingCursorFromString = KeysetCursorFromString;
 
 export const LISTING_PAGE_DEFAULT_LIMIT = 20;
 export const LISTING_PAGE_MAX_LIMIT = 50;
@@ -196,67 +192,6 @@ export const ListingPage = Schema.Struct({
   nextCursor: Schema.NullishOr(ListingCursor),
 });
 export type ListingPage = typeof ListingPage.Type;
-
-/*
- * The cursor travels as `base64url("<createdAt>:<id>")`, so the sort key is not
- * a JSON field and there is no offset parameter to page with. It is
- * tamper-tolerant, not tamper-proof: a forged cursor is accepted, which is
- * harmless because it only moves the keyset window - each feed still decides
- * which rows exist for it, the published-only rule and the filters on public
- * search, the owner scope on the owner's own feed.
- */
-const CURSOR_PATTERN = /^(\d+):(\d+)$/;
-const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-export const encodeListingCursor = (cursor: typeof ListingCursor.Encoded): string =>
-  btoa(`${cursor.createdAt}:${cursor.id}`)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-const decodeListingCursor = (value: string): typeof ListingCursor.Encoded | undefined => {
-  // Only the base64url alphabet is accepted, so standard base64 (`+`, `/`, `=`)
-  // is a malformed cursor instead of being silently normalised.
-  if (!BASE64URL_PATTERN.test(value) || value.length % 4 === 1) return undefined;
-
-  let decoded: string;
-  try {
-    const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-    decoded = atob(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "="));
-  } catch {
-    return undefined;
-  }
-
-  const match = CURSOR_PATTERN.exec(decoded);
-  if (match === null) return undefined;
-  const createdAt = Number(match[1]);
-  const id = Number(match[2]);
-  if (!Number.isSafeInteger(createdAt) || !Number.isSafeInteger(id)) return undefined;
-
-  // The `ListingId` brand is applied by the target schema's own decoding; the
-  // transformation only produces the cursor's encoded shape.
-  return { createdAt, id };
-};
-
-// The string form of a cursor. Decoding a malformed cursor fails the request
-// instead of dropping the filter and silently starting from the first page.
-export const ListingCursorFromString: Schema.Codec<typeof ListingCursor.Type, string> =
-  Schema.String.pipe(
-    Schema.decodeTo(
-      ListingCursor,
-      SchemaTransformation.transformEffect({
-        decode: (value, options) => {
-          const cursor = decodeListingCursor(value);
-          return cursor === undefined
-            ? Effect.fail(
-                new SchemaIssue.InvalidValue({ message: "Invalid cursor" }, value, options),
-              )
-            : Effect.succeed(cursor);
-        },
-        encode: (cursor) => Effect.succeed(encodeListingCursor(cursor)),
-      }),
-    ),
-  );
 
 /*
  * Query parameters arrive as strings, so every field of the search query needs

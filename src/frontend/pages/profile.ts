@@ -136,6 +136,20 @@ const checkbox = (name: string, label: string, checked: boolean) => `
 // only: the service refuses a future date whatever the input allows.
 const todayValue = (): string => new Date().toISOString().slice(0, 10);
 
+// The one contact field both profiles carry: free text, because it is whatever
+// the person chose to publish. Neither form requires it; each hint says what a
+// blank one discloses.
+const contactField = (value: string, hint: string) => `
+  <div class="mt-4">
+    <label for="contact" class="${labelClass}">Contact details</label>
+    ${textInput("contact", {
+      value,
+      placeholder: "Email, phone, or however you want to be reached",
+      autocomplete: "off",
+    })}
+    <p class="${hintClass}">${hint}</p>
+  </div>`;
+
 const seekerFields = (values: ProfileFormValues) => `
   <div>
     <label for="name" class="${labelClass}">Name</label>
@@ -167,6 +181,8 @@ const seekerFields = (values: ProfileFormValues) => `
     <p class="${hintClass}">Optional. Shown to people whose listings you answer.</p>
   </div>
 
+  ${contactField(values.contact, "Shown to a lister when you send them an enquiry. Your account email is shown instead when this is empty.")}
+
   <fieldset class="mt-4">
     <legend class="${labelClass}">Habits</legend>
     <div class="grid gap-2 sm:grid-cols-2">
@@ -191,7 +207,9 @@ const listerFields = (values: ProfileFormValues) => `
     <p class="${hintClass}">
       An owner holds the property. A leaseholder rents it and is subletting.
     </p>
-  </div>`;
+  </div>
+
+  ${contactField(values.contact, "Optional. Shown to signed-in people viewing your listings.")}`;
 
 const switchControl = (role: EditableProfileRole) => {
   const label = role === "seeker" ? "Switch to my listing profile" : "Switch to my seeking profile";

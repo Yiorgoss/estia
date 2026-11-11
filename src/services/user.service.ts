@@ -146,6 +146,11 @@ const bioOf = (bio: string | null | undefined): string | null => {
   return trimmed === "" ? null : trimmed;
 };
 
+// The contact line is stored the same way: a box the person emptied is null in
+// the database, not "". What a blank line discloses to a reader is the enquiry
+// path's rule (`EnquiryService.send`), not a storage decision.
+const contactOf = (contact: string | null | undefined): string | null => bioOf(contact);
+
 // A birth date in the future is not a birth date. This is the one rule the
 // boundary cannot state, because it depends on the moment of the save.
 const beforeToday = (dateOfBirth: Date): Effect.Effect<Date, ProfileValidationError> =>
@@ -207,12 +212,16 @@ export const UserServiceLive = Layer.effect(
 
           const profile =
             "ownership" in input
-              ? yield* listerRepo.upsertForUser(user.id, input)
+              ? yield* listerRepo.upsertForUser(user.id, {
+                  ...input,
+                  contact: contactOf(input.contact),
+                })
               : yield* Effect.gen(function* () {
                   yield* beforeToday(input.dateOfBirth);
                   return yield* seekerRepo.upsertForUser(user.id, {
                     ...input,
                     bio: bioOf(input.bio),
+                    contact: contactOf(input.contact),
                   });
                 });
 

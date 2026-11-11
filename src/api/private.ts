@@ -32,6 +32,20 @@ import { ListingPageRoutes } from "@/handlers/private/listing-pages";
 import { ListingPhotoPageRoutes } from "@/handlers/private/listing-photo-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
 import { SavedSearchRoutes } from "@/handlers/private/saved-search-routes";
+import { EnquiryPageRoutes } from "@/handlers/private/enquiry-pages";
+import {
+  EnquiryPageQuery,
+  EnquirySchema,
+  ReceivedEnquiryPage,
+  SendEnquiryInput,
+  SentEnquiryPage,
+} from "@/db/schema/Enquiry";
+import {
+  EnquiryListingNotFoundError,
+  EnquiryOwnListingError,
+  EnquiryRateLimitedError,
+  EnquiryValidationError,
+} from "@/services/enquiry.service";
 
 /*
  * The caller's own profile. The role is the account's stored role, which is what
@@ -176,10 +190,49 @@ export const ListingGroup = HttpApiGroup.make("listing-group")
   )
   .prefix("/listings");
 
+/*
+ * The contact path. A send names the listing in the path and carries only the
+ * message; the sender is the session. Both lists are scoped by the caller's
+ * account, so there is deliberately no endpoint that reads an enquiry by id -
+ * that would be a cross-account read waiting to be written. A listing that is
+ * not published answers the same 404 the public read does.
+ */
+export const EnquiryGroup = HttpApiGroup.make("enquiry-group")
+  .add(
+    HttpApiEndpoint.post("send", "/listings/:id/enquiries", {
+      params: { id: ListingId },
+      payload: SendEnquiryInput,
+      success: EnquirySchema,
+      error: [
+        EnquiryListingNotFoundError,
+        EnquiryOwnListingError,
+        EnquiryValidationError,
+        EnquiryRateLimitedError,
+        UnauthorizedError,
+        InternalError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("sent", "/enquiries/sent", {
+      query: EnquiryPageQuery,
+      success: SentEnquiryPage,
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("received", "/enquiries/received", {
+      query: EnquiryPageQuery,
+      success: ReceivedEnquiryPage,
+      error: [UnauthorizedError, InternalError],
+    }),
+  );
+
 // The api prefix only applies to the groups added before it.
 export const PrivateApi = HttpApi.make("private-api")
   .add(UserGroup)
   .add(ListingGroup)
+  .add(EnquiryGroup)
   .prefix("/api");
 
 export const PrivateRoutes = HttpRouter.addAll([
@@ -199,4 +252,5 @@ export const PrivateRoutes = HttpRouter.addAll([
   ...ListingPhotoPageRoutes,
   ...ProfilePageRoutes,
   ...SavedSearchRoutes,
+  ...EnquiryPageRoutes,
 ]);

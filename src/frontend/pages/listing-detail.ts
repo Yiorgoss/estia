@@ -21,6 +21,27 @@ const secondaryButtonClass =
   "inline-block rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50";
 const chipClass = "rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700";
 const sectionHeadingClass = "text-sm font-semibold text-gray-900";
+const contactButtonClass =
+  "inline-block rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2";
+
+/*
+ * The contact path is a signed-in surface inside an otherwise public page. The
+ * page is told who is reading it; when nobody is, it renders the sign-in prompt
+ * and never the lister's contact line. When the reader owns the listing it
+ * offers the enquiries instead of a form, because there is nobody to reach.
+ */
+export interface ListingContactState {
+  readonly signedIn: boolean;
+  readonly isOwner?: boolean | undefined;
+  readonly listerName?: string | null | undefined;
+  readonly listerContact?: string | null | undefined;
+  // A rejected enquiry comes back to this page with what was typed and why it
+  // could not be sent.
+  readonly enquiryMessage?: string | undefined;
+  readonly enquiryError?: string | undefined;
+}
+
+const defaultContactState: ListingContactState = { signedIn: false };
 
 interface PageMetadata {
   readonly title: string;
@@ -85,6 +106,78 @@ const flagChips = (flags: ReadonlyArray<string>) =>
         ${flags.map((flag) => `<li class="${chipClass}">${flag}</li>`).join("")}
       </ul>`;
 
+// The contact details a lister chose to publish, or an honest note that they
+// published none. Either way the enquiry form stays, because the enquiry itself
+// is the way to reach them.
+const listerContactLines = (state: ListingContactState): string => {
+  const name =
+    state.listerName == null || state.listerName.trim() === ""
+      ? ""
+      : `<p class="text-sm text-gray-600">Listed by <span class="font-medium text-gray-900">${escapeHtml(state.listerName)}</span>.</p>`;
+  const contact =
+    state.listerContact == null || state.listerContact.trim() === ""
+      ? `<p class="mt-1 text-sm text-gray-600">This lister has not published contact details. Send an enquiry and they will see how to reach you.</p>`
+      : `<p class="mt-1 text-sm text-gray-600">Contact: <span class="font-medium text-gray-900">${escapeHtml(state.listerContact)}</span></p>`;
+  return `${name}${contact}`;
+};
+
+const enquiryError = (message: string | undefined) =>
+  message === undefined
+    ? ""
+    : `<p class="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">${escapeHtml(message)}</p>`;
+
+const contactSection = (listing: PublicListing, state: ListingContactState) => {
+  if (!state.signedIn) {
+    return `<section class="mt-6 border-t border-gray-100 pt-5">
+      <h2 class="${sectionHeadingClass}">Contact the lister</h2>
+      <p class="mt-2 text-sm text-gray-600">
+        Sign in to see this lister's contact details and send them an enquiry.
+      </p>
+      <p class="mt-4">
+        <a href="/login" class="${contactButtonClass}">Sign in to contact</a>
+      </p>
+    </section>`;
+  }
+
+  if (state.isOwner === true) {
+    return `<section class="mt-6 border-t border-gray-100 pt-5">
+      <h2 class="${sectionHeadingClass}">Contact the lister</h2>
+      <p class="mt-2 text-sm text-gray-600">
+        This is your listing. Everyone who sends an enquiry appears under Enquiries.
+      </p>
+      ${enquiryError(state.enquiryError)}
+      <p class="mt-4">
+        <a href="/enquiries" class="${contactButtonClass}">See enquiries</a>
+      </p>
+    </section>`;
+  }
+
+  return `<section class="mt-6 border-t border-gray-100 pt-5">
+      <h2 class="${sectionHeadingClass}">Contact the lister</h2>
+      <div class="mt-2">${listerContactLines(state)}</div>
+
+      <form method="post" action="/listings/${listing.id}/enquiries" class="mt-4">
+        <label for="message" class="mb-1 block text-sm font-medium text-gray-700">Your message</label>
+        <textarea
+          id="message"
+          name="message"
+          rows="4"
+          required
+          maxlength="2000"
+          placeholder="Say who you are and what you would like to know."
+          class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >${escapeHtml(state.enquiryMessage ?? "")}</textarea>
+        <p class="mt-1 text-xs text-gray-500">
+          Up to 2000 characters. The lister sees the display name and contact details from your profile, or your account email when those are not published.
+        </p>
+        ${enquiryError(state.enquiryError)}
+        <p class="mt-4">
+          <button type="submit" class="${contactButtonClass}">Send enquiry</button>
+        </p>
+      </form>
+    </section>`;
+};
+
 // A listing with no photos simply has no gallery section: the page still
 // renders every fact it has, and the search card falls back to its placeholder.
 const gallery = (listing: PublicListing): string => {
@@ -122,7 +215,10 @@ const gallery = (listing: PublicListing): string => {
       </section>`;
 };
 
-export const listingDetailPage = (listing: PublicListing) => {
+export const listingDetailPage = (
+  listing: PublicListing,
+  contact: ListingContactState = defaultContactState,
+) => {
   const region = regionLabels[listing.regionCode];
   const kind = kindLabels[listing.kind];
   const available = formatDate(listing.availableFrom);
@@ -189,6 +285,8 @@ export const listingDetailPage = (listing: PublicListing) => {
             ${detailRow("Published", published ?? "Not stated")}
           </dl>
         </section>
+
+        ${contactSection(listing, contact)}
       </div>
     </article>
     `,

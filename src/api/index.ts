@@ -18,11 +18,14 @@ import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { ListingRepositoryLive } from "@/repos/listing.repo";
 import { SavedSearchRepositoryLive } from "@/repos/saved-search.repo";
 import { ListingPhotoRepositoryLive } from "@/repos/listing-photo.repo";
+import { EnquiryRepositoryLive } from "@/repos/enquiry.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { ListingHandler as PrivateListingHandler } from "@/handlers/private/listing.handler";
+import { EnquiryHandler } from "@/handlers/private/enquiry.handler";
 import { ListingServiceLive } from "@/services/listing.service";
 import { SavedSearchServiceLive } from "@/services/saved-search.service";
 import { ListingPhotoServiceLive } from "@/services/listing-photo.service";
+import { EnquiryServiceLive } from "@/services/enquiry.service";
 import { ListingHandler as PublicListingHandler } from "@/handlers/public/listing.handler";
 
 // --- Repositories ---
@@ -34,6 +37,7 @@ export const RepositoriesLive = Layer.mergeAll(
   ListingRepositoryLive,
   SavedSearchRepositoryLive,
   ListingPhotoRepositoryLive,
+  EnquiryRepositoryLive,
 );
 
 // --- Low-level / infra services ---
@@ -46,6 +50,7 @@ export const DomainServicesLive = Layer.mergeAll(
   ListingServiceLive,
   SavedSearchServiceLive,
   ListingPhotoServiceLive.pipe(Layer.provide(ListingServiceLive)),
+  EnquiryServiceLive,
 );
 
 // --- Final app layer ---
@@ -89,7 +94,7 @@ export const PublicRouterLive = Layer.mergeAll(
  */
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
-  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler)),
+  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler, EnquiryHandler)),
   Layer.provide(SameOriginWriteMiddleware),
 );
 
