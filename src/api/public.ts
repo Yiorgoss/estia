@@ -14,7 +14,7 @@ import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
 import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
-import { optionalCallerId } from "@/handlers/optional-caller";
+import { optionalCaller } from "@/handlers/optional-caller";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
 import {
@@ -211,44 +211,49 @@ const searchResultsRoute = HttpRouter.route(
   "/search/results",
   (request) =>
     Effect.gen(function* () {
-      const searchParams = yield* HttpServerRequest.ParsedSearchParams;
-      const listingService = yield* ListingService;
-      const caller = yield* optionalCallerId(request);
+      const session = yield* optionalCaller(request);
 
-      // The form collects euros; the listings API filters on minor units, so the
-      // helper converts and rounds before decoding.
-      const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
-        withMinorUnitPrices(omitBlankSearchText(searchParams)),
-      );
-      const { limit, cursor, ...filters } = query;
-      const page = yield* listingService.search(filters, { limit, cursor });
+      const response = yield* Effect.gen(function* () {
+        const searchParams = yield* HttpServerRequest.ParsedSearchParams;
+        const listingService = yield* ListingService;
 
-      // Only a signed-in visitor can save a search, so only they see the save
-      // control; the results themselves are identical for everyone.
-      return HttpServerResponse.html(
-        searchResults(page, { canSave: Option.isSome(caller) }),
+        // The form collects euros; the listings API filters on minor units, so the
+        // helper converts and rounds before decoding.
+        const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
+          withMinorUnitPrices(omitBlankSearchText(searchParams)),
+        );
+        const { limit, cursor, ...filters } = query;
+        const page = yield* listingService.search(filters, { limit, cursor });
+
+        // Only a signed-in visitor can save a search, so only they see the save
+        // control; the results themselves are identical for everyone.
+        return HttpServerResponse.html(
+          searchResults(page, { canSave: Option.isSome(session.caller) }),
+        );
+      }).pipe(
+        Effect.catchTags({
+          // htmx only swaps 2xx responses by default, so a bad filter has to come
+          // back as 200 with the error fragment; a 4xx here would leave the page
+          // showing the previous results with no explanation. The JSON endpoint
+          // still rejects bad filters with the runtime's 400.
+          SchemaError: () =>
+            Effect.succeed(
+              HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
+                contentType: "text/html",
+              }),
+            ),
+          InternalError: () =>
+            Effect.succeed(
+              HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
+                status: 500,
+                contentType: "text/html",
+              }),
+            ),
+        }),
       );
-    }).pipe(
-      Effect.catchTags({
-        // htmx only swaps 2xx responses by default, so a bad filter has to come
-        // back as 200 with the error fragment; a 4xx here would leave the page
-        // showing the previous results with no explanation. The JSON endpoint
-        // still rejects bad filters with the runtime's 400.
-        SchemaError: () =>
-          Effect.succeed(
-            HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
-              contentType: "text/html",
-            }),
-          ),
-        InternalError: () =>
-          Effect.succeed(
-            HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
-              status: 500,
-              contentType: "text/html",
-            }),
-          ),
-      }),
-    ),
+
+      return HttpServerResponse.setCookiesUnsafe(response, session.cookies);
+    }),
 );
 
 /*
@@ -260,15 +265,18 @@ const searchResultsRoute = HttpRouter.route(
  */
 const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
   Effect.gen(function* () {
-    const caller = yield* optionalCallerId(request);
-    if (Option.isNone(caller)) {
-      return HttpServerResponse.html(searchPage());
+    const session = yield* optionalCaller(request);
+    if (Option.isNone(session.caller)) {
+      return HttpServerResponse.setCookiesUnsafe(
+        HttpServerResponse.html(searchPage()),
+        session.cookies,
+      );
     }
 
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const savedSearchService = yield* SavedSearchService;
 
-    const listed = yield* Effect.result(savedSearchService.list(caller.value));
+    const listed = yield* Effect.result(savedSearchService.list(session.caller.value));
     if (Result.isFailure(listed)) {
       yield* Effect.logError("Saved searches could not be read", { error: listed.failure });
     }
@@ -279,25 +287,28 @@ const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
     const applied =
       savedId === undefined
         ? Option.none()
-        : yield* savedSearchService.findOwned(caller.value, savedId).pipe(
+        : yield* savedSearchService.findOwned(session.caller.value, savedId).pipe(
             Effect.orElseSucceed(() => Option.none()),
           );
     const appliedSearch = Option.getOrNull(applied);
 
-    return HttpServerResponse.html(
-      searchPage({
-        savedSearches,
-        ...(Result.isFailure(listed)
-          ? { savedError: "Your saved searches could not be loaded just now." }
-          : {}),
-        ...(appliedSearch === null
-          ? {}
-          : {
-              values: searchFormValuesFromSavedSearch(appliedSearch),
-              resultsUrl: savedSearchResultsHref(appliedSearch),
-              appliedSavedSearchId: appliedSearch.id,
-            }),
-      }),
+    return HttpServerResponse.setCookiesUnsafe(
+      HttpServerResponse.html(
+        searchPage({
+          savedSearches,
+          ...(Result.isFailure(listed)
+            ? { savedError: "Your saved searches could not be loaded just now." }
+            : {}),
+          ...(appliedSearch === null
+            ? {}
+            : {
+                values: searchFormValuesFromSavedSearch(appliedSearch),
+                resultsUrl: savedSearchResultsHref(appliedSearch),
+                appliedSavedSearchId: appliedSearch.id,
+              }),
+        }),
+      ),
+      session.cookies,
     );
   }),
 );

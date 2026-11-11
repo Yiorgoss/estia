@@ -7,15 +7,23 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Array, Effect, pipe, Schema } from "effect";
 import { isNotNull } from "effect/Predicate";
 
+const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
+  request.headers["hx-request"] === "true";
+
 /*
  * A request under `/api` is the JSON API, whose contract for a missing session
  * is a 401. Every other private route is a page, and a page answers a signed-out
- * visitor with a prompt carrying a sign-in link, never a bare error string.
+ * visitor with a prompt carrying a sign-in link, never a bare error string. An
+ * htmx request is answered with a real navigation instead, because htmx swaps
+ * only 2xx responses and would otherwise discard the sign-in page and leave the
+ * page looking as if nothing happened.
  */
 const unauthenticatedResponse = (request: HttpServerRequest.HttpServerRequest) =>
-  new URL(request.originalUrl).pathname.startsWith("/api/")
-    ? HttpServerResponse.text("UnauthorizedError", { status: 401 })
-    : HttpServerResponse.text(signInRequiredPage, { status: 401, contentType: "text/html" });
+  isHtmx(request)
+    ? HttpServerResponse.empty({ status: 200, headers: { "HX-Redirect": "/login" } })
+    : new URL(request.originalUrl).pathname.startsWith("/api/")
+      ? HttpServerResponse.text("UnauthorizedError", { status: 401 })
+      : HttpServerResponse.text(signInRequiredPage, { status: 401, contentType: "text/html" });
 
 export const AuthMiddleware = HttpRouter.middleware(
   Effect.gen(function* () {

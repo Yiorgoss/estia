@@ -444,3 +444,93 @@ describe("reopening a saved search from the list", () => {
     }),
   );
 });
+
+describe("an htmx save with no session", () => {
+  it.effect("is sent to the sign-in page instead of silently doing nothing", () =>
+    Effect.gen(function* () {
+      const response = yield* call(
+        "/search/saved",
+        form(
+          { method: "POST", headers: { "user-agent": "estia-tests", "hx-request": "true" } },
+          { pets: "false" },
+        ),
+      );
+      assert.strictEqual(response.status, 200, response.body);
+      assert.strictEqual(response.headers.get("HX-Redirect"), "/login");
+      assert.strictEqual(response.body, "");
+    }),
+  );
+
+  it.effect("keeps the sign-in page for a save that navigates", () =>
+    Effect.gen(function* () {
+      const response = yield* call(
+        "/search/saved",
+        form({ method: "POST", headers: { "user-agent": "estia-tests" } }, { pets: "false" }),
+      );
+      assert.strictEqual(response.status, 401, response.body);
+      assert.include(response.body, "Sign in required");
+    }),
+  );
+});
+
+describe("a stale access token on the public search routes", () => {
+  it.effect("still identifies the caller, rotates the session, and keeps the saved-search UI", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("search-page-rotation");
+      const created = yield* send("POST", "/api/saved-searches", {
+        cookie: `access_token=${session.access}`,
+        payload: { name: "Returned later", pets: false },
+      });
+      assert.strictEqual(created.status, 200, created.body);
+
+      const page = yield* call("/search", {
+        headers: {
+          "user-agent": "estia-tests",
+          cookie: `access_token=an.expired.token; refresh_token=${session.refresh}`,
+        },
+      });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.include(page.body, "Returned later");
+
+      const access = page.cookies["access_token"];
+      const refresh = page.cookies["refresh_token"];
+      assert.isDefined(access);
+      assert.isDefined(refresh);
+      assert.notStrictEqual(access, "an.expired.token");
+      assert.notStrictEqual(refresh, session.refresh);
+
+      const listed = yield* send("GET", "/api/saved-searches", {
+        cookie: `access_token=${access}`,
+      });
+      assert.strictEqual(listed.status, 200, listed.body);
+      const names = (
+        asObject(listed.json)["items"] as ReadonlyArray<Record<string, unknown>>
+      ).map((item) => item["name"]);
+      assert.include(names, "Returned later");
+
+      const results = yield* call("/search/results", {
+        headers: {
+          "user-agent": "estia-tests",
+          cookie: `access_token=an.expired.token; refresh_token=${refresh}`,
+        },
+      });
+      assert.strictEqual(results.status, 200, results.body);
+      assert.include(results.body, 'hx-post="/search/saved"');
+      assert.notStrictEqual(results.cookies["refresh_token"], refresh);
+    }),
+  );
+
+  it.effect("leaves a genuinely signed-out visitor on the public page", () =>
+    Effect.gen(function* () {
+      const page = yield* call("/search");
+      assert.strictEqual(page.status, 200, page.body);
+      assert.notInclude(page.body, 'id="saved-searches"');
+      assert.isUndefined(page.cookies["access_token"]);
+
+      const results = yield* call("/search/results");
+      assert.strictEqual(results.status, 200, results.body);
+      assert.notInclude(results.body, 'hx-post="/search/saved"');
+    }),
+  );
+});
