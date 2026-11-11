@@ -1,4 +1,4 @@
-import { RefreshTokenValue } from "@/db/schema/brands";
+import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
 import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
@@ -7,12 +7,13 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Option, Result, Schema } from "effect";
 
 /*
- * The end of a session, and a deliberate renewal of one. Both routes are public:
- * they are authenticated by the cookies the caller presents, never by an
+ * The ends of a session, and a deliberate renewal of one. These routes are
+ * public: they are authenticated by the cookies the caller presents, never by an
  * authorization header, so a person whose access cookie has already expired can
- * still sign out or refresh. Neither route is behind `AuthMiddleware`, because
+ * still sign out or refresh. None of them is behind `AuthMiddleware`, because
  * that middleware answers a missing session with a 401 instead of doing what
- * these two exist to do.
+ * these routes exist to do - and because its post-response rotation would hand a
+ * signed-out-everywhere caller a fresh refresh token.
  *
  * The token format, the cookie names, and the lifetimes are the ones the app
  * already issues; nothing here mints a new kind of session.
@@ -52,10 +53,10 @@ const unauthorized = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text("UnauthorizedError", { status: 401 });
 
 /*
- * Signing out keys on the refresh token, never on the access token: the access
- * cookie is short-lived and may already have expired by the time the person
- * clicks log out, while the refresh token is the month-long credential that
- * actually has to die.
+ * This route ends the one session, so it keys on the refresh token and never on
+ * the access token: the access cookie is short-lived and may already have
+ * expired by the time the person clicks log out, while the refresh token is
+ * the month-long credential that actually has to die.
  *
  * Clearing the cookies is the promise this route makes, so it happens even when
  * the row cannot be revoked; a database failure is logged, and the person still
@@ -143,4 +144,90 @@ const refresh = HttpRouter.route("POST", "/api/auth/refresh", (request) =>
   }),
 );
 
-export const SessionRoutes = [logout, refresh];
+/*
+ * Signing out of every device, kept deliberately separate from the log-out above
+ * and reachable only from its own control: it ends every session the account
+ * has - the ones on other devices and the leftovers of earlier sign-ins - not
+ * just the session performing it.
+ *
+ * The account is the one the presented cookies prove. The refresh token is
+ * asked first because it is the month-long credential that identifies the
+ * session, with the access token as the fallback for a browser that has lost
+ * its refresh cookie while its access cookie is still live. A caller with no
+ * session at all names no account; there is nothing to end and the answer is the
+ * signed-out one.
+ *
+ * Clearing the cookies is part of the promise this route makes, and this device
+ * is signed out either way. Ending the sessions on the other devices is the rest
+ * of it, so a failure to revoke them is answered as a 500 - with this device's
+ * cookies still cleared - rather than as the signed-out page, which would leave
+ * month-long refresh tokens alive while claiming they had ended.
+ *
+ * That failure copy must not simply invite a retry. The response has already
+ * cleared the cookies that identified the account, so a retry would name no
+ * account, be answered as the signed-out page, and end nothing on the other
+ * devices. It says the sign-out did not complete, that the other devices may
+ * still be signed in, and to sign in again before repeating the action.
+ *
+ * What this cannot reach is the access tokens already handed out: there is no
+ * revocation list for them, so a session that is open right now may keep reading
+ * private pages until its access token expires, within an hour. The profile
+ * page says so next to the control rather than promising more than this does.
+ */
+const logoutEverywhere = HttpRouter.route("POST", "/api/auth/logout-all", (request) =>
+  Effect.gen(function* () {
+    if (!isSameOriginWrite(request)) {
+      return HttpServerResponse.text(crossSiteFormMessage, { status: 403 });
+    }
+
+    const auth = yield* AuthService;
+    const jwtService = yield* JWTService;
+    const refreshTokenService = yield* RefreshTokenService;
+
+    const presented = yield* cookieRefreshToken(request);
+    const accessToken = yield* Schema.decodeUnknownEffect(JWTSchema)(
+      request.cookies["access_token"],
+    ).pipe(Effect.catchTags({ SchemaError: () => Effect.succeed(null) }));
+
+    const outcome = yield* Effect.result(
+      auth
+        .endAllSessions({
+          refreshToken: Option.getOrNull(presented),
+          accessToken,
+        })
+        .pipe(
+          Effect.tap((revoked) =>
+            Effect.logInfo(`Signing out of every device ended ${revoked} session(s)`),
+          ),
+          Effect.tapError((error) =>
+            Effect.logError("Signing out of every device could not revoke the refresh tokens", {
+              error,
+            }),
+          ),
+        ),
+    );
+
+    const clearedCookies = [
+      yield* jwtService.clearCookie(),
+      yield* refreshTokenService.clearCookie(),
+    ];
+
+    if (Result.isFailure(outcome)) {
+      return yield* HttpServerResponse.setCookies(
+        HttpServerResponse.text(
+          "Signing out of every device did not complete on our side. The sessions on other devices may still be signed in. Sign in again and repeat the action to end them.",
+          { status: 500 },
+        ),
+        clearedCookies,
+      ).pipe(Effect.orDie);
+    }
+
+    const response = prefersHtml(request)
+      ? HttpServerResponse.redirect("/login", { status: 303 })
+      : HttpServerResponse.empty({ status: 204 });
+
+    return yield* HttpServerResponse.setCookies(response, clearedCookies).pipe(Effect.orDie);
+  }),
+);
+
+export const SessionRoutes = [logout, logoutEverywhere, refresh];

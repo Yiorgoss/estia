@@ -102,6 +102,25 @@ describe("GET /profile", () => {
     }),
   );
 
+  // The all-devices action is a separate card with its own wording, so it cannot
+  // be reached by someone looking for the ordinary log-out, and the page says
+  // what each one does and what the wider one cannot reach.
+  it.effect("offers a separate control to sign out of every device", () =>
+    Effect.gen(function* () {
+      const user = yield* freshUser("logout-everywhere-control");
+
+      const response = yield* page(user);
+
+      assert.strictEqual(response.status, 200, response.body);
+      assert.include(response.body, 'action="/api/auth/logout-all"');
+      assert.include(response.body, ">Sign out of all devices</button>");
+      assert.include(response.body, "Sign out of all devices");
+      assert.include(response.body, "ends every session on this account");
+      assert.include(response.body, "Log out ends only this session");
+      assert.include(response.body, "No email is sent when a");
+    }),
+  );
+
   it.effect("asks an unauthenticated visitor to sign in instead of answering a 401 body", () =>
     Effect.gen(function* () {
       const response = yield* call("/profile");
@@ -141,8 +160,10 @@ describe("GET /profile", () => {
       assert.include(response.body, 'value="seeker"');
       assert.include(response.body, 'value="lister"');
       assert.notInclude(response.body, 'action="/profile"');
-      // The choice page is still the profile page, so it still has the way out.
+      // The choice page is still the profile page, so it still has the way out,
+      // including the one that ends every session.
       assert.include(response.body, 'action="/api/auth/logout"');
+      assert.include(response.body, 'action="/api/auth/logout-all"');
     }),
   );
 

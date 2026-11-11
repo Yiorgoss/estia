@@ -1129,7 +1129,15 @@ grep -q 'action="/api/auth/logout"' "$WORK/profile-logout" \
   || fail "the profile page offers no way to log out"
 grep -q '>Log out</button>' "$WORK/profile-logout" \
   || fail "the profile page logout control is not labelled Log out"
-pass "the profile page offers a log out control"
+# The all-devices action is a separate control with its own wording, so the two
+# are distinguishable on the page.
+grep -q 'action="/api/auth/logout-all"' "$WORK/profile-logout" \
+  || fail "the profile page offers no way to sign out of every device"
+grep -q '>Sign out of all devices</button>' "$WORK/profile-logout" \
+  || fail "the profile page all-devices control is not labelled Sign out of all devices"
+grep -q 'ends every session on this account' "$WORK/profile-logout" \
+  || fail "the profile page does not say what signing out of all devices does"
+pass "the profile page offers a log out control and a separate all-devices control"
 
 # A browser posts that control: a redirect to the sign-in page and both cookies
 # cleared. The access cookie is deliberately absent, because the person may click
@@ -1173,6 +1181,109 @@ CODE=$(curl -s -o "$WORK/logout-signed-out" -w '%{http_code}' \
 assert_status "$CODE" 204 "logout while signed out"
 [ ! -s "$WORK/logout-signed-out" ] || fail "logout while signed out answered with a body"
 pass "logging out while signed out is harmless"
+
+# 6c. signing out of every device
+#
+# The separate action ends every session the account has, not only the one that
+# asks: this account signs in twice more - once as another device, once as an
+# earlier visit - and both refresh tokens have to die with it, while a second
+# account's live session is untouched. The rows are read back from the database,
+# because that is where the promise lives.
+EVERY_EMAIL="smoke-everywhere-$(date +%s)@test.local"
+CODE=$(curl -s -D "$WORK/every-register.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${EVERY_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+assert_status "$CODE" 200 "register the all-devices smoke user"
+EVERY_ACCESS="$(cookie_value "$WORK/every-register.h" access_token)"
+EVERY_REFRESH="$(cookie_value "$WORK/every-register.h" refresh_token)"
+EVERY_ID="$(user_id_from_token "$EVERY_ACCESS")"
+
+for N in 1 2; do
+  CODE=$(curl -s -D "$WORK/every-login-${N}.h" -o /dev/null -w '%{http_code}' \
+    -X POST "${BASE_URL}/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"${EVERY_EMAIL}\",\"password\":\"${PASSWORD}\"}")
+  assert_status "$CODE" 200 "the all-devices smoke user signs in again (${N})"
+done
+EVERY_ACCESS_2="$(cookie_value "$WORK/every-login-1.h" access_token)"
+EVERY_REFRESH_2="$(cookie_value "$WORK/every-login-1.h" refresh_token)"
+EVERY_REFRESH_3="$(cookie_value "$WORK/every-login-2.h" refresh_token)"
+[ -n "$EVERY_ACCESS_2" ] && [ -n "$EVERY_REFRESH_2" ] && [ -n "$EVERY_REFRESH_3" ] \
+  || fail "the repeated sign-ins did not set session cookies"
+EVERY_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${EVERY_ID}' AND revoked_at IS NULL;")"
+[ "$EVERY_LIVE" = "3" ] || fail "the account does not have three live sessions (${EVERY_LIVE})"
+pass "one account holds three live sessions from three sign-ins"
+
+# A page on another site can post this URL with the cookie attached, so a foreign
+# origin is refused before anything is revoked.
+CODE=$(curl -s -o "$WORK/every-cross-site" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/logout-all" \
+  -H 'Origin: https://evil.example' \
+  -H "Cookie: access_token=${EVERY_ACCESS}; refresh_token=${EVERY_REFRESH}")
+assert_status "$CODE" 403 "signing out of every device from another site is refused"
+EVERY_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${EVERY_ID}' AND revoked_at IS NULL;")"
+[ "$EVERY_LIVE" = "3" ] || fail "a cross-site logout-all revoked a token (${EVERY_LIVE} live)"
+pass "a refused cross-site logout-all changes nothing"
+
+# The JSON client's answer: an empty 204 with both cookies cleared.
+CODE=$(curl -s -D "$WORK/every-logout.h" -o "$WORK/every-logout" -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/logout-all" \
+  -H "Cookie: access_token=${EVERY_ACCESS}; refresh_token=${EVERY_REFRESH}")
+assert_status "$CODE" 204 "signing out of every device"
+[ ! -s "$WORK/every-logout" ] || fail "logout-all answered with a body"
+for NAME in access_token refresh_token; do
+  CLEARED_H=$(cookie_flags "$WORK/every-logout.h" "$NAME")
+  [ -n "$CLEARED_H" ] || fail "logout-all did not clear ${NAME}"
+  printf '%s' "$CLEARED_H" | grep -qi 'max-age=0' || fail "cleared ${NAME} has a lifetime left"
+done
+pass "signing out of every device clears both session cookies"
+
+EVERY_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${EVERY_ID}' AND revoked_at IS NULL;")"
+[ "$EVERY_LIVE" = "0" ] || fail "logout-all left ${EVERY_LIVE} live refresh token(s)"
+EVERY_ROWS="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${EVERY_ID}';")"
+[ "$EVERY_ROWS" = "3" ] || fail "logout-all changed the number of session rows (${EVERY_ROWS})"
+pass "signing out of every device revoked all three refresh tokens"
+
+# The other two devices still hold their tokens; replaying either is a 401 with
+# no cookies, so the revocation is in the database and not just in this browser.
+for TOKEN in "$EVERY_REFRESH_2" "$EVERY_REFRESH_3"; do
+  CODE=$(curl -s -D "$WORK/every-replay.h" -o /dev/null -w '%{http_code}' \
+    -X POST "${BASE_URL}/api/auth/refresh" \
+    -H "Cookie: refresh_token=${TOKEN}")
+  assert_status "$CODE" 401 "a revoked device's refresh token is rejected"
+  [ -z "$(cookie_flags "$WORK/every-replay.h" refresh_token)" ] \
+    || fail "a revoked refresh token set a cookie"
+done
+pass "replaying any revoked refresh token answers 401 and sets nothing"
+
+# Another account's session is not this account's to end.
+SECOND_USER_ID="$(user_id_from_token "$SECOND_ACCESS")"
+SECOND_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${SECOND_USER_ID}' AND revoked_at IS NULL;")"
+[ "$SECOND_LIVE" -ge 1 ] || fail "logout-all revoked another account's refresh token"
+pass "another account's live session survives"
+
+# The profile page's control, posted by a browser: a redirect to the sign-in page
+# and both cookies cleared. This ends the second account's sessions, which is the
+# last use of its refresh token in this checklist.
+SECOND_REFRESH="$(cookie_value "$WORK/register-second.h" refresh_token)"
+CODE=$(curl -s -D "$WORK/every-form.h" -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/api/auth/logout-all" \
+  -H 'Accept: text/html' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: refresh_token=${SECOND_REFRESH}")
+assert_status "$CODE" 303 "form sign out of every device"
+EVERY_LOCATION=$(header_value "$WORK/every-form.h" location)
+[ "$EVERY_LOCATION" = "/login" ] \
+  || fail "form logout-all did not redirect to /login (got ${EVERY_LOCATION:-no Location header})"
+for NAME in access_token refresh_token; do
+  CLEARED_H=$(cookie_flags "$WORK/every-form.h" "$NAME")
+  [ -n "$CLEARED_H" ] || fail "form logout-all did not clear ${NAME}"
+  printf '%s' "$CLEARED_H" | grep -qi 'max-age=0' || fail "cleared ${NAME} has a lifetime left"
+done
+SECOND_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE user_id='${SECOND_USER_ID}' AND revoked_at IS NULL;")"
+[ "$SECOND_LIVE" = "0" ] || fail "the form action left ${SECOND_LIVE} live token(s) for its account"
+pass "the profile page control redirects to sign-in, clears cookies, and ends every session"
 
 # 7. multipart upload
 printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"

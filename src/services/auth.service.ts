@@ -6,7 +6,7 @@ import { RefreshTokenService } from "./refresh-token.service";
 import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User";
 import { InternalError, UserNotFoundError } from "./user.service";
-import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
+import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 
 export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(
   "InvalidCredentialsError",
@@ -53,6 +53,21 @@ export class AuthService extends Context.Service<
       credentials: UserCredentialsType,
       userAgent: string,
     ) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>;
+    /*
+     * The other end of a session, on every device. The account is the one the
+     * presented cookies prove - the refresh token first, because it is the
+     * month-long credential that identifies the session, and the access token
+     * when the refresh cookie is gone, because a caller holding a live access
+     * token is still signed in on this device. A caller with no session names
+     * no account and has nothing to end. The count is how many sessions this
+     * call ended. Access tokens already issued are not recalled - there is no
+     * revocation list for them - so another device's open session may keep
+     * reading private pages until its access token expires, within an hour.
+     */
+    readonly endAllSessions: (presented: {
+      readonly accessToken?: typeof JWTSchema.Type | null | undefined;
+      readonly refreshToken?: typeof RefreshTokenValue.Type | null | undefined;
+    }) => Effect.Effect<number, InternalError>;
     // readonly login: (credentials: UserCredentialsType, userAgent: string) => Effect.Effect<AuthTokens, InternalError | InvalidCredentialsError>
   }
 >()("AuthService") {}
@@ -135,6 +150,42 @@ export const AuthServiceLive = Layer.effect(
             JWTSigningError: () => Effect.fail(new InternalError()),
           }),
         ),
+      endAllSessions: ({ accessToken, refreshToken }) =>
+        Effect.gen(function* () {
+          const fromRefresh = Option.fromNullishOr(refreshToken).pipe(
+            Option.match({
+              onNone: () => Effect.succeed(Option.none<typeof UserId.Type>()),
+              onSome: (token) => refreshTokenService.userIdForToken(token),
+            }),
+          );
+          const fromAccess = Option.fromNullishOr(accessToken).pipe(
+            Option.match({
+              onNone: () => Effect.succeed(Option.none<typeof UserId.Type>()),
+              onSome: (token) =>
+                jwtService.verify(token).pipe(
+                  Effect.flatMap((jwtObject) => jwtService.extractUser(jwtObject)),
+                  Effect.map((user) => Option.some(user.id)),
+                  // A token that cannot be verified proves no account, which is
+                  // the same answer as no token at all.
+                  Effect.catch(() => Effect.succeed(Option.none<typeof UserId.Type>())),
+                ),
+            }),
+          );
+
+          const account = yield* fromRefresh.pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => fromAccess,
+                onSome: (id) => Effect.succeed(Option.some(id)),
+              }),
+            ),
+          );
+
+          return yield* Option.match(account, {
+            onNone: () => Effect.succeed(0),
+            onSome: (id) => refreshTokenService.revokeAllSessions(id),
+          });
+        }),
     };
   }),
 );

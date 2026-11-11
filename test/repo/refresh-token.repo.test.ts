@@ -118,6 +118,52 @@ layer(TestLive, { concurrent: false })("RefreshTokenRepository", (it) => {
     }),
   );
 
+  it.effect("revokeAllForUser revokes every live token the user owns and no one else's", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-rt-all-a", "rt-all-a@test.local");
+      yield* insertUser("u-rt-all-b", "rt-all-b@test.local");
+      yield* insertRefreshToken({
+        userId: "u-rt-all-a",
+        tokenHash: "hash-all-a1",
+        expiresAt: VALID_EXPIRES_AT,
+      });
+      yield* insertRefreshToken({
+        userId: "u-rt-all-a",
+        tokenHash: "hash-all-a2",
+        expiresAt: VALID_EXPIRES_AT,
+      });
+      yield* insertRefreshToken({
+        userId: "u-rt-all-a",
+        tokenHash: "hash-all-a-revoked",
+        expiresAt: VALID_EXPIRES_AT,
+        revokedAt: 1,
+      });
+      yield* insertRefreshToken({
+        userId: "u-rt-all-a",
+        tokenHash: "hash-all-a-expired",
+        expiresAt: -1,
+      });
+      yield* insertRefreshToken({
+        userId: "u-rt-all-b",
+        tokenHash: "hash-all-b1",
+        expiresAt: VALID_EXPIRES_AT,
+      });
+
+      const repo = yield* RefreshTokenRepository;
+      const ended = yield* repo.revokeAllForUser(userId("u-rt-all-a"));
+
+      assert.strictEqual(ended, 2);
+      assert.isTrue(Option.isNone(yield* repo.findValidByHash(tokenHash("hash-all-a1"))));
+      assert.isTrue(Option.isNone(yield* repo.findValidByHash(tokenHash("hash-all-a2"))));
+      // Another account's session is untouched.
+      assert.isTrue(Option.isSome(yield* repo.findValidByHash(tokenHash("hash-all-b1"))));
+
+      // Ending them again ends nothing: the rows already carry their revocation.
+      assert.strictEqual(yield* repo.revokeAllForUser(userId("u-rt-all-a")), 0);
+      assert.strictEqual(yield* repo.revokeAllForUser(userId("u-rt-all-nobody")), 0);
+    }),
+  );
+
   it.effect("revoke returns None for unknown and expired tokens", () =>
     Effect.gen(function* () {
       yield* insertUser("u-rt-revoke-miss", "rt-revoke-miss@test.local");

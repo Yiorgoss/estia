@@ -19,6 +19,13 @@ export interface RefreshTokenRepository {
   readonly revoke: (
     hash: typeof RefreshTokenHash.Type,
   ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
+  /*
+   * Every live token the account owns is revoked in one statement, so the
+   * sessions on other devices and the leftovers of earlier sign-ins end
+   * together. Rows that already ended - revoked or expired - are left as they
+   * are; the count is how many sessions this call ended.
+   */
+  readonly revokeAllForUser: (id: typeof UserId.Type) => Effect.Effect<number, SqlError>;
   readonly new: (newToken: typeof NewRefreshToken.Type) => Effect.Effect<RefreshToken, SqlError>;
 }
 
@@ -44,6 +51,18 @@ export const RefreshTokenRepositoryLive = Layer.effect(
             Effect.map((rows) => rows[0]),
             Effect.map(Option.fromNullishOr),
           );
+        }),
+      revokeAllForUser: (id) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const revoked = yield* sql<RefreshToken>`
+              UPDATE refresh_tokens
+                 SET revoked_at = ${now}
+               WHERE user_id = ${id}
+                 AND revoked_at IS NULL
+                 AND expires_at >= ${now}
+           RETURNING *;`;
+          return revoked.length;
         }),
       findValidByHash: (hash) =>
         Effect.gen(function* () {
