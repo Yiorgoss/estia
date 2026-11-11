@@ -85,6 +85,43 @@ const flagChips = (flags: ReadonlyArray<string>) =>
         ${flags.map((flag) => `<li class="${chipClass}">${flag}</li>`).join("")}
       </ul>`;
 
+// A listing with no photos simply has no gallery section: the page still
+// renders every fact it has, and the search card falls back to its placeholder.
+const gallery = (listing: PublicListing): string => {
+  if (listing.photos.length === 0) return "";
+  const [first, ...rest] = listing.photos;
+  if (first === undefined) return "";
+  const alt = (index: number) => `${listing.title} - photo ${index + 1}`;
+
+  return `
+      <section class="border-b border-gray-100 p-5 sm:p-6" aria-label="Photos">
+        <h2 class="${sectionHeadingClass}">Photos</h2>
+        <div class="mt-3 space-y-2">
+          <img
+            src="${escapeHtml(first.url)}"
+            alt="${escapeHtml(alt(0))}"
+            class="aspect-[4/3] w-full rounded-md bg-gray-100 object-cover"
+          />
+          ${
+            rest.length === 0
+              ? ""
+              : `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  ${rest
+                    .map(
+                      (photo, index) => `<img
+                        src="${escapeHtml(photo.url)}"
+                        alt="${escapeHtml(alt(index + 1))}"
+                        loading="lazy"
+                        class="aspect-[4/3] w-full rounded-md bg-gray-100 object-cover"
+                      />`,
+                    )
+                    .join("")}
+                </div>`
+          }
+        </div>
+      </section>`;
+};
+
 export const listingDetailPage = (listing: PublicListing) => {
   const region = regionLabels[listing.regionCode];
   const kind = kindLabels[listing.kind];
@@ -124,6 +161,8 @@ export const listingDetailPage = (listing: PublicListing) => {
           </p>
         </div>
       </header>
+
+      ${gallery(listing)}
 
       <div class="p-5 sm:p-6">
         <section>

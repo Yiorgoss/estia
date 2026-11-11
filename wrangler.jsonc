@@ -41,6 +41,15 @@
           "migrations_dir": "src/db/migrations",
         },
       ],
+      // Bindings are not inherited by a named environment, so the prod
+      // environment repeats the bucket the map archive and listing photos use.
+      // The bucket must exist in the deploying account before `wrangler deploy`.
+      "r2_buckets": [
+        {
+          "binding": "STORAGE",
+          "bucket_name": "estia",
+        },
+      ],
     },
   },
 }

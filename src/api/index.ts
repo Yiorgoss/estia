@@ -16,9 +16,11 @@ import { SameOriginWriteMiddleware } from "@/handlers/same-origin";
 import { SeekerRepositoryLive } from "@/repos/seeker.repo";
 import { ListerRepositoryLive } from "@/repos/lister.repo";
 import { ListingRepositoryLive } from "@/repos/listing.repo";
+import { ListingPhotoRepositoryLive } from "@/repos/listing-photo.repo";
 import { UserHandler } from "@/handlers/private/user.handler";
 import { ListingHandler as PrivateListingHandler } from "@/handlers/private/listing.handler";
 import { ListingServiceLive } from "@/services/listing.service";
+import { ListingPhotoServiceLive } from "@/services/listing-photo.service";
 import { ListingHandler as PublicListingHandler } from "@/handlers/public/listing.handler";
 
 // --- Repositories ---
@@ -28,6 +30,7 @@ export const RepositoriesLive = Layer.mergeAll(
   RefreshTokenRepositoryLive,
   UserRepositoryLive,
   ListingRepositoryLive,
+  ListingPhotoRepositoryLive,
 );
 
 // --- Low-level / infra services ---
@@ -38,6 +41,7 @@ export const DomainServicesLive = Layer.mergeAll(
   UserServiceLive,
   RefreshTokenServiceLive,
   ListingServiceLive,
+  ListingPhotoServiceLive.pipe(Layer.provide(ListingServiceLive)),
 );
 
 // --- Final app layer ---

@@ -19,11 +19,13 @@ const publicKeys = [
   "id",
   "kind",
   "pets",
+  "photos",
   "priceMinor",
   "publishedAt",
   "regionCode",
   "sizeSqm",
   "smoking",
+  "thumbnailUrl",
   "title",
 ];
 

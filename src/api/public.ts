@@ -1,7 +1,7 @@
 import { UserCredentials } from "@/db/schema/User";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
@@ -11,7 +11,7 @@ import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
 import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
-import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
+import { JWTSchema, ListingId, ListingPhotoId, RefreshTokenValue } from "@/db/schema/brands";
 import {
   decodeListingId,
   LISTING_MAP_DEFAULT_LIMIT,
@@ -24,16 +24,18 @@ import {
 } from "@/db/schema/Listing";
 import { approximateLocation, ListingPinPage } from "@/db/schema/ListingPin";
 import { ListingNotFoundError, ListingService } from "@/services/listing.service";
+import { listingPhotoUrl, decodeListingPhotoId } from "@/db/schema/ListingPhoto";
+import type { ListingPhoto } from "@/db/schema/ListingPhoto";
+import { ListingPhotoService } from "@/services/listing-photo.service";
+import { callerId } from "@/handlers/private/caller";
 import {
   listingDetailPage,
   listingNotFoundPage,
   listingUnavailablePage,
 } from "@/frontend/pages/listing-detail";
 import { withMinorUnitPrices } from "@/utils";
-import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
-  .add(HttpApiEndpoint.post("test-post", "/test-post"))
   .add(
     HttpApiEndpoint.post("login", "/login", {
       payload: UserCredentials,
@@ -69,6 +71,11 @@ const AuthGroup = HttpApiGroup.make("auth")
  * `publishedAt` is the timestamp a visitor reads as recency; the newest-first
  * sort key is `createdAt`, which only travels inside the encoded `nextCursor`.
  */
+const PublicListingPhoto = Schema.Struct({
+  id: ListingPhotoId,
+  url: Schema.String,
+});
+
 const PublicListingSchema = Schema.Struct({
   id: ListingSchema.fields.id,
   kind: ListingSchema.fields.kind,
@@ -84,11 +91,17 @@ const PublicListingSchema = Schema.Struct({
   pets: ListingSchema.fields.pets,
   availableFrom: ListingSchema.fields.availableFrom,
   publishedAt: ListingSchema.fields.publishedAt,
+  // The first photo is the search card's thumbnail; `photos` carries the
+  // gallery the detail page renders. Both are projected from the photo rows,
+  // so neither can leak a storage key or a bucket name.
+  thumbnailUrl: Schema.NullishOr(Schema.String),
+  photos: Schema.Array(PublicListingPhoto),
 });
 export type PublicListing = typeof PublicListingSchema.Type;
 
 export const toPublicListing = (
   listing: typeof ListingSchema.Type,
+  photos: ReadonlyArray<ListingPhoto> = [],
 ): typeof PublicListingSchema.Type => ({
   id: listing.id,
   kind: listing.kind,
@@ -104,6 +117,11 @@ export const toPublicListing = (
   pets: listing.pets,
   availableFrom: listing.availableFrom,
   publishedAt: listing.publishedAt,
+  thumbnailUrl: photos[0] === undefined ? null : listingPhotoUrl(listing.id, photos[0].id),
+  photos: photos.map((photo) => ({
+    id: photo.id,
+    url: listingPhotoUrl(listing.id, photo.id),
+  })),
 });
 
 export const PublicListingPageResponse = Schema.Struct({
@@ -114,8 +132,12 @@ export type PublicListingPageResponse = typeof PublicListingPageResponse.Type;
 
 export const toPublicListingPage = (
   page: typeof ListingPage.Type,
+  firstPhotos: ReadonlyMap<number, ListingPhoto> = new Map(),
 ): typeof PublicListingPageResponse.Type => ({
-  items: page.items.map(toPublicListing),
+  items: page.items.map((listing) => {
+    const photo = firstPhotos.get(Number(listing.id));
+    return toPublicListing(listing, photo === undefined ? [] : [photo]);
+  }),
   nextCursor: page.nextCursor,
 });
 
@@ -215,8 +237,20 @@ const searchResultsRoute = HttpRouter.route(
     );
     const { limit, cursor, ...filters } = query;
     const page = yield* listingService.search(filters, { limit, cursor });
+    const photoService = yield* ListingPhotoService;
+    const firstPhotos = yield* photoService.firstPhotos(page.items.map((item) => item.id));
 
-    return HttpServerResponse.html(searchResults(page));
+    return HttpServerResponse.html(
+      searchResults(
+        page,
+        new Map(
+          Array.from(firstPhotos, ([listingId, photo]) => [
+            listingId,
+            listingPhotoUrl(photo.listingId, photo.id),
+          ]),
+        ),
+      ),
+    );
   }).pipe(
     Effect.catchTags({
       // htmx only swaps 2xx responses by default, so a bad filter has to come
@@ -256,7 +290,9 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
 
     const listingService = yield* ListingService;
     const listing = yield* listingService.getPublic(id);
-    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing)));
+    const photoService = yield* ListingPhotoService;
+    const photos = yield* photoService.listPublic(id);
+    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos)));
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),
@@ -268,6 +304,61 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
           }),
         ),
     }),
+  ),
+);
+
+/*
+ * One gallery photo's bytes. The URL names the listing and the photo, never a
+ * storage key: the row is looked up first, so an unknown or another listing's
+ * photo id is the same 404. A published listing's photos are public; a draft or
+ * unlisted listing's photos are served only to its signed-in owner (the edit
+ * page preview), and anyone else gets the same 404 as a missing photo.
+ *
+ * Nothing here can list the bucket, and no request can name a key. The content
+ * type comes from the validated row, not from the request or the upload's
+ * filename.
+ */
+const photoNotFound = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.text("Not found", { status: 404 });
+
+const listingPhotoRoute = HttpRouter.route("GET", "/listings/:id/photos/:photoId", (request) =>
+  Effect.gen(function* () {
+    const params = yield* HttpRouter.params;
+    const listingId = decodeListingId(params["id"]);
+    const photoId = decodeListingPhotoId(params["photoId"]);
+    if (listingId === undefined || photoId === undefined) return photoNotFound();
+
+    // The public router has no auth middleware, so the session is optional: an
+    // invalid or missing cookie is simply an anonymous visitor here.
+    const viewerId = yield* callerId(request).pipe(
+      Effect.option,
+      Effect.map(Option.getOrUndefined),
+    );
+
+    const photoService = yield* ListingPhotoService;
+    const found = yield* photoService.read(listingId, photoId, viewerId);
+    if (Option.isNone(found)) return photoNotFound();
+
+    const { photo, object, private: isPrivate } = found.value;
+    const headers = new Headers({
+      "content-type": photo.contentType,
+      "content-length": String(photo.byteSize),
+      "x-content-type-options": "nosniff",
+      "content-disposition": "inline",
+      etag: object.httpEtag,
+      "cache-control": isPrivate
+        ? "private, max-age=0, must-revalidate"
+        : "public, max-age=31536000, immutable",
+    });
+    return HttpServerResponse.fromWeb(new Response(object.body, { status: 200, headers }));
+  }).pipe(
+    Effect.catchTag("InternalError", (error) =>
+      Effect.logError("Photo read failed", { error }).pipe(
+        Effect.andThen(
+          Effect.succeed(HttpServerResponse.text("The photo is unavailable.", { status: 500 })),
+        ),
+      ),
+    ),
   ),
 );
 
@@ -308,6 +399,7 @@ const mapRoute = HttpRouter.route("GET", "/map", () =>
 
 export const PublicRoutes = HttpRouter.addAll([
   searchResultsRoute,
+  listingPhotoRoute,
   listingDetailRoute,
   mapRoute,
   MapTilesRoute,
@@ -330,37 +422,4 @@ export const PublicRoutes = HttpRouter.addAll([
   HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage()))),
   ...AuthPageRoutes,
   ...SessionRoutes,
-  HttpRouter.route(
-    "GET",
-    "/test",
-    Effect.succeed(
-      HttpServerResponse.html(
-        `
-          <!doctype html>
-          <html>
-            <head>
-              ${head}
-            </head>
-            <body class="flex bg-gray-200 place-content-center min-h-lvh">
-            
-              <div id='result' class="font-2xl" style='background:purple;width:500px;height:100px'>
-                nothing yet
-              </div>
-              <form
-                hx-post="/api/auth/test-post"
-                enctype="multipart/form-data"
-                hx-target="#result"
-                hx-swap="outerHTML"
-                name="files"
-                >
-                  <input type='text' name="hi" />
-                  <input type='file' name="file" />
-                  <button type='submit'>Submit</button>
-              </form>
-            </body>
-          </html>
-            `,
-      ),
-    ),
-  ),
 ]);

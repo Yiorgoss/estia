@@ -17,6 +17,7 @@ import {
 } from "@/frontend/listing-form";
 import { editListingPage, listingErrorPage, newListingPage } from "@/frontend/pages/listing-form";
 import { myListingsPage } from "@/frontend/pages/my-listings";
+import { ListingPhotoService } from "@/services/listing-photo.service";
 import { UnauthorizedError } from "@/services/auth.service";
 import {
   InvalidListingTransitionError,
@@ -215,8 +216,10 @@ const getEditListingPage = HttpRouter.route("GET", "/listings/:id/edit", (reques
 
     const ownerId = yield* callerId(request);
     const listingService = yield* ListingService;
+    const photoService = yield* ListingPhotoService;
     const listing = yield* listingService.getOwn(ownerId, id);
-    return respond(editListingPage(listing, listingFormValuesFor(listing)), 200);
+    const photos = yield* photoService.listOwned(ownerId, id);
+    return respond(editListingPage(listing, listingFormValuesFor(listing), undefined, photos), 200);
   }).pipe(Effect.catch((error: ListingPageError) => Effect.succeed(errorResponse(error)))),
 );
 
@@ -232,19 +235,21 @@ const updateListing = HttpRouter.route("POST", "/listings/:id/edit", (request) =
     const decoded = decodeUpdateListingForm(params);
     const ownerId = yield* callerId(request);
     const listingService = yield* ListingService;
+    const photoService = yield* ListingPhotoService;
     // Loading first means a rejected submit is answered with the edit page as it
-    // stands, including the current status and the existing values.
+    // stands, including the current status, the existing values, and the gallery.
     const current = yield* listingService.getOwn(ownerId, id);
+    const photos = yield* photoService.listOwned(ownerId, id);
 
     if (!decoded.ok) {
-      return respond(editListingPage(current, values, decoded.message), 400);
+      return respond(editListingPage(current, values, decoded.message, photos), 400);
     }
 
     return yield* listingService.updateListing(ownerId, id, decoded.input).pipe(
       Effect.map(() => seeOther(`/listings/${id}/edit`)),
       Effect.catch((error: ListingPageError) => {
         const { message, status } = describeError(error);
-        return Effect.succeed(respond(editListingPage(current, values, message), status));
+        return Effect.succeed(respond(editListingPage(current, values, message, photos), status));
       }),
     );
   }).pipe(Effect.catch((error: ListingPageError) => Effect.succeed(errorResponse(error)))),
@@ -298,12 +303,15 @@ const transitionRoute = (action: "publish" | "unlist") =>
       const rejected = (error: ListingPageError) => {
         const { message, status } = describeError(error);
         if (returnTo.page === "edit") {
-          return listingService.getOwn(ownerId, id).pipe(
-            Effect.map((current) =>
-              respond(editListingPage(current, listingFormValuesFor(current), message), status),
-            ),
-            Effect.orElseSucceed(() => errorResponse(error)),
-          );
+          return Effect.gen(function* () {
+            const photoService = yield* ListingPhotoService;
+            const current = yield* listingService.getOwn(ownerId, id);
+            const photos = yield* photoService.listOwned(ownerId, id);
+            return respond(
+              editListingPage(current, listingFormValuesFor(current), message, photos),
+              status,
+            );
+          }).pipe(Effect.orElseSucceed(() => errorResponse(error)));
         }
         return listingService.listMine(ownerId, minePageRequest(returnTo.cursor)).pipe(
           Effect.map((page) =>

@@ -5,6 +5,7 @@ import {
   toPublicListingPinPage,
 } from "@/api/public";
 import { ListingService } from "@/services/listing.service";
+import { ListingPhotoService } from "@/services/listing-photo.service";
 import { HttpApiBuilder } from "effect/http-api";
 import { Effect } from "effect";
 
@@ -24,7 +25,9 @@ export const ListingHandler = HttpApiBuilder.group(PublicApi, "listings", (handl
         // rules, so the handler only splits them apart.
         const { limit, cursor, ...filters } = query;
         const page = yield* listingService.search(filters, { limit, cursor });
-        return toPublicListingPage(page);
+        const photoService = yield* ListingPhotoService;
+        const firstPhotos = yield* photoService.firstPhotos(page.items.map((item) => item.id));
+        return toPublicListingPage(page, firstPhotos);
       }),
     )
     .handle("map", ({ query }) =>
@@ -41,7 +44,10 @@ export const ListingHandler = HttpApiBuilder.group(PublicApi, "listings", (handl
     .handle("detail", ({ params }) =>
       Effect.gen(function* () {
         const listingService = yield* ListingService;
-        return toPublicListing(yield* listingService.getPublic(params.id));
+        const photoService = yield* ListingPhotoService;
+        const listing = yield* listingService.getPublic(params.id);
+        const photos = yield* photoService.listPublic(params.id);
+        return toPublicListing(listing, photos);
       }),
     ),
 );

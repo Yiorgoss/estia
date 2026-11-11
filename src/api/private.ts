@@ -29,6 +29,7 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
 import { ListingPageRoutes } from "@/handlers/private/listing-pages";
+import { ListingPhotoPageRoutes } from "@/handlers/private/listing-photo-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
 
 /*
@@ -194,5 +195,6 @@ export const PrivateRoutes = HttpRouter.addAll([
       `),
   ),
   ...ListingPageRoutes,
+  ...ListingPhotoPageRoutes,
   ...ProfilePageRoutes,
 ]);
