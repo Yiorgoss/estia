@@ -20,22 +20,32 @@ export interface ListingPhotoRepository {
     photoId: typeof ListingPhotoId.Type,
   ) => Effect.Effect<Option.Option<typeof ListingPhotoSchema.Type>, SqlError>;
 
-  readonly countByListing: (listingId: typeof ListingId.Type) => Effect.Effect<number, SqlError>;
-
-  readonly insert: (
+  /*
+   * Appends one photo at the end of the gallery and decides the ten-photo cap
+   * in the same statement, so the count read cannot go stale between the check
+   * and the write. `None` means the gallery was already full.
+   */
+  readonly append: (
     listingId: typeof ListingId.Type,
     values: {
       readonly storageKey: string;
       readonly contentType: PhotoContentType;
       readonly byteSize: number;
-      readonly position: number;
     },
-  ) => Effect.Effect<typeof ListingPhotoSchema.Type, SqlError>;
+    limit: number,
+  ) => Effect.Effect<Option.Option<typeof ListingPhotoSchema.Type>, SqlError>;
 
   readonly deleteById: (
     listingId: typeof ListingId.Type,
     photoId: typeof ListingPhotoId.Type,
   ) => Effect.Effect<Option.Option<typeof ListingPhotoSchema.Type>, SqlError>;
+
+  /*
+   * Rewrites a gallery's positions as 0..n-1 from the order the table holds,
+   * in one statement, so closing a gap left by a delete never depends on an
+   * order the caller read earlier.
+   */
+  readonly compactPositions: (listingId: typeof ListingId.Type) => Effect.Effect<void, SqlError>;
 
   /*
    * Writes a whole gallery order in one statement. The ids must be this
@@ -48,9 +58,10 @@ export interface ListingPhotoRepository {
   ) => Effect.Effect<void, SqlError>;
 
   /*
-   * The first photo of each named listing, in one query. A listing with no
-   * photos is simply absent from the result, which is the search card's
-   * placeholder case.
+   * The first photo of each named listing, in one query: the row the gallery
+   * order puts first, which is the same row `listByListing` returns first. A
+   * listing with no photos is simply absent from the result, which is the
+   * search card's placeholder case.
    */
   readonly firstForListings: (
     listingIds: ReadonlyArray<typeof ListingId.Type>,
@@ -66,10 +77,6 @@ const decodePhoto = (row: Record<string, unknown>): typeof ListingPhotoSchema.Ty
 const decodePhotos = (
   rows: ReadonlyArray<Record<string, unknown>>,
 ): ReadonlyArray<typeof ListingPhotoSchema.Type> => rows.map(decodePhoto);
-
-const decodeSingle = (
-  rows: ReadonlyArray<Record<string, unknown>>,
-): typeof ListingPhotoSchema.Type => decodePhoto(Option.getOrThrow(Option.fromNullishOr(rows[0])));
 
 export const ListingPhotoRepositoryLive = Layer.effect(
   ListingPhotoRepository,
@@ -95,18 +102,18 @@ export const ListingPhotoRepositoryLive = Layer.effect(
           Effect.map(Option.fromNullishOr),
           Effect.map(Option.map(decodePhoto)),
         ),
-      countByListing: (listingId) =>
-        sql<{ readonly total: number }>`
-            SELECT COUNT(*) AS total
-              FROM listing_photos
-             WHERE listing_id = ${listingId}
-            `.pipe(Effect.map((rows) => rows[0]?.total ?? 0)),
-      insert: (listingId, values) =>
+      append: (listingId, values, limit) =>
         sql<Record<string, unknown>>`
               INSERT INTO listing_photos (listing_id, storage_key, content_type, byte_size, position)
-              VALUES (${listingId}, ${values.storageKey}, ${values.contentType}, ${values.byteSize}, ${values.position})
+              SELECT ${listingId}, ${values.storageKey}, ${values.contentType}, ${values.byteSize},
+                     (SELECT COUNT(*) FROM listing_photos WHERE listing_id = ${listingId})
+               WHERE (SELECT COUNT(*) FROM listing_photos WHERE listing_id = ${listingId}) < ${limit}
               RETURNING *;
-            `.pipe(Effect.map(decodeSingle)),
+            `.pipe(
+          Effect.map((rows) => rows[0]),
+          Effect.map(Option.fromNullishOr),
+          Effect.map(Option.map(decodePhoto)),
+        ),
       deleteById: (listingId, photoId) =>
         sql<Record<string, unknown>>`
               DELETE FROM listing_photos
@@ -135,14 +142,34 @@ export const ListingPhotoRepositoryLive = Layer.effect(
                    AND ${sql.in("id", orderedIds)};
               `,
             ),
+      compactPositions: (listingId) =>
+        Effect.asVoid(
+          sql`
+            UPDATE listing_photos
+               SET position = ranked.position
+              FROM (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY position ASC, id ASC) - 1 AS position
+                  FROM listing_photos
+                 WHERE listing_id = ${listingId}
+              ) AS ranked
+             WHERE listing_photos.id = ranked.id
+               AND listing_photos.listing_id = ${listingId};
+          `,
+        ),
       firstForListings: (listingIds) =>
         listingIds.length === 0
           ? Effect.succeed([])
           : sql<Record<string, unknown>>`
                 SELECT *
                   FROM listing_photos
-                 WHERE position = 0
-                   AND ${sql.in("listing_id", listingIds)}
+                 WHERE ${sql.in("listing_id", listingIds)}
+                   AND id = (
+                     SELECT first_photo.id
+                       FROM listing_photos AS first_photo
+                      WHERE first_photo.listing_id = listing_photos.listing_id
+                   ORDER BY first_photo.position ASC, first_photo.id ASC
+                      LIMIT 1
+                   )
               ORDER BY listing_id ASC
                 `.pipe(Effect.map(decodePhotos)),
     } satisfies ListingPhotoRepository;

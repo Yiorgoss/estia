@@ -24,7 +24,6 @@ const listing = (overrides: Partial<PublicListing> = {}): PublicListing => ({
   pets: true,
   availableFrom: new Date("2026-03-01T00:00:00.000Z"),
   publishedAt: new Date("2026-01-03T00:00:00.000Z"),
-  thumbnailUrl: null,
   photos: [],
   ...overrides,
 });
@@ -97,7 +96,6 @@ describe("listingDetailPage", () => {
   it("renders the gallery with the first photo and the rest below it", () => {
     const html = listingDetailPage(
       listing({
-        thumbnailUrl: "/listings/7/photos/1",
         photos: [
           { id: Schema.decodeSync(ListingPhotoId)(1), url: "/listings/7/photos/1" },
           { id: Schema.decodeSync(ListingPhotoId)(2), url: "/listings/7/photos/2" },

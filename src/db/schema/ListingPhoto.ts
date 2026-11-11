@@ -8,21 +8,16 @@ import { Schema } from "effect";
  * storage is never listed, so the gallery is the only way in and the only way
  * out.
  *
- * The limits are enforced by the service on the bytes it receives, not just by
- * the browser's `accept` attribute, and the same numbers are mirrored by the
- * database CHECK in `0007_listing_photos.sql`.
+ * The byte limit is enforced by the service on the bytes it receives, not just
+ * by the browser's `accept` attribute, and the ten-photo cap by the gallery's
+ * insert statement. The same numbers are mirrored by the database CHECK in
+ * `0007_listing_photos.sql`.
  */
 export const LISTING_PHOTO_MAX_PER_LISTING = 10;
 export const LISTING_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
 export const PhotoContentType = Schema.Literals(["image/jpeg", "image/png", "image/webp"]);
 export type PhotoContentType = typeof PhotoContentType.Type;
-
-export const PHOTO_CONTENT_TYPES: ReadonlyArray<PhotoContentType> = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-];
 
 // The extension is derived from the validated type, never from the uploaded
 // file name, so a caller cannot choose any part of the key.

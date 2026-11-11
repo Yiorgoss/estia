@@ -22,13 +22,12 @@ const publicKeys = [
   "id",
   "kind",
   "pets",
-  "photos",
   "priceMinor",
+  "primaryPhotoUrl",
   "publishedAt",
   "regionCode",
   "sizeSqm",
   "smoking",
-  "thumbnailUrl",
   "title",
 ];
 
@@ -124,6 +123,7 @@ describe("GET /api/listings", () => {
       assert.deepStrictEqual(Object.keys(body.items[0]).sort(), publicKeys);
       assert.strictEqual(body.items[0].id, publishedListing.id);
       assert.strictEqual(body.items[0].title, publishedListing.title);
+      assert.isNull(body.items[0].primaryPhotoUrl);
       assert.isString(body.nextCursor);
       assert.notInclude(body.nextCursor, ":");
     }),
