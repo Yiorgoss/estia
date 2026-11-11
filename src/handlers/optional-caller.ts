@@ -14,7 +14,8 @@ import { Effect, Option, Result, Schema } from "effect";
  * refresh token therefore identifies the caller instead of hiding their own UI,
  * and the pair the session proves travels back for the response to carry. The
  * anonymous path is unchanged: a visitor with no live session is still just a
- * visitor, and nothing is minted.
+ * visitor, and nothing is minted. A request carrying no session cookie never
+ * reaches the auth flow, so an ordinary public page load is not an auth event.
  */
 export interface OptionalCallerSession {
   readonly caller: Option.Option<typeof UserId.Type>;
@@ -48,6 +49,8 @@ export const sessionResolver: Effect.Effect<
       const refreshToken = yield* Schema.decodeUnknownEffect(RefreshTokenValue)(
         request.cookies["refresh_token"],
       ).pipe(Effect.catchTags({ SchemaError: () => Effect.succeed(null) }));
+
+      if (accessToken === null && refreshToken === null) return noCaller;
 
       const outcome = yield* Effect.result(
         auth.tokenAuthFlow({ accessToken, refreshToken }, request.headers["user-agent"]),

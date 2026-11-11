@@ -1,7 +1,7 @@
 import { CurrentUserId } from "@/handlers/private/caller";
 import { sessionResolver } from "@/handlers/optional-caller";
 import { signInRequiredPage } from "@/frontend/pages/sign-in-required";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Option } from "effect";
 
 const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
@@ -25,8 +25,11 @@ const unauthenticatedResponse = (request: HttpServerRequest.HttpServerRequest) =
 /*
  * The one place a private request establishes its session. It runs before the
  * route, so the caller every handler reads is the account the resolver proved,
- * and it writes the session's cookie pair onto whatever response the route
- * produced - a page, a fragment, a refusal, or an error.
+ * and it registers the session's cookie pair on the response this request ends
+ * with - a page, a fragment, a refusal, or the error the runtime derives from a
+ * route that failed. The pair is registered rather than attached to the route's
+ * own response, because a route that fails produces no response, and the
+ * resolver has already spent the presented refresh token by then.
  */
 export const AuthMiddleware = HttpRouter.middleware<{ provides: CurrentUserId }>()(
   Effect.gen(function* () {
@@ -38,8 +41,10 @@ export const AuthMiddleware = HttpRouter.middleware<{ provides: CurrentUserId }>
         if (Option.isNone(session.caller)) {
           return unauthenticatedResponse(request);
         }
-        const response = yield* Effect.provideService(app, CurrentUserId, session.caller.value);
-        return HttpServerResponse.setCookiesUnsafe(response, session.cookies);
+        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+          Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
+        );
+        return yield* Effect.provideService(app, CurrentUserId, session.caller.value);
       });
   }),
 ).layer;
