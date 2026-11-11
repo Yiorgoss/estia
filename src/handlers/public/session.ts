@@ -53,10 +53,10 @@ const unauthorized = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text("UnauthorizedError", { status: 401 });
 
 /*
- * Signing out keys on the refresh token, never on the access token: the access
- * cookie is short-lived and may already have expired by the time the person
- * clicks log out, while the refresh token is the month-long credential that
- * actually has to die.
+ * This route ends the one session, so it keys on the refresh token and never on
+ * the access token: the access cookie is short-lived and may already have
+ * expired by the time the person clicks log out, while the refresh token is
+ * the month-long credential that actually has to die.
  *
  * Clearing the cookies is the promise this route makes, so it happens even when
  * the row cannot be revoked; a database failure is logged, and the person still
@@ -159,9 +159,15 @@ const refresh = HttpRouter.route("POST", "/api/auth/refresh", (request) =>
  *
  * Clearing the cookies is part of the promise this route makes, and this device
  * is signed out either way. Ending the sessions on the other devices is the rest
- * of it, so a failure to revoke them is answered as a failure - with this
- * device's cookies still cleared - rather than as the signed-out page, which
- * would leave month-long refresh tokens alive while claiming they had ended.
+ * of it, so a failure to revoke them is answered as a 500 - with this device's
+ * cookies still cleared - rather than as the signed-out page, which would leave
+ * month-long refresh tokens alive while claiming they had ended.
+ *
+ * That failure copy must not simply invite a retry. The response has already
+ * cleared the cookies that identified the account, so a retry would name no
+ * account, be answered as the signed-out page, and end nothing on the other
+ * devices. It says the sign-out did not complete, that the other devices may
+ * still be signed in, and to sign in again before repeating the action.
  *
  * What this cannot reach is the access tokens already handed out: there is no
  * revocation list for them, so a session that is open right now may keep reading
