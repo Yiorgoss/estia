@@ -4,7 +4,7 @@ import { ListingSearchQueryCodec } from "@/db/schema/Listing";
 import { callerId } from "@/handlers/private/caller";
 import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import { clearedNameInput, savedSearchesPanel } from "@/frontend/saved-search";
-import type { SavedSearchesPanelOptions } from "@/frontend/saved-search";
+import type { SavedSearchesPanelOptions, SavedSearchesPlace } from "@/frontend/saved-search";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { withMinorUnitPrices } from "@/utils";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
@@ -38,27 +38,42 @@ const readForm = (request: HttpServerRequest.HttpServerRequest) =>
 const panelError = "Your saved searches could not be loaded just now.";
 
 /*
+ * Which page a form was submitted from. The delete control is rendered on the
+ * search page and on the listing profile, both through the same panel, and only
+ * the profile form names itself. Anything else - including a value the shared
+ * partial never writes - is the search page, so the field can never choose an
+ * arbitrary destination.
+ */
+const placeFrom = (raw: string | ReadonlyArray<string> | undefined): SavedSearchesPlace =>
+  raw === "profile" ? "profile" : "search";
+
+const backHref = (place: SavedSearchesPlace): string =>
+  place === "profile" ? "/profile" : "/search";
+
+/*
  * The list as the page shows it, with an optional banner. An htmx request gets
  * the section it targets; a request without htmx is a navigation, and a saved
- * or failed one is answered with the search page rather than a bare fragment.
- * A failed read is rendered inside the section, so the surrounding search page
- * stays usable.
+ * or failed one is answered with the page the form came from rather than a bare
+ * fragment. A failed read is rendered inside the section, so the surrounding
+ * page stays usable.
  */
 const panelFor = (
   request: HttpServerRequest.HttpServerRequest,
   ownerId: typeof UserId.Type,
   options: SavedSearchesPanelOptions = {},
   extra = "",
-) =>
-  Effect.gen(function* () {
-    if (!isHtmx(request)) return seeOther("/search");
+) => {
+  const place = options.place ?? "search";
+  return Effect.gen(function* () {
+    if (!isHtmx(request)) return seeOther(backHref(place));
     const savedSearchService = yield* SavedSearchService;
     const listed = yield* Effect.result(savedSearchService.list(ownerId));
     if (Result.isFailure(listed)) {
-      return respond(savedSearchesPanel([], { error: panelError }), 200);
+      return respond(savedSearchesPanel([], { ...options, error: panelError }), 200);
     }
     return respond(`${savedSearchesPanel(listed.success, options)}${extra}`, 200);
   });
+};
 
 /*
  * htmx only swaps 2xx responses, so a refused htmx save or delete has to answer
@@ -70,10 +85,11 @@ const panelFor = (
 const refuse = (
   request: HttpServerRequest.HttpServerRequest,
   ownerId: typeof UserId.Type,
+  place: SavedSearchesPlace,
   message: string,
 ) =>
   isHtmx(request)
-    ? panelFor(request, ownerId, { error: message })
+    ? panelFor(request, ownerId, { place, error: message })
     : Effect.succeed(respond(message, 403));
 
 /*
@@ -87,7 +103,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
   Effect.gen(function* () {
     const ownerId = yield* callerId;
     if (!isSameOriginWrite(request)) {
-      return yield* refuse(request, ownerId, crossSiteFormMessage);
+      return yield* refuse(request, ownerId, "search", crossSiteFormMessage);
     }
 
     const params = yield* readForm(request);
@@ -133,13 +149,18 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
 const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (request) =>
   Effect.gen(function* () {
     const ownerId = yield* callerId;
+    const params = yield* readForm(request);
+    const place = placeFrom(params["place"]);
     if (!isSameOriginWrite(request)) {
-      return yield* refuse(request, ownerId, crossSiteFormMessage);
+      return yield* refuse(request, ownerId, place, crossSiteFormMessage);
     }
 
-    const id = yield* Effect.map(HttpRouter.params, (params) => decodeSavedSearchId(params["id"]));
+    const id = yield* Effect.map(HttpRouter.params, (routeParams) =>
+      decodeSavedSearchId(routeParams["id"]),
+    );
     if (id === undefined) {
       return yield* panelFor(request, ownerId, {
+        place,
         error: "That saved search no longer exists.",
       });
     }
@@ -151,10 +172,10 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
         outcome.failure._tag === "SavedSearchNotFoundError"
           ? "That saved search no longer exists."
           : "This saved search could not be deleted just now. Please try again.";
-      return yield* panelFor(request, ownerId, { error });
+      return yield* panelFor(request, ownerId, { place, error });
     }
 
-    return yield* panelFor(request, ownerId, { notice: "Saved search deleted." });
+    return yield* panelFor(request, ownerId, { place, notice: "Saved search deleted." });
   }),
 );
 

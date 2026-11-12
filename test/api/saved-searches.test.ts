@@ -527,3 +527,248 @@ describe("two overlapping requests that share one refresh token", () => {
     }),
   );
 });
+
+/*
+ * The same saved searches on the listing profile. The section is the search
+ * page's own, rendered where a lister reads their profile, and its forms keep
+ * working there: running one lands on the search page it was saved from and
+ * deleting one from the profile removes it from both.
+ */
+const listingSession = (label: string) =>
+  Effect.gen(function* () {
+    const session = yield* signIn(label);
+    const switched = yield* call(
+      "/profile/switch",
+      form({ method: "POST", headers: browser(`access_token=${session.access}`) }, {}),
+    );
+    assert.strictEqual(switched.status, 303, switched.body);
+    return session;
+  });
+
+const profileOf = (cookie: string) => call("/profile", { headers: browser(cookie) });
+
+describe("the listing profile's saved-search section", () => {
+  it.effect("shows a search saved on the search page, with its criteria", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-saved-visible");
+      const cookie = `access_token=${session.access}`;
+
+      const saved = yield* browserSave(cookie, {
+        name: "Quiet Attica",
+        kind: "room",
+        regionCode: "attica",
+        minPrice: "400",
+        maxPrice: "800",
+        pets: "false",
+      });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const page = yield* profileOf(cookie);
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.include(page.body, "Quiet Attica");
+      // The name is not the criteria summary, so the criteria are shown too.
+      assert.include(page.body, "Room in Attica");
+      assert.include(page.body, "€400-€800/mo");
+      assert.include(page.body, "No pets");
+      assert.include(page.body, "Run");
+      assert.include(page.body, 'name="place" value="profile"');
+    }),
+  );
+
+  it.effect("re-runs a saved search from the profile onto the same results", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-rerun");
+      const cookie = `access_token=${session.access}`;
+
+      yield* browserSave(cookie, {
+        name: "Cheap Crete",
+        kind: "room",
+        regionCode: "crete",
+        maxPrice: "500",
+        pets: "false",
+      });
+      const [stored] = yield* storedSearches(session.id);
+      assert.isDefined(stored);
+
+      const page = yield* profileOf(cookie);
+      assert.strictEqual(page.status, 200, page.body);
+      const href = `/search?saved=${String(stored.id)}`;
+      assert.include(page.body, `href="${href}"`);
+
+      const rerun = yield* call(href, { headers: browser(cookie) });
+      assert.strictEqual(rerun.status, 200, rerun.body);
+
+      const fields = searchFormFields(rerun.body);
+      assert.strictEqual(fields["regionCode"], "crete");
+      assert.strictEqual(fields["pets"], "false");
+      assert.strictEqual(fields["maxPrice"], "500");
+
+      // The page it lands on asks the feed for exactly the stored criteria.
+      const resultsUrl = resultsUrlOf(rerun.body);
+      assert.strictEqual(resultsUrl, savedSearchResultsHref(stored));
+
+      const results = yield* call(resultsUrl, {
+        headers: { ...browser(cookie), "hx-request": "true" },
+      });
+      assert.strictEqual(results.status, 200, results.body);
+      assert.notInclude(results.body, 'id="saved-searches"');
+    }),
+  );
+
+  it.effect("deletes from the profile and removes it from both places", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-delete");
+      const cookie = `access_token=${session.access}`;
+
+      yield* browserSave(cookie, { name: "Delete from profile", pets: "false" });
+      const [stored] = yield* storedSearches(session.id);
+      assert.isDefined(stored);
+
+      const before = yield* profileOf(cookie);
+      assert.include(before.body, "Delete from profile");
+
+      // The profile's own delete control posts the place it came from, so the
+      // section swapped back in keeps the profile's wording.
+      const removed = yield* call(
+        `/search/saved/${String(stored.id)}/delete`,
+        form(
+          {
+            method: "POST",
+            headers: { ...browser(cookie), "hx-request": "true" },
+          },
+          { place: "profile" },
+        ),
+      );
+      assert.strictEqual(removed.status, 200, removed.body);
+      assert.include(removed.body, "Saved search deleted.");
+      assert.notInclude(removed.body, "Delete from profile");
+      assert.include(removed.body, "Save a search from the listings page");
+
+      const after = yield* profileOf(cookie);
+      assert.strictEqual(after.status, 200, after.body);
+      assert.notInclude(after.body, "Delete from profile");
+      assert.include(after.body, "No saved searches yet.");
+
+      const search = yield* call("/search", { headers: browser(cookie) });
+      assert.notInclude(search.body, "Delete from profile");
+
+      const left = yield* storedSearches(session.id);
+      assert.lengthOf(left, 0);
+    }),
+  );
+
+  it.effect("never shows another account's saved searches", () =>
+    Effect.gen(function* () {
+      const owner = yield* listingSession("profile-other-owner");
+      yield* browserSave(`access_token=${owner.access}`, { name: "Owner only" });
+      const [stored] = yield* storedSearches(owner.id);
+      assert.isDefined(stored);
+
+      const visitor = yield* listingSession("profile-other-visitor");
+      const cookie = `access_token=${visitor.access}`;
+
+      const page = yield* profileOf(cookie);
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.notInclude(page.body, "Owner only");
+
+      // Naming another account's id does not cross the boundary either.
+      const removed = yield* call(
+        `/search/saved/${String(stored.id)}/delete`,
+        form(
+          { method: "POST", headers: { ...browser(cookie), "hx-request": "true" } },
+          { place: "profile" },
+        ),
+      );
+      assert.strictEqual(removed.status, 200, removed.body);
+      assert.include(removed.body, "no longer exists");
+      assert.lengthOf(yield* storedSearches(owner.id), 1);
+    }),
+  );
+
+  it.effect("rotates an aged access token and keeps the list", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-rotation");
+      yield* browserSave(`access_token=${session.access}`, {
+        name: "Rotated with me",
+        regionCode: "crete",
+      });
+
+      const page = yield* call("/profile", { headers: browser(staleAccess(session)) });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.notInclude(page.body, "Sign in required");
+      assert.include(page.body, "Rotated with me");
+
+      const access = page.cookies["access_token"];
+      const refresh = page.cookies["refresh_token"];
+      assert.isDefined(access);
+      assert.isDefined(refresh);
+      assert.notStrictEqual(access, "an.expired.token");
+      assert.notStrictEqual(refresh, session.refresh);
+    }),
+  );
+
+  it.effect("reads correctly when the account has saved nothing", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-empty");
+
+      const page = yield* profileOf(`access_token=${session.access}`);
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.include(page.body, "No saved searches yet. Save a search from the listings page");
+      // The listing profile has no filters above the list to point at.
+      assert.notInclude(page.body, "Set the filters above");
+    }),
+  );
+
+  it.effect("says the list could not be loaded instead of claiming there are none", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-load-failure");
+      const cookie = `access_token=${session.access}`;
+      yield* browserSave(cookie, { name: "Unreadable for now" });
+
+      // The read fails for a reason the page must not read as "you have none".
+      yield* query("ALTER TABLE saved_searches RENAME TO saved_searches_hidden");
+      const page = yield* Effect.ensuring(
+        profileOf(cookie),
+        query("ALTER TABLE saved_searches_hidden RENAME TO saved_searches"),
+      );
+
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, "Your saved searches could not be loaded just now.");
+      assert.notInclude(page.body, "No saved searches yet.");
+      assert.notInclude(page.body, "Unreadable for now");
+    }),
+  );
+
+  it.effect("refuses a signed-out visitor", () =>
+    Effect.gen(function* () {
+      const response = yield* call("/profile", { headers: { "user-agent": "estia-tests" } });
+
+      assert.strictEqual(response.status, 401);
+      assert.include(response.body, "Sign in required");
+      assert.notInclude(response.body, 'id="saved-searches"');
+    }),
+  );
+});
+
+describe("a delete from the listing profile without htmx", () => {
+  it.effect("is a navigation back to the profile it came from", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-delete-navigation");
+      const cookie = `access_token=${session.access}`;
+      yield* browserSave(cookie, { name: "Navigation delete" });
+      const [stored] = yield* storedSearches(session.id);
+      assert.isDefined(stored);
+
+      const removed = yield* call(
+        `/search/saved/${String(stored.id)}/delete`,
+        form({ method: "POST", headers: browser(cookie) }, { place: "profile" }),
+      );
+      assert.strictEqual(removed.status, 303, removed.body);
+      assert.strictEqual(removed.location, "/profile");
+      assert.lengthOf(yield* storedSearches(session.id), 0);
+    }),
+  );
+});

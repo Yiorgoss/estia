@@ -1,5 +1,7 @@
 import { SavedSearchId, UserId } from "@/db/schema/brands";
 import { SavedSearchSchema } from "@/db/schema/SavedSearch";
+import { profilePage } from "@/frontend/pages/profile";
+import { emptyProfileFormValues } from "@/frontend/profile-form";
 import { searchPage } from "@/frontend/pages/search";
 import {
   clearedNameInput,
@@ -111,6 +113,56 @@ describe("savedSearchesPanel", () => {
     assert.include(savedSearchesPanel([]), "No saved searches yet.");
   });
 
+  // The name is what the search was called; the criteria are what it will do
+  // when it is run, and a person reading the list back needs both.
+  it("shows the stored criteria under the name, with a run and a delete control", () => {
+    const html = savedSearchesPanel([savedSearch()]);
+
+    assert.include(html, "Balcony rooms in Attica");
+    assert.include(html, "Room in Attica");
+    assert.include(html, "€400-€1,200.50/mo");
+    assert.include(html, "Furnished, No ensuite");
+    assert.include(html, ">\n        Run\n      </a>");
+    assert.include(html, "Delete");
+  });
+
+  // An unnamed save is named after its criteria, so the summary line would only
+  // repeat the name it produced.
+  it("does not repeat a name that is already the criteria summary", () => {
+    const html = savedSearchesPanel([
+      savedSearch({
+        name: "Listings No pets",
+        kind: null,
+        regionCode: null,
+        minPriceMinor: null,
+        maxPriceMinor: null,
+        minSizeSqm: null,
+        maxSizeSqm: null,
+        furnished: null,
+        ensuite: null,
+        smoking: null,
+        pets: false,
+        availableFrom: null,
+      }),
+    ]);
+
+    assert.include(html, "Listings No pets");
+    assert.notInclude(html, "text-xs text-gray-600");
+  });
+
+  // The panel is rendered on the listing profile too, which has no filters of
+  // its own, so its empty copy cannot point at them.
+  it("has profile wording that does not point at filters the page lacks", () => {
+    const empty = savedSearchesPanel([], { place: "profile" });
+
+    assert.include(empty, "No saved searches yet. Save a search from the listings page");
+    assert.notInclude(empty, "Set the filters above");
+
+    const listed = savedSearchesPanel([savedSearch()], { place: "profile" });
+    assert.include(listed, 'name="place" value="profile"');
+    assert.notInclude(savedSearchesPanel([savedSearch()]), 'name="place"');
+  });
+
   it("escapes a stored name", () => {
     const html = savedSearchesPanel([savedSearch({ name: '<img src=x onerror="alert(1)">' })]);
 
@@ -123,6 +175,40 @@ describe("savedSearchesPanel", () => {
     const failed = savedSearchesPanel([], { error: "Could not load." });
     assert.include(failed, "Could not load.");
     assert.notInclude(failed, "No saved searches yet.");
+  });
+});
+
+describe("profilePage", () => {
+  const listingProfile = (savedSearches: ReadonlyArray<typeof SavedSearchSchema.Type>) =>
+    profilePage({ role: "lister", values: emptyProfileFormValues, savedSearches });
+
+  it("carries the saved searches on the listing profile", () => {
+    const html = listingProfile([savedSearch()]);
+
+    assert.include(html, 'id="saved-searches"');
+    assert.include(html, "Balcony rooms in Attica");
+    assert.include(html, "Room in Attica");
+    assert.include(html, 'href="/search?saved=7"');
+    assert.include(html, 'action="/search/saved/7/delete"');
+  });
+
+  it("says the list could not be loaded without claiming there are none", () => {
+    const html = profilePage({
+      role: "lister",
+      values: emptyProfileFormValues,
+      savedSearchesError: "Your saved searches could not be loaded just now.",
+    });
+
+    assert.include(html, "Your saved searches could not be loaded just now.");
+    assert.notInclude(html, "No saved searches yet.");
+  });
+
+  // The seeking profile is unchanged, and a page with no saved-search state is
+  // not given an empty one.
+  it("leaves the seeking profile without a saved-search section", () => {
+    const html = profilePage({ role: "seeker", values: emptyProfileFormValues });
+
+    assert.notInclude(html, 'id="saved-searches"');
   });
 });
 
