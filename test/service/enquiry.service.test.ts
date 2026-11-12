@@ -196,6 +196,51 @@ layer(TestLive, { concurrent: false })("EnquiryService", (it) => {
     }),
   );
 
+  it.effect("refuses a sender whose profile contact is blank and whose account has no email", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-enq-no-contact-owner", "no-contact-owner@test.local");
+      yield* insertUser("u-enq-no-contact-sender", "   ");
+      yield* insertSeeker("u-enq-no-contact-sender", { name: "Ada Seeker", contact: "   " });
+      yield* insertListing(6111, "u-enq-no-contact-owner", { status: "published" });
+      const service = yield* EnquiryService;
+
+      const refused = yield* Effect.flip(
+        service.send(userId("u-enq-no-contact-sender"), listingId(6111), {
+          message: "Can you reply to this?",
+        }),
+      );
+      assert.strictEqual(refused._tag, "EnquiryValidationError");
+      if (refused._tag === "EnquiryValidationError") {
+        assert.include(refused.message, "contact detail");
+      }
+
+      const received = yield* service.listReceived(userId("u-enq-no-contact-owner"));
+      assert.strictEqual(received.items.length, 0);
+    }),
+  );
+
+  it.effect("sends with the profile contact line when the account has no email", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-enq-contact-only-owner", "contact-only-owner@test.local");
+      yield* insertUser("u-enq-contact-only-sender", "\t");
+      yield* insertSeeker("u-enq-contact-only-sender", {
+        name: "Ada Seeker",
+        contact: "ada@example.test",
+      });
+      yield* insertListing(6112, "u-enq-contact-only-owner", { status: "published" });
+      const service = yield* EnquiryService;
+
+      yield* service.send(userId("u-enq-contact-only-sender"), listingId(6112), {
+        message: "Hello there",
+      });
+
+      const received = yield* service.listReceived(userId("u-enq-contact-only-owner"));
+      assert.strictEqual(received.items.length, 1);
+      assert.strictEqual(received.items[0]?.senderName, "Ada Seeker");
+      assert.strictEqual(received.items[0]?.senderContact, "ada@example.test");
+    }),
+  );
+
   it.effect("bounds both lists and walks them with a cursor without gaps or repeats", () =>
     Effect.gen(function* () {
       yield* insertUser("u-enq-page-owner", "enq-page-owner@test.local");

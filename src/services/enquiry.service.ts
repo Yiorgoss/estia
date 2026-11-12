@@ -172,7 +172,15 @@ export const EnquiryServiceLive = Layer.effect(
               }),
             );
           }
-          const senderContact = nonBlank(profile?.contact) ?? accountEmail ?? "";
+          const senderContact = nonBlank(profile?.contact) ?? accountEmail;
+          if (senderContact === undefined) {
+            return yield* Effect.fail(
+              new EnquiryValidationError({
+                message:
+                  "Your account has no contact detail to show the lister. Add a contact detail to your profile before sending an enquiry.",
+              }),
+            );
+          }
 
           return yield* fromSql(
             enquiries.create(listingId, senderId, message, senderName, senderContact),

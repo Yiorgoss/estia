@@ -48,7 +48,6 @@ const enquiriesHref = (
   const sent = overrides.sent ?? state.sentCursor;
   if (received !== undefined) search.set("receivedCursor", encodeKeysetCursor(received));
   if (sent !== undefined) search.set("sentCursor", encodeKeysetCursor(sent));
-  if (state.sentBanner === true) search.set("sent", "1");
   const query = search.toString();
   return query === "" ? "/enquiries" : `/enquiries?${query}`;
 };

@@ -75,6 +75,19 @@ describe("enquiriesPage", () => {
     assert.notInclude(enquiriesPage(pages), "Your enquiry was sent");
   });
 
+  it("does not carry the send confirmation into a next page link", () => {
+    const next = { createdAt: 1_700_000_000_000, id: 7 };
+    const html = enquiriesPage({
+      received: { items: [received()], nextCursor: next },
+      sent: { items: [sent()], nextCursor: next },
+      sentBanner: true,
+    });
+
+    assert.include(html, "Your enquiry was sent");
+    assert.include(html, "Next page");
+    assert.notInclude(html, "sent=1");
+  });
+
   it("links each list to its next page independently", () => {
     const receivedNext = { createdAt: 1_700_000_000_000, id: 7 };
     const sentCursor = { createdAt: 1_699_000_000_000, id: 3 };

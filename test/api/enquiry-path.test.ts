@@ -41,6 +41,17 @@ const listerUser = (label: string) =>
     return user;
   });
 
+const registerWithoutEmail = (email: string) =>
+  Effect.gen(function* () {
+    const registered = yield* send("POST", "/api/auth/register", {
+      payload: { email, password: "correct horse battery staple" },
+    });
+    assert.strictEqual(registered.status, 200, registered.body);
+    const access = registered.cookies["access_token"];
+    assert.isString(access);
+    return `access_token=${access}`;
+  });
+
 const createListing = (user: TestUser, overrides: Record<string, unknown> = {}) =>
   Effect.gen(function* () {
     const response = yield* send("POST", "/api/listings", {
@@ -367,6 +378,63 @@ describe("POST /api/listings/:id/enquiries", () => {
       }),
   );
 
+  it.effect("refuses a sender with no contact detail and records no enquiry", () =>
+    Effect.gen(function* () {
+      const cookie = yield* registerWithoutEmail("   ");
+      const saved = yield* send("PUT", "/api/users/profile", {
+        cookie,
+        payload: seekerPayload({ name: "No Contact", contact: "   " }),
+      });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const message = `No contact ${Date.now()}`;
+      const response = yield* send("POST", `/api/listings/${listingId}/enquiries`, {
+        cookie,
+        payload: { message },
+      });
+      assert.strictEqual(response.status, 400, response.body);
+      const body = asObject(response.json);
+      assert.strictEqual(body["_tag"], "EnquiryValidationError");
+      assert.include(String(body["message"]), "contact detail");
+
+      const sent = yield* call("/api/enquiries/sent", {
+        headers: { cookie, "user-agent": agent },
+      });
+      assert.strictEqual(sent.status, 200, sent.body);
+      assert.isUndefined(sentItems(sent).find((item) => item.message === message));
+    }),
+  );
+
+  it.effect("refuses a lister-only sender with no name, contact, or account email", () =>
+    Effect.gen(function* () {
+      const cookie = yield* registerWithoutEmail("  ");
+      const switched = yield* call(
+        "/api/users/change-role",
+        json({ method: "POST", headers: { cookie, origin: testOrigin } }),
+      );
+      assert.strictEqual(switched.status, 200, switched.body);
+      const saved = yield* send("PUT", "/api/users/profile", {
+        cookie,
+        payload: listerPayload({ name: "Only Lets", contact: "   " }),
+      });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const message = `No identity ${Date.now()}`;
+      const pageSend = yield* call(
+        `/listings/${listingId}/enquiries`,
+        form({ method: "POST", headers: { cookie, "user-agent": agent } }, { message }),
+      );
+      assert.strictEqual(pageSend.status, 400, pageSend.body);
+      assert.include(pageSend.body, "no name or email");
+
+      const sent = yield* call("/api/enquiries/sent", {
+        headers: { cookie, "user-agent": agent },
+      });
+      assert.strictEqual(sent.status, 200, sent.body);
+      assert.isUndefined(sentItems(sent).find((item) => item.message === message));
+    }),
+  );
+
   it.effect("snapshots the sender identity when the enquiry is sent", () =>
     Effect.gen(function* () {
       const sender = yield* register("enq-snapshot-seeker");
@@ -585,6 +653,33 @@ describe("the contact form on a listing detail page", () => {
       assert.strictEqual(refused.status, 400, refused.body);
       assert.include(refused.body, "Write a message up to 2000 characters.");
       assert.include(refused.body, `action="/listings/${listingId}/enquiries"`);
+    }),
+  );
+
+  it.effect("returns a missing contact detail to the listing page with what was typed", () =>
+    Effect.gen(function* () {
+      const cookie = yield* registerWithoutEmail("\t");
+      const saved = yield* send("PUT", "/api/users/profile", {
+        cookie,
+        payload: seekerPayload({ name: "No Contact", contact: "" }),
+      });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const message = `Page no contact ${Date.now()}`;
+      const refused = yield* call(
+        `/listings/${listingId}/enquiries`,
+        form({ method: "POST", headers: { cookie, "user-agent": agent } }, { message }),
+      );
+      assert.strictEqual(refused.status, 400, refused.body);
+      assert.include(refused.body, "contact detail");
+      assert.include(refused.body, message);
+      assert.include(refused.body, `action="/listings/${listingId}/enquiries"`);
+
+      const listerPage = yield* call("/enquiries", {
+        headers: { cookie: world.lister.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(listerPage.status, 200, listerPage.body);
+      assert.notInclude(listerPage.body, message);
     }),
   );
 
