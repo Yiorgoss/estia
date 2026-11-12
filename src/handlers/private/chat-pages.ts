@@ -1,4 +1,9 @@
-import { CHAT_MESSAGE_PAGE_MAX_LIMIT, decodeChatId, SendMessageInput } from "@/db/schema/Chat";
+import {
+  CHAT_MESSAGE_MAX_LENGTH,
+  CHAT_MESSAGE_PAGE_MAX_LIMIT,
+  decodeChatId,
+  SendMessageInput,
+} from "@/db/schema/Chat";
 import type { ChatId, UserId } from "@/db/schema/brands";
 import { decodeListingId } from "@/db/schema/Listing";
 import { chatErrorPage, chatInboxPage, chatThreadPage } from "@/frontend/pages/chats";
@@ -74,7 +79,7 @@ const decodeMessageForm = (
   });
   return Option.isSome(decoded)
     ? { ok: true, input: decoded.value }
-    : { ok: false, message: "Write a message of 1 to 4000 characters." };
+    : { ok: false, message: `Write a message of 1 to ${CHAT_MESSAGE_MAX_LENGTH} characters.` };
 };
 
 const describeError = (
@@ -237,8 +242,8 @@ const startChatRoute = HttpRouter.route("POST", "/chats/start", (request) =>
 /*
  * The no-socket send path. A rejected message is shown on the thread it was
  * written on, so the person can fix it without navigating; the thread is re-read
- * first, so the page carries the conversation as it stands, including the
- * messages that arrived while the form was being filled in.
+ * first, so the page carries the chat as it stands, including the messages that
+ * arrived while the form was being filled in.
  */
 const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (request) =>
   Effect.gen(function* () {

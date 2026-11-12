@@ -1,4 +1,10 @@
-import type { ChatDetail, ChatInbox, ChatMessage, ChatMessages } from "@/db/schema/Chat";
+import {
+  CHAT_MESSAGE_MAX_LENGTH,
+  type ChatDetail,
+  type ChatInbox,
+  type ChatMessage,
+  type ChatMessages,
+} from "@/db/schema/Chat";
 import type { UserId } from "@/db/schema/brands";
 import {
   errorBanner,
@@ -89,7 +95,7 @@ export const chatInboxPage = (inbox: ChatInbox, options: { readonly error?: stri
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-gray-900">Chats</h1>
-        <p class="mt-1 text-sm text-gray-600">Every conversation you are part of, newest activity first.</p>
+        <p class="mt-1 text-sm text-gray-600">Every chat you are part of, newest activity first.</p>
       </div>
       <a href="/search" class="${secondaryButtonClass}">Search listings</a>
     </div>
@@ -164,7 +170,7 @@ export const chatThreadPage = (
 
         <form id="chat-form" method="post" action="/chats/${detail.id}/messages" class="border-t border-gray-100 p-5">
           <label for="chat-body" class="block text-sm font-medium text-gray-900">Message</label>
-          <textarea id="chat-body" name="body" rows="3" required maxlength="4000"
+          <textarea id="chat-body" name="body" rows="3" required maxlength="${CHAT_MESSAGE_MAX_LENGTH}"
                     class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none">${options.draft === undefined ? "" : escapeHtml(options.draft)}</textarea>
           <input type="hidden" name="clientMessageId" value="${crypto.randomUUID()}" />
           <div class="mt-3 flex items-center gap-3">
@@ -315,12 +321,12 @@ export const chatThreadPage = (
         };
 
         form.addEventListener("submit", (event) => {
-          if (pending !== null) {
-            event.preventDefault();
+          if (socket === null || socket.readyState !== 1) {
+            pending = null;
             return;
           }
-          if (socket === null || socket.readyState !== 1) return;
           event.preventDefault();
+          if (pending !== null) return;
           const body = input.value.trim();
           if (body === "") return;
           pending = { clientMessageId: newId(), body: body };

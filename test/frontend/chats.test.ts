@@ -1,5 +1,11 @@
 import { ChatId, ChatMessageId, ListingId, UserId } from "@/db/schema/brands";
-import type { ChatDetail, ChatInbox, ChatMessage, ChatMessages } from "@/db/schema/Chat";
+import {
+  CHAT_MESSAGE_MAX_LENGTH,
+  type ChatDetail,
+  type ChatInbox,
+  type ChatMessage,
+  type ChatMessages,
+} from "@/db/schema/Chat";
 import { chatErrorPage, chatInboxPage, chatThreadPage } from "@/frontend/pages/chats";
 import { assert, describe, it } from "@effect/vitest";
 import { Schema } from "effect";
@@ -125,6 +131,7 @@ describe("chatThreadPage", () => {
     assert.include(html, "Sunny studio in Athens");
     assert.include(html, 'href="/listings/9"');
     assert.include(html, 'action="/chats/4/messages"');
+    assert.include(html, `maxlength="${CHAT_MESSAGE_MAX_LENGTH}"`);
     assert.include(html, 'data-seq="1"');
     assert.include(html, 'data-seq="2"');
     // The reader's own message reads as "You", the counterpart's by name.
