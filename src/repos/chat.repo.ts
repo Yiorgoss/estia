@@ -238,9 +238,7 @@ export const ChatRepositoryLive = Layer.effect(
           ORDER BY seq DESC
              LIMIT ${limit}
             `.pipe(
-          Effect.map((rows) =>
-            rows.map((row) => decode(ChatMessageSchema, row)).reverse(),
-          ),
+          Effect.map((rows) => rows.map((row) => decode(ChatMessageSchema, row)).reverse()),
         ),
 
       markRead: (chatId, userId, seq) =>

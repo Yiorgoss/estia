@@ -404,9 +404,7 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
           ? { _tag: "owner" }
           : { _tag: "member" };
 
-    return HttpServerResponse.html(
-      listingDetailPage(toPublicListing(listing, photos), contact),
-    );
+    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos), contact));
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),

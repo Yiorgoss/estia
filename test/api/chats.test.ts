@@ -65,12 +65,7 @@ const createListing = (
     return { id, title: String(listing["title"]) };
   });
 
-const startChat = (
-  seeker: TestUser,
-  listingId: number,
-  body: string,
-  clientMessageId?: string,
-) =>
+const startChat = (seeker: TestUser, listingId: number, body: string, clientMessageId?: string) =>
   call(
     "/chats/start",
     form(
@@ -244,17 +239,13 @@ describe("the chat JSON API", () => {
       });
       assert.strictEqual(second.status, 200, second.body);
 
-      const beforeAck = (yield* inbox(users.owner)).find(
-        (item) => Number(item["id"]) === chatId,
-      );
+      const beforeAck = (yield* inbox(users.owner)).find((item) => Number(item["id"]) === chatId);
       assert.strictEqual(beforeAck?.["unreadCount"], 1);
 
       const stale = yield* acknowledge(users.owner, chatId, 1);
       assert.strictEqual(stale.status, 200, stale.body);
       assert.strictEqual(asObject(stale.json)["lastReadSeq"], 1);
-      const stillUnread = (yield* inbox(users.owner)).find(
-        (item) => Number(item["id"]) === chatId,
-      );
+      const stillUnread = (yield* inbox(users.owner)).find((item) => Number(item["id"]) === chatId);
       assert.strictEqual(stillUnread?.["unreadCount"], 1);
 
       const acknowledged = yield* acknowledge(users.owner, chatId, 2);
@@ -270,9 +261,7 @@ describe("the chat JSON API", () => {
         clientMessageId: "read-third",
       });
       assert.strictEqual(third.status, 200, third.body);
-      const afterThird = (yield* inbox(users.owner)).find(
-        (item) => Number(item["id"]) === chatId,
-      );
+      const afterThird = (yield* inbox(users.owner)).find((item) => Number(item["id"]) === chatId);
       assert.strictEqual(afterThird?.["unreadCount"], 1);
     }),
   );
@@ -360,10 +349,9 @@ describe("the chat JSON API", () => {
         Array.from({ length: total }, (_, index) => index + 1),
       );
 
-      const both = yield* call(
-        `/api/chats/${chatId}/messages?after=1&before=2`,
-        { headers: { cookie: users.seeker.cookie } },
-      );
+      const both = yield* call(`/api/chats/${chatId}/messages?after=1&before=2`, {
+        headers: { cookie: users.seeker.cookie },
+      });
       assert.strictEqual(both.status, 400, both.body);
 
       const refused = yield* call(
@@ -651,13 +639,13 @@ describe("the chat pages", () => {
         `/chats/${chatId}/messages`,
         form(
           { method: "POST", headers: { cookie: users.owner.cookie, origin: testOrigin } },
-          { body: "   ", clientMessageId: '<img src=x onerror=alert(1)>' },
+          { body: "   ", clientMessageId: "<img src=x onerror=alert(1)>" },
         ),
       );
       assert.strictEqual(refused.status, 400, refused.body);
       assert.include(refused.body, `1 to ${CHAT_MESSAGE_MAX_LENGTH} characters`);
-      assert.notInclude(refused.body, '<img src=x onerror=');
-      assert.include(refused.body, '&lt;img src=x onerror=alert(1)&gt;');
+      assert.notInclude(refused.body, "<img src=x onerror=");
+      assert.include(refused.body, "&lt;img src=x onerror=alert(1)&gt;");
     }),
   );
 
