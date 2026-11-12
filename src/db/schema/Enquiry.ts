@@ -4,7 +4,7 @@ import { Schema, SchemaTransformation } from "effect";
 
 /*
  * An enquiry is the smallest record that closes the marketplace loop: one short
- * message from a signed-in seeker against one listing. The sender is the account
+ * message from a signed-in account against one listing. The sender is the account
  * the session proves, never a request field, and there is no thread, no read
  * receipt, and no reply - the lister reads it and answers on the contact details
  * recorded with it.
@@ -42,7 +42,7 @@ export const SendEnquiryInput = Schema.Struct({
 export type SendEnquiryInput = typeof SendEnquiryInput.Type;
 
 /*
- * What the seeker sent. It carries the listing title so the list reads without a
+ * What the sender sent. It carries the listing title so the list reads without a
  * second request, and no identity at all: the rows are already scoped to the
  * caller, so repeating their account id would only widen the wire shape.
  */

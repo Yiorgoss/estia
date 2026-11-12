@@ -38,10 +38,7 @@ import {
 import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import { ListingPhotoService } from "@/services/listing-photo.service";
 import type { PhotoVariant } from "@/services/listing-photo.service";
-import {
-  listingNotFoundPage,
-  listingUnavailablePage,
-} from "@/frontend/pages/listing-detail";
+import { listingNotFoundPage, listingUnavailablePage } from "@/frontend/pages/listing-detail";
 import { withMinorUnitPrices } from "@/utils";
 
 const AuthGroup = HttpApiGroup.make("auth")
