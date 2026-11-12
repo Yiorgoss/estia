@@ -1472,6 +1472,11 @@ node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0xff,0xd8,0xf
   "$WORK/photo-one.jpg"
 node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,1,2,3,4]))' \
   "$WORK/photo-two.png"
+node -e '
+  const bytes = Buffer.alloc(1024 * 1024 + 1, 1);
+  Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(bytes);
+  require("fs").writeFileSync(process.argv[1], bytes);
+' "$WORK/photo-too-big.png"
 
 # An anonymous upload is refused before any row or object is written.
 BEFORE_PHOTOS="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
@@ -1491,6 +1496,15 @@ CODE=$(curl -s -o "$WORK/wrong-photo" -w '%{http_code}' \
   -H "Cookie: access_token=${ACCESS}" \
   -F "photos=@$WORK/not-an-image.txt;type=image/jpeg")
 assert_status "$CODE" 400 "a file whose bytes are not the declared image type is refused"
+
+# The per-photo cap is one megabyte, checked on the server while streaming.
+CODE=$(curl -s -o "$WORK/photo-too-big" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-too-big.png;type=image/png")
+assert_status "$CODE" 400 "a photo just over the 1 MB limit is refused"
+grep -q "1 MB" "$WORK/photo-too-big" || fail "the size refusal did not state the limit"
 
 # The owner's upload succeeds and redirects back to the edit page.
 CODE=$(curl -s -D "$WORK/photo-upload.h" -o "$WORK/photo-upload" -w '%{http_code}' \
@@ -1603,9 +1617,11 @@ node - "$WORK/photo-large.png" <<'PNG'
 const fs = require("node:fs");
 const zlib = require("node:zlib");
 
-const width = 1200;
-const height = 900;
-const raw = Buffer.alloc(height * (1 + width * 3));
+// A palette image keeps the upload below the 1 MB cap while still having a
+// long edge of 1000px, so the card image is a real downscale of the original.
+const width = 1000;
+const height = 750;
+const raw = Buffer.alloc(height * (1 + width));
 let seed = 0x2545f491;
 const next = () => {
   seed ^= seed << 13;
@@ -1614,14 +1630,15 @@ const next = () => {
   return (seed >>> 0) & 0xff;
 };
 for (let y = 0; y < height; y += 1) {
-  const row = y * (1 + width * 3);
+  const row = y * (1 + width);
   raw[row] = 0;
-  for (let x = 0; x < width; x += 1) {
-    const offset = row + 1 + x * 3;
-    raw[offset] = next();
-    raw[offset + 1] = next();
-    raw[offset + 2] = next();
-  }
+  for (let x = 0; x < width; x += 1) raw[row + 1 + x] = next();
+}
+const palette = Buffer.alloc(256 * 3);
+for (let index = 0; index < 256; index += 1) {
+  palette[index * 3] = (index * 37) & 0xff;
+  palette[index * 3 + 1] = (index * 91) & 0xff;
+  palette[index * 3 + 2] = (index * 151) & 0xff;
 }
 
 const table = new Int32Array(256).map((_, index) => {
@@ -1646,12 +1663,13 @@ const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(width, 0);
 ihdr.writeUInt32BE(height, 4);
 ihdr[8] = 8;
-ihdr[9] = 2;
+ihdr[9] = 3;
 fs.writeFileSync(
   process.argv[2],
   Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", ihdr),
+    chunk("PLTE", palette),
     chunk("IDAT", zlib.deflateSync(raw, { level: 6 })),
     chunk("IEND", Buffer.alloc(0)),
   ]),

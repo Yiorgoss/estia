@@ -272,7 +272,7 @@ export const ListingPhotoServiceLive = Layer.effect(
           if (upload.bytes.length > LISTING_PHOTO_MAX_BYTES) {
             return yield* Effect.fail(
               new ListingPhotoValidationError({
-                message: "Each photo must be 5 MB or smaller.",
+                message: "Each photo must be 1 MB or smaller.",
               }),
             );
           }

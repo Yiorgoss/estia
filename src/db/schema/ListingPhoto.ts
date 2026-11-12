@@ -21,7 +21,7 @@ import { Schema } from "effect";
  * failure never loses a photo and an owner can see which photos lack a copy.
  */
 export const LISTING_PHOTO_MAX_PER_LISTING = 10;
-export const LISTING_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+export const LISTING_PHOTO_MAX_BYTES = 1 * 1024 * 1024;
 export const LISTING_PHOTO_THUMBNAIL_LONG_EDGE = 640;
 export const LISTING_PHOTO_THUMBNAIL_QUALITY = 80;
 export const LISTING_PHOTO_THUMBNAIL_MAX_BYTES = 256 * 1024;

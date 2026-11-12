@@ -505,16 +505,33 @@ describe("server-side file validation", () => {
         assert.strictEqual(spoofed.status, 400);
         assert.include(spoofed.body, "does not look like");
 
-        const oversized = new Uint8Array(5 * 1024 * 1024 + 1);
+        const oversized = new Uint8Array(1 * 1024 * 1024 + 1);
         oversized.set(PNG_HEADER);
         const tooBig = yield* upload(id, [
           { name: "huge.png", contentType: "image/png", bytes: oversized },
         ]);
         assert.strictEqual(tooBig.status, 400);
-        assert.include(tooBig.body, "5 MB");
+        assert.include(tooBig.body, "1 MB");
 
         assert.lengthOf(yield* photosOf(id), 0);
       }),
+  );
+
+  it.effect("accepts a file just under the 1 MB limit", () =>
+    Effect.gen(function* () {
+      const id = yield* createListing();
+      const justUnder = new Uint8Array(1 * 1024 * 1024 - 1);
+      justUnder.set(PNG_HEADER);
+
+      const accepted = yield* upload(id, [
+        { name: "just-under.png", contentType: "image/png", bytes: justUnder },
+      ]);
+      assert.strictEqual(accepted.status, 303, accepted.body);
+
+      const photos = yield* photosOf(id);
+      assert.lengthOf(photos, 1);
+      assert.strictEqual(photos[0]?.byteSize, justUnder.length);
+    }),
   );
 
   it.effect("caps a listing at ten photos", () =>

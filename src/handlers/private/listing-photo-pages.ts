@@ -164,7 +164,7 @@ const renderMultipartError = (error: MultipartError): HttpServerResponse.HttpSer
     ? respond(
         listingErrorPage(
           "That upload is too large",
-          "Each photo must be 5 MB or smaller, and a listing can have at most 10 photos.",
+          "Each photo must be 1 MB or smaller, and a listing can have at most 10 photos.",
         ),
         413,
       )
@@ -194,7 +194,7 @@ const readPartBytes = (
         size += chunk.length;
         if (size > LISTING_PHOTO_MAX_BYTES) {
           return Effect.fail(
-            new ListingPhotoValidationError({ message: "Each photo must be 5 MB or smaller." }),
+            new ListingPhotoValidationError({ message: "Each photo must be 1 MB or smaller." }),
           );
         }
         chunks.push(chunk);
