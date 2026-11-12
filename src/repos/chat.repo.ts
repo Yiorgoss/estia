@@ -85,6 +85,17 @@ export interface ChatRepository {
   ) => Effect.Effect<ReadonlyArray<typeof ChatMessageSchema.Type>, SqlError>;
 
   /*
+   * The page immediately before a sequence number, oldest first. The query reads
+   * newest first so a limit takes the nearest older rows, then reverses them into
+   * display order.
+   */
+  readonly listBefore: (
+    chatId: typeof ChatId.Type,
+    beforeSeq: number,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<typeof ChatMessageSchema.Type>, SqlError>;
+
+  /*
    * Moves the caller's read mark forward, never backwards: opening an older page
    * after a newer one does not make anything unread again.
    */
@@ -217,6 +228,20 @@ export const ChatRepositoryLive = Layer.effect(
           ORDER BY seq ASC
              LIMIT ${limit}
             `.pipe(Effect.map((rows) => rows.map((row) => decode(ChatMessageSchema, row)))),
+
+      listBefore: (chatId, beforeSeq, limit) =>
+        sql<Record<string, unknown>>`
+            SELECT *
+              FROM chat_messages
+             WHERE chat_id = ${chatId}
+               AND seq < ${beforeSeq}
+          ORDER BY seq DESC
+             LIMIT ${limit}
+            `.pipe(
+          Effect.map((rows) =>
+            rows.map((row) => decode(ChatMessageSchema, row)).reverse(),
+          ),
+        ),
 
       markRead: (chatId, userId, seq) =>
         Effect.asVoid(

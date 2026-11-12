@@ -1,6 +1,7 @@
 import {
   CHAT_MESSAGE_MAX_LENGTH,
   CHAT_MESSAGE_PAGE_MAX_LIMIT,
+  type ChatDetail,
   decodeChatId,
   SendMessageInput,
 } from "@/db/schema/Chat";
@@ -115,24 +116,33 @@ const describeError = (
   }
 };
 
+const threadMessages = (
+  chats: ChatService,
+  userId: typeof UserId.Type,
+  detail: ChatDetail,
+) =>
+  chats.listMessages(userId, detail.id, {
+    before: detail.lastSeq + 1,
+    limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,
+  });
+
 const threadErrorResponse = (
   userId: typeof UserId.Type,
   chatId: typeof ChatId.Type,
   failure: { readonly title: string; readonly message: string; readonly status: number },
   draft: string | undefined,
+  clientMessageId: string | undefined,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, ChatService> =>
   Effect.gen(function* () {
     const chats = yield* ChatService;
     const detail = yield* chats.openChat(userId, chatId);
-    const messages = yield* chats.listMessages(userId, chatId, {
-      after: Math.max(0, detail.lastSeq - CHAT_MESSAGE_PAGE_MAX_LIMIT),
-      limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,
-    });
+    const messages = yield* threadMessages(chats, userId, detail);
     return respond(
       chatThreadPage(detail, messages, {
         userId,
         error: failure.message,
         ...(draft === undefined || draft === "" ? {} : { draft }),
+        ...(clientMessageId === undefined ? {} : { clientMessageId }),
       }),
       failure.status,
     );
@@ -174,8 +184,9 @@ const chatInboxRoute = HttpRouter.route("GET", "/chats", () =>
 /*
  * One thread, and the act of reading it: `openChat` moves the caller's read mark
  * to the newest sequence number, which is what clears the inbox badge. The page
- * renders the newest page of the archive, not the oldest, and the client script
- * only asks for what comes after the last sequence number it got.
+ * renders the newest page of the archive, not the oldest; the load-earlier
+ * control asks for the page before its first sequence number, and the socket
+ * only appends what comes after the newest one it got.
  */
 const chatThreadRoute = HttpRouter.route("GET", "/chats/:id", () =>
   Effect.gen(function* () {
@@ -185,10 +196,7 @@ const chatThreadRoute = HttpRouter.route("GET", "/chats/:id", () =>
     const userId = yield* callerId;
     const chats = yield* ChatService;
     const detail = yield* chats.openChat(userId, id);
-    const messages = yield* chats.listMessages(userId, id, {
-      after: Math.max(0, detail.lastSeq - CHAT_MESSAGE_PAGE_MAX_LIMIT),
-      limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,
-    });
+    const messages = yield* threadMessages(chats, userId, detail);
     return respond(chatThreadPage(detail, messages, { userId }), 200);
   }).pipe(
     Effect.catchTags({
@@ -255,6 +263,11 @@ const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (reques
     const params = yield* readForm(request);
     const rawBody = params["body"];
     const draft = typeof rawBody === "string" ? rawBody : undefined;
+    const rawClientMessageId = params["clientMessageId"];
+    const submittedClientMessageId =
+      typeof rawClientMessageId === "string" && rawClientMessageId !== ""
+        ? rawClientMessageId
+        : undefined;
     const decoded = decodeMessageForm(params);
     if (!decoded.ok) {
       const userId = yield* callerId;
@@ -263,6 +276,7 @@ const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (reques
         id,
         { title: "That message could not be sent", message: decoded.message, status: 400 },
         draft,
+        submittedClientMessageId,
       );
     }
 
@@ -278,7 +292,13 @@ const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (reques
             respond(chatErrorPage(failure.title, failure.message), failure.status),
           );
         }
-        return threadErrorResponse(userId, id, failure, decoded.input.body);
+        return threadErrorResponse(
+          userId,
+          id,
+          failure,
+          decoded.input.body,
+          decoded.input.clientMessageId,
+        );
       }),
     );
   }),

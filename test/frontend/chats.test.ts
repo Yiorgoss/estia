@@ -1,6 +1,7 @@
 import { ChatId, ChatMessageId, ListingId, UserId } from "@/db/schema/brands";
 import {
   CHAT_MESSAGE_MAX_LENGTH,
+  CHAT_MESSAGE_PAGE_MAX_LIMIT,
   type ChatDetail,
   type ChatInbox,
   type ChatMessage,
@@ -37,9 +38,14 @@ const detail = (overrides: Partial<ChatDetail> = {}): ChatDetail => ({
   ...overrides,
 });
 
-const thread = (messages: ReadonlyArray<ChatMessage>, lastSeq = 2): ChatMessages => ({
+const thread = (
+  messages: ReadonlyArray<ChatMessage>,
+  lastSeq = 2,
+  hasEarlier = false,
+): ChatMessages => ({
   items: messages,
   lastSeq,
+  hasEarlier,
 });
 
 describe("chatInboxPage", () => {
@@ -140,6 +146,31 @@ describe("chatThreadPage", () => {
     assert.include(html, "12 Nov, 10:20");
     // The socket client and the element it clones for a live message.
     assert.include(html, 'id="chat-message-template"');
+  });
+
+  it("offers the earlier page only while older messages exist", () => {
+    const withEarlier = chatThreadPage(detail(), thread([message({ seq: 100 })], 100, true), {
+      userId: user("user-owner"),
+    });
+    assert.include(withEarlier, 'id="chat-load-earlier"');
+    assert.include(withEarlier, 'data-before="100"');
+    assert.include(withEarlier, `data-limit="${CHAT_MESSAGE_PAGE_MAX_LIMIT}"`);
+    assert.include(withEarlier, "Load earlier messages");
+
+    const earliest = chatThreadPage(detail(), thread([message({ seq: 1 })], 1, false), {
+      userId: user("user-owner"),
+    });
+    assert.notInclude(earliest, 'id="chat-load-earlier"');
+  });
+
+  it("carries the submitted client message id into an error re-render", () => {
+    const html = chatThreadPage(detail(), thread([message()]), {
+      userId: user("user-seeker"),
+      error: "That message could not be sent.",
+      clientMessageId: "submitted-id",
+    });
+
+    assert.include(html, 'name="clientMessageId" value="submitted-id"');
   });
 
   it("escapes a message body instead of executing it", () => {

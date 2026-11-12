@@ -135,6 +135,9 @@ export const ChatMessagesSchema = Schema.Struct({
   // The chat's highest allocated sequence number, so a client knows whether it
   // has caught up without asking a second question.
   lastSeq: Schema.Int,
+  // Whether messages older than this page's first item exist, so the thread can
+  // stop offering an earlier page at the first message.
+  hasEarlier: Schema.Boolean,
 });
 export type ChatMessages = typeof ChatMessagesSchema.Type;
 
@@ -166,9 +169,11 @@ export type ChatRead = typeof ChatReadSchema.Type;
 
 /*
  * A cursor over the archive: `after` is the highest sequence number the caller
- * already has, so a reconnect asks for what it missed rather than for a page
- * number. Query parameters arrive as strings, so both fields carry a string
- * codec, and a blank or non-integer one is a bad request instead of seq 0.
+ * already has, so a reconnect asks for what it missed; `before` is the oldest
+ * sequence number it already has, so the thread can ask for the page immediately
+ * older. The two are different questions and cannot be combined. Query
+ * parameters arrive as strings, so every field carries a string codec, and a
+ * blank or non-integer one is a bad request instead of seq 0.
  */
 const ChatSeqFromString = NonBlankFiniteFromString.check(
   Schema.isInt(),
@@ -182,10 +187,19 @@ const ChatMessageLimitFromString = NonBlankFiniteFromString.pipe(
   ),
 );
 
+const validateMessageCursor = (query: {
+  readonly after?: number | undefined;
+  readonly before?: number | undefined;
+}): ReadonlyArray<Schema.FilterIssue> =>
+  query.after !== undefined && query.before !== undefined
+    ? [{ path: ["before"], issue: "after and before cannot both be set" }]
+    : [];
+
 export const ChatMessagesQuery = Schema.Struct({
   after: Schema.optional(ChatSeqFromString),
+  before: Schema.optional(ChatSeqFromString),
   limit: ChatMessageLimitFromString.pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(CHAT_MESSAGE_PAGE_DEFAULT_LIMIT)),
   ),
-});
+}).check(Schema.makeFilter(validateMessageCursor));
 export type ChatMessagesQuery = typeof ChatMessagesQuery.Type;

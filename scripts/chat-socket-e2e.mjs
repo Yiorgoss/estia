@@ -61,11 +61,10 @@ const register = async (label) => {
   return { cookie, id: accountId(cookie), email };
 };
 
-const json = (cookie, payload) => ({
+const json = (cookie) => ({
   "content-type": "application/json",
   "user-agent": "chat-e2e",
   cookie,
-  ...(payload === undefined ? {} : {}),
 });
 
 const form = (cookie, fields, origin = ORIGIN) => ({
@@ -330,6 +329,20 @@ const main = async () => {
     "the archive reads back in one strictly increasing order",
     seqs.every((seq, index) => index === 0 || seq > seqs[index - 1]),
     JSON.stringify(seqs),
+  );
+
+  const newestPage = await request(
+    `/api/chats/${chatId}/messages?before=${ordered.json.lastSeq + 1}&limit=100`,
+    { headers: json(seeker.cookie) },
+  );
+  const newestSeqs = newestPage.json.items.map((item) => item.seq);
+  check(
+    "a before page returns the newest history in order",
+    newestPage.status === 200 &&
+      newestSeqs.every((seq, index) => index === 0 || seq > newestSeqs[index - 1]) &&
+      newestSeqs.at(-1) === ordered.json.lastSeq &&
+      newestPage.json.hasEarlier === (newestSeqs[0] > 1),
+    `${newestPage.status} ${JSON.stringify(newestPage.json)}`,
   );
 
   // Unread is D1's answer: the owner's messages above the seeker's read mark.

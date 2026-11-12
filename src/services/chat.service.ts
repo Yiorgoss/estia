@@ -70,7 +70,11 @@ export interface ChatService {
   readonly listMessages: (
     userId: typeof UserId.Type,
     chatId: typeof ChatId.Type,
-    page: { readonly after: number; readonly limit: number },
+    page: {
+      readonly after?: number;
+      readonly before?: number;
+      readonly limit: number;
+    },
   ) => Effect.Effect<ChatMessages, ChatNotFoundError | InternalError>;
 
   /*
@@ -239,14 +243,29 @@ export const ChatServiceLive = Layer.effect(
       listMessages: (userId, chatId, page) =>
         Effect.gen(function* () {
           const access = yield* load(userId, chatId);
-          const items = yield* fromSql(
-            repo.listMessages(
-              chatId,
-              page.after,
-              page.limit > 0 ? page.limit : CHAT_MESSAGE_PAGE_DEFAULT_LIMIT,
-            ),
-          );
-          return { items, lastSeq: access.lastSeq } satisfies ChatMessages;
+          const limit = page.limit > 0 ? page.limit : CHAT_MESSAGE_PAGE_DEFAULT_LIMIT;
+
+          if (page.before !== undefined) {
+            const rows = yield* fromSql(repo.listBefore(chatId, page.before, limit + 1));
+            const hasEarlier = rows.length > limit;
+            return {
+              items: hasEarlier ? rows.slice(1) : rows,
+              lastSeq: access.lastSeq,
+              hasEarlier,
+            } satisfies ChatMessages;
+          }
+
+          const items = yield* fromSql(repo.listMessages(chatId, page.after ?? 0, limit));
+          const first = items[0];
+          const older =
+            first === undefined
+              ? []
+              : yield* fromSql(repo.listBefore(chatId, first.seq, 1));
+          return {
+            items,
+            lastSeq: access.lastSeq,
+            hasEarlier: older.length > 0,
+          } satisfies ChatMessages;
         }),
 
       markRead: (userId, chatId, seq) =>
