@@ -15,6 +15,13 @@ import {
 } from "@/frontend/layout";
 import { escapeHtml, formatDateTime } from "@/utils";
 
+export const NEW_MESSAGES_THRESHOLD_PX = 80;
+
+export const shouldFollowNewMessage = (
+  distanceFromBottom: number,
+  threshold: number,
+): boolean => distanceFromBottom <= threshold;
+
 /*
  * The two chat pages: the caller's inbox and one thread.
  *
@@ -174,6 +181,9 @@ export const chatThreadPage = (
               ? `<p id="chat-empty" class="text-sm text-gray-500">No messages yet. Say hello.</p>`
               : ""
           }
+          <button type="button" id="chat-new-messages"
+                  class="fixed bottom-4 left-1/2 z-10 -translate-x-1/2 shadow ${secondaryButtonClass}"
+                  hidden>New messages</button>
         </div>
 
         <form id="chat-form" method="post" action="/chats/${detail.id}/messages" class="border-t border-gray-100 p-5">
@@ -213,6 +223,10 @@ export const chatThreadPage = (
 
         const clientMessageIdInput = form.querySelector('input[name="clientMessageId"]');
         const loadEarlierButton = document.getElementById("chat-load-earlier");
+        const newMessagesButton = document.getElementById("chat-new-messages");
+
+        const NEW_MESSAGES_THRESHOLD_PX = ${NEW_MESSAGES_THRESHOLD_PX};
+        const shouldFollowNewMessage = ${shouldFollowNewMessage.toString()};
 
         let lastSeq = Number(root.dataset.lastSeq || "0");
         let acknowledged = Number(root.dataset.lastReadSeq || "0");
@@ -244,6 +258,18 @@ export const chatThreadPage = (
           typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
             ? crypto.randomUUID()
             : String(Date.now()) + Math.random().toString(16).slice(2);
+
+        const distanceFromBottom = () =>
+          document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+
+        const clearNewMessages = () => {
+          if (
+            newMessagesButton !== null &&
+            shouldFollowNewMessage(distanceFromBottom(), NEW_MESSAGES_THRESHOLD_PX)
+          ) {
+            newMessagesButton.hidden = true;
+          }
+        };
 
         const renderMessage = (message) => {
           const seq = Number(message.seq);
@@ -321,6 +347,16 @@ export const chatThreadPage = (
           loadEarlierButton.addEventListener("click", loadEarlier);
         }
 
+        if (newMessagesButton !== null) {
+          newMessagesButton.addEventListener("click", () => {
+            const last = list.lastElementChild;
+            if (last !== null) last.scrollIntoView({ block: "end" });
+            newMessagesButton.hidden = true;
+          });
+        }
+
+        window.addEventListener("scroll", clearNewMessages, { passive: true });
+
         input.addEventListener("input", () => {
           if (clientMessageIdInput !== null) clientMessageIdInput.value = newId();
         });
@@ -330,11 +366,20 @@ export const chatThreadPage = (
           if (!Number.isFinite(seq) || seq <= lastSeq) return;
           lastSeq = seq;
 
+          const follow = shouldFollowNewMessage(
+            distanceFromBottom(),
+            NEW_MESSAGES_THRESHOLD_PX,
+          );
           const item = renderMessage(message);
           const empty = document.getElementById("chat-empty");
           if (empty !== null) empty.remove();
           list.appendChild(item);
-          item.scrollIntoView({ block: "end" });
+          if (follow) {
+            item.scrollIntoView({ block: "end" });
+            if (newMessagesButton !== null) newMessagesButton.hidden = true;
+          } else if (newMessagesButton !== null) {
+            newMessagesButton.hidden = false;
+          }
           if (pending === null) setStatus("");
           acknowledge();
         };

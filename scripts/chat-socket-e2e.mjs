@@ -332,7 +332,7 @@ const main = async () => {
   );
 
   const newestPage = await request(
-    `/api/chats/${chatId}/messages?before=${ordered.json.lastSeq + 1}&limit=100`,
+    `/api/chats/${chatId}/messages?before=${ordered.json.lastSeq + 1}&limit=10`,
     { headers: json(seeker.cookie) },
   );
   const newestSeqs = newestPage.json.items.map((item) => item.seq);
@@ -341,8 +341,22 @@ const main = async () => {
     newestPage.status === 200 &&
       newestSeqs.every((seq, index) => index === 0 || seq > newestSeqs[index - 1]) &&
       newestSeqs.at(-1) === ordered.json.lastSeq &&
-      newestPage.json.hasEarlier === (newestSeqs[0] > 1),
+      newestPage.json.hasEarlier === true,
     `${newestPage.status} ${JSON.stringify(newestPage.json)}`,
+  );
+
+  const earlierPage = await request(
+    `/api/chats/${chatId}/messages?before=${newestSeqs[0]}&limit=1`,
+    { headers: json(seeker.cookie) },
+  );
+  const earlierSeqs = earlierPage.json.items.map((item) => item.seq);
+  check(
+    "the next before page starts exactly one sequence below the loaded page",
+    earlierPage.status === 200 &&
+      earlierSeqs.length === 1 &&
+      earlierSeqs[0] === newestSeqs[0] - 1 &&
+      earlierSeqs.every((seq) => !newestSeqs.includes(seq)),
+    `${earlierPage.status} ${JSON.stringify(earlierPage.json)}`,
   );
 
   // Unread is D1's answer: the owner's messages above the seeker's read mark.
@@ -397,6 +411,33 @@ const main = async () => {
       threadPage.text.includes("Posted without a socket") &&
       threadPage.text.includes(`action="/chats/${chatId}/messages"`) &&
       threadPage.text.includes(`data-chat-id="${chatId}"`),
+  );
+
+  // A loaded earlier page must not make the socket replay that page again.
+  await waitFor(
+    ownerSocket.frames,
+    (frame) => frame.type === "message" && frame.message.body === "Posted without a socket",
+  );
+  const beforePagingSend = ownerSocket.frames.length;
+  const pagingBody = `paging-${Date.now()}`;
+  ownerSocket.send({
+    type: "send",
+    clientMessageId: `paging-${Date.now()}`,
+    body: pagingBody,
+  });
+  await waitFor(
+    ownerSocket.frames,
+    (frame) => frame.type === "message" && frame.message.body === pagingBody,
+  );
+  const pagingSeqs = messages(ownerSocket.frames.slice(beforePagingSend)).map(
+    (message) => message.seq,
+  );
+  check(
+    "the socket delivers exactly one new frame and none from the loaded page",
+    pagingSeqs.length === 1 &&
+      pagingSeqs[0] === ordered.json.lastSeq + 1 &&
+      earlierSeqs.every((seq) => !pagingSeqs.includes(seq)),
+    JSON.stringify(pagingSeqs),
   );
 
   // The refusals.
