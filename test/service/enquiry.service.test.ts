@@ -196,6 +196,50 @@ layer(TestLive, { concurrent: false })("EnquiryService", (it) => {
     }),
   );
 
+  it.effect("uses the listing profile's published identity for a lister-only sender", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-enq-lister-owner", "lister-id-owner@test.local");
+      yield* insertUser("u-enq-lister-sender", "lister-id-sender@test.local");
+      yield* insertLister(7104, "u-enq-lister-sender", {
+        name: "Sender Lets",
+        contact: "sender-contact@example.test",
+      });
+      yield* insertListing(6113, "u-enq-lister-owner", { status: "published" });
+      const service = yield* EnquiryService;
+
+      yield* service.send(userId("u-enq-lister-sender"), listingId(6113), { message: "Hello" });
+
+      const received = yield* service.listReceived(userId("u-enq-lister-owner"));
+      assert.strictEqual(received.items.length, 1);
+      assert.strictEqual(received.items[0]?.senderName, "Sender Lets");
+      assert.strictEqual(received.items[0]?.senderContact, "sender-contact@example.test");
+    }),
+  );
+
+  it.effect("prefers the seeking profile's identity when both profiles are published", () =>
+    Effect.gen(function* () {
+      yield* insertUser("u-enq-both-owner", "both-owner@test.local");
+      yield* insertUser("u-enq-both-sender", "both-sender@test.local");
+      yield* insertSeeker("u-enq-both-sender", {
+        name: "Both Seeking",
+        contact: "both-seeking@example.test",
+      });
+      yield* insertLister(7105, "u-enq-both-sender", {
+        name: "Both Listing",
+        contact: "both-listing@example.test",
+      });
+      yield* insertListing(6114, "u-enq-both-owner", { status: "published" });
+      const service = yield* EnquiryService;
+
+      yield* service.send(userId("u-enq-both-sender"), listingId(6114), { message: "Hello" });
+
+      const received = yield* service.listReceived(userId("u-enq-both-owner"));
+      assert.strictEqual(received.items.length, 1);
+      assert.strictEqual(received.items[0]?.senderName, "Both Seeking");
+      assert.strictEqual(received.items[0]?.senderContact, "both-seeking@example.test");
+    }),
+  );
+
   it.effect("refuses a sender whose profile contact is blank and whose account has no email", () =>
     Effect.gen(function* () {
       yield* insertUser("u-enq-no-contact-owner", "no-contact-owner@test.local");

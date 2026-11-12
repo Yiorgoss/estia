@@ -67,10 +67,10 @@ export type SentEnquiryPage = typeof SentEnquiryPage.Type;
  * What the lister reads: the enquiry, the listing it belongs to, and who sent
  * it. The sender's display name and contact line are captured on the enquiry
  * when it is sent - the seeking profile's published values when they exist,
- * otherwise the account's stored email - so a later profile edit does not
- * rewrite what the lister was told. The sender's account id stays on the
- * server, so the lister cannot use this surface to reach anything else that
- * account holds.
+ * otherwise the listing profile's, otherwise the account's stored email - so a
+ * later profile edit does not rewrite what the lister was told. The sender's
+ * account id stays on the server, so the lister cannot use this surface to
+ * reach anything else that account holds.
  */
 export const ReceivedEnquiry = Schema.Struct({
   id: EnquiryId,

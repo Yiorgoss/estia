@@ -160,19 +160,21 @@ export const EnquiryServiceLive = Layer.effect(
             );
           }
 
-          const profile = Option.getOrNull(yield* fromSql(seekers.findByUserId(senderId)));
+          const seeker = Option.getOrNull(yield* fromSql(seekers.findByUserId(senderId)));
+          const lister = Option.getOrNull(yield* fromSql(listers.findByUserId(senderId)));
           const account = Option.getOrNull(yield* fromSql(users.findById(senderId)));
           const accountEmail = nonBlank(account?.email);
-          const senderName = nonBlank(profile?.name) ?? accountEmail;
+          const senderName = nonBlank(seeker?.name) ?? nonBlank(lister?.name) ?? accountEmail;
           if (senderName === undefined) {
             return yield* Effect.fail(
               new EnquiryValidationError({
                 message:
-                  "Your account has no name or email to show the lister. Add a name to your seeking profile before sending an enquiry.",
+                  "Your account has no name or email to show the lister. Add a name to your profile before sending an enquiry.",
               }),
             );
           }
-          const senderContact = nonBlank(profile?.contact) ?? accountEmail;
+          const senderContact =
+            nonBlank(seeker?.contact) ?? nonBlank(lister?.contact) ?? accountEmail;
           if (senderContact === undefined) {
             return yield* Effect.fail(
               new EnquiryValidationError({

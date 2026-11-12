@@ -341,41 +341,75 @@ describe("POST /api/listings/:id/enquiries", () => {
     }),
   );
 
-  it.effect(
-    "falls back to the account email when a lister-only sender has no seeking identity",
-    () =>
-      Effect.gen(function* () {
-        const sender = yield* listerUser("enq-identity-sender");
-        const saved = yield* saveProfile(
-          sender,
-          listerPayload({ name: "Sender Lets", contact: "sender-contact@example.test" }),
-        );
-        assert.strictEqual(saved.status, 200, saved.body);
+  it.effect("shows a lister-only sender's published listing identity", () =>
+    Effect.gen(function* () {
+      const sender = yield* listerUser("enq-identity-sender");
+      const saved = yield* saveProfile(
+        sender,
+        listerPayload({ name: "Sender Lets", contact: "sender-contact@example.test" }),
+      );
+      assert.strictEqual(saved.status, 200, saved.body);
 
-        const message = `Identity ${Date.now()}`;
-        const sent = yield* send("POST", `/api/listings/${listingId}/enquiries`, {
-          cookie: sender.cookie,
-          payload: { message },
-        });
-        assert.strictEqual(sent.status, 200, sent.body);
+      const message = `Identity ${Date.now()}`;
+      const sent = yield* send("POST", `/api/listings/${listingId}/enquiries`, {
+        cookie: sender.cookie,
+        payload: { message },
+      });
+      assert.strictEqual(sent.status, 200, sent.body);
 
-        const received = yield* call("/api/enquiries/received", {
-          headers: { cookie: world.lister.cookie, "user-agent": agent },
-        });
-        assert.strictEqual(received.status, 200, received.body);
-        const match = sentItems(received).find((item) => item.message === message);
-        assert.isDefined(match, received.body);
-        assert.strictEqual(match?.senderName, sender.email);
-        assert.strictEqual(match?.senderContact, sender.email);
+      const received = yield* call("/api/enquiries/received", {
+        headers: { cookie: world.lister.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(received.status, 200, received.body);
+      const match = sentItems(received).find((item) => item.message === message);
+      assert.isDefined(match, received.body);
+      assert.strictEqual(match?.senderName, "Sender Lets");
+      assert.strictEqual(match?.senderContact, "sender-contact@example.test");
 
-        const page = yield* call("/enquiries", {
-          headers: { cookie: world.lister.cookie, "user-agent": agent },
-        });
-        assert.strictEqual(page.status, 200, page.body);
-        assert.include(page.body, message);
-        assert.include(page.body, `From <span class="font-medium">${sender.email}</span>`);
-        assert.include(page.body, `Contact: ${sender.email}`);
-      }),
+      const page = yield* call("/enquiries", {
+        headers: { cookie: world.lister.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, message);
+      assert.include(page.body, `From <span class="font-medium">Sender Lets</span>`);
+      assert.include(page.body, "Contact: sender-contact@example.test");
+    }),
+  );
+
+  it.effect("prefers the seeking profile when the sender has both profile kinds", () =>
+    Effect.gen(function* () {
+      const sender = yield* register("enq-both-profiles");
+      const seeking = yield* saveProfile(
+        sender,
+        seekerPayload({ name: "Both Seeking", contact: "both-seeking@example.test" }),
+      );
+      assert.strictEqual(seeking.status, 200, seeking.body);
+      const listingRole = yield* switchRole(sender);
+      assert.strictEqual(listingRole.status, 200, listingRole.body);
+      const listing = yield* saveProfile(
+        sender,
+        listerPayload({ name: "Both Listing", contact: "both-listing@example.test" }),
+      );
+      assert.strictEqual(listing.status, 200, listing.body);
+      const seekingRole = yield* switchRole(sender);
+      assert.strictEqual(seekingRole.status, 200, seekingRole.body);
+
+      const message = `Both profiles ${Date.now()}`;
+      const sent = yield* send("POST", `/api/listings/${listingId}/enquiries`, {
+        cookie: sender.cookie,
+        payload: { message },
+      });
+      assert.strictEqual(sent.status, 200, sent.body);
+
+      const received = yield* call("/api/enquiries/received", {
+        headers: { cookie: world.lister.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(received.status, 200, received.body);
+      const match = sentItems(received).find((item) => item.message === message);
+      assert.isDefined(match, received.body);
+      assert.strictEqual(match?.senderName, "Both Seeking");
+      assert.strictEqual(match?.senderContact, "both-seeking@example.test");
+    }),
   );
 
   it.effect("refuses a sender with no contact detail and records no enquiry", () =>
@@ -405,7 +439,7 @@ describe("POST /api/listings/:id/enquiries", () => {
     }),
   );
 
-  it.effect("refuses a lister-only sender with no name, contact, or account email", () =>
+  it.effect("refuses a lister-only sender with no contact detail or account email", () =>
     Effect.gen(function* () {
       const cookie = yield* registerWithoutEmail("  ");
       const switched = yield* call(
@@ -425,7 +459,7 @@ describe("POST /api/listings/:id/enquiries", () => {
         form({ method: "POST", headers: { cookie, "user-agent": agent } }, { message }),
       );
       assert.strictEqual(pageSend.status, 400, pageSend.body);
-      assert.include(pageSend.body, "no name or email");
+      assert.include(pageSend.body, "contact detail");
 
       const sent = yield* call("/api/enquiries/sent", {
         headers: { cookie, "user-agent": agent },
