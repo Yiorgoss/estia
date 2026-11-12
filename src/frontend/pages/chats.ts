@@ -268,7 +268,18 @@ export const chatThreadPage = (
           );
           socket.addEventListener("open", () => {
             retry = 0;
-            setStatus("");
+            if (pending === null) {
+              setStatus("");
+              return;
+            }
+            socket.send(
+              JSON.stringify({
+                type: "send",
+                clientMessageId: pending.clientMessageId,
+                body: pending.body,
+              }),
+            );
+            setStatus("Sending...");
           });
           socket.addEventListener("message", (event) => {
             let frame;
@@ -295,10 +306,6 @@ export const chatThreadPage = (
           });
           socket.addEventListener("close", () => {
             socket = null;
-            if (pending !== null) {
-              input.value = pending.body;
-              pending = null;
-            }
             if (leaving) return;
             setStatus("Reconnecting...");
             const wait = Math.min(1000 * Math.pow(2, retry), 8000);
@@ -308,9 +315,12 @@ export const chatThreadPage = (
         };
 
         form.addEventListener("submit", (event) => {
+          if (pending !== null) {
+            event.preventDefault();
+            return;
+          }
           if (socket === null || socket.readyState !== 1) return;
           event.preventDefault();
-          if (pending !== null) return;
           const body = input.value.trim();
           if (body === "") return;
           pending = { clientMessageId: newId(), body: body };
