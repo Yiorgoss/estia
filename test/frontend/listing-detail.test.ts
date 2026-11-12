@@ -156,11 +156,38 @@ describe("listingDetailPage contact path", () => {
     assert.include(html, 'action="/listings/7/enquiries"');
     assert.include(html, 'name="message"');
     assert.include(html, "Send enquiry");
+    assert.include(html, "Up to 2000 characters.");
+    assert.notInclude(html, "Sign in to contact");
+  });
+
+  it("shows the sender the identity the lister will read", () => {
+    const html = listingDetailPage(listing(), {
+      signedIn: true,
+      listerName: "Ada Lets",
+      listerContact: "lets@example.test",
+      senderIdentity: { name: "Ada Seeker", contact: "ada@example.test" },
+    });
+
     assert.include(
       html,
-      "The lister sees the display name and contact details from your profile, or your account email when those are not published.",
+      "The lister sees this on an enquiry you send: Ada Seeker - ada@example.test.",
     );
-    assert.notInclude(html, "Sign in to contact");
+    assert.notInclude(html, "other profile");
+  });
+
+  it("says an enquiry cannot be sent when the sender has no contact to show", () => {
+    const html = listingDetailPage(listing(), {
+      signedIn: true,
+      listerName: "Ada Lets",
+      listerContact: "lets@example.test",
+      senderIdentity: { name: "Ada Seeker", contact: null },
+    });
+
+    assert.include(
+      html,
+      "An enquiry cannot be sent until you add a contact detail to your profile.",
+    );
+    assert.notInclude(html, "The lister sees this on an enquiry you send:");
   });
 
   it("says so when the lister published no contact details and still offers the form", () => {
@@ -187,6 +214,7 @@ describe("listingDetailPage contact path", () => {
       signedIn: true,
       listerName: `<img src=x onerror=alert(1)>`,
       listerContact: `<script>alert("contact")</script>`,
+      senderIdentity: { name: `<b>sender</b>`, contact: `<i>contact</i>` },
       enquiryMessage: `<script>alert("message")</script>`,
       enquiryError: `<b>no</b>`,
     });
@@ -194,10 +222,14 @@ describe("listingDetailPage contact path", () => {
     assert.notInclude(html, "<img src=x");
     assert.notInclude(html, "<script>");
     assert.notInclude(html, "<b>no</b>");
+    assert.notInclude(html, "<b>sender</b>");
+    assert.notInclude(html, "<i>contact</i>");
     assert.include(html, "&lt;img src=x onerror=alert(1)&gt;");
     assert.include(html, "&lt;script&gt;alert(&quot;contact&quot;)&lt;/script&gt;");
     assert.include(html, "&lt;script&gt;alert(&quot;message&quot;)&lt;/script&gt;");
     assert.include(html, "&lt;b&gt;no&lt;/b&gt;");
+    assert.include(html, "&lt;b&gt;sender&lt;/b&gt;");
+    assert.include(html, "&lt;i&gt;contact&lt;/i&gt;");
   });
 });
 

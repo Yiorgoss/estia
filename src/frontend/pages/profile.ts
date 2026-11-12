@@ -2,6 +2,8 @@ import type { ProfileFormValues } from "@/frontend/profile-form";
 import { isSeekerProfileComplete } from "@/frontend/profile-form";
 import type { EditableProfileRole } from "@/db/schema/Profile";
 import type { SavedSearch } from "@/db/schema/SavedSearch";
+import type { SenderIdentity } from "@/services/enquiry.service";
+import { senderIdentityPreview } from "@/frontend/enquiry-identity";
 import {
   errorBanner,
   pageShell,
@@ -28,11 +30,6 @@ const inputClass =
 const selectClass =
   "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
 const hintClass = "mt-1 text-xs text-gray-500";
-
-// One statement of the enquiry's contact order, shared by both profile forms so
-// neither promises a source the send does not use.
-const contactHint =
-  "For an enquiry, the contact on this profile is shown first, then your other profile's, then your account email; if all are empty, the enquiry is refused.";
 
 const genderOptions = [
   { value: "male", label: "Male" },
@@ -142,9 +139,9 @@ const checkbox = (name: string, label: string, checked: boolean) => `
 const todayValue = (): string => new Date().toISOString().slice(0, 10);
 
 // The one contact field both profiles carry: free text, because it is whatever
-// the person chose to publish. Neither form requires it; each hint says what a
-// blank one discloses.
-const contactField = (value: string, hint: string) => `
+// the person chose to publish. Neither form requires it; the identity notice
+// above the fields says what an enquiry would carry right now.
+const contactField = (value: string) => `
   <div class="mt-4">
     <label for="contact" class="${labelClass}">Contact details</label>
     ${textInput("contact", {
@@ -152,7 +149,6 @@ const contactField = (value: string, hint: string) => `
       placeholder: "Email, phone, or however you want to be reached",
       autocomplete: "off",
     })}
-    <p class="${hintClass}">${hint}</p>
   </div>`;
 
 const seekerFields = (values: ProfileFormValues) => `
@@ -186,7 +182,7 @@ const seekerFields = (values: ProfileFormValues) => `
     <p class="${hintClass}">Optional. Shown to people whose listings you answer.</p>
   </div>
 
-  ${contactField(values.contact, contactHint)}
+  ${contactField(values.contact)}
 
   <fieldset class="mt-4">
     <legend class="${labelClass}">Habits</legend>
@@ -214,7 +210,7 @@ const listerFields = (values: ProfileFormValues) => `
     </p>
   </div>
 
-  ${contactField(values.contact, contactHint)}`;
+  ${contactField(values.contact)}`;
 
 const switchControl = (role: EditableProfileRole) => {
   const label = role === "seeker" ? "Switch to my listing profile" : "Switch to my seeking profile";
@@ -279,6 +275,9 @@ export interface ProfilePageState {
   // page, and the pages that explain why there is no profile to show.
   readonly savedSearches?: ReadonlyArray<SavedSearch> | undefined;
   readonly savedSearchesError?: string | undefined;
+  // What this account's enquiries carry right now, resolved by the same service
+  // the send uses, so the form shows the record instead of describing the rule.
+  readonly enquiryIdentity?: SenderIdentity | undefined;
 }
 
 /*
@@ -293,6 +292,11 @@ const savedSearchesSection = (state: ProfilePageState) =>
         place: "profile",
         error: state.savedSearchesError,
       });
+
+const enquiryIdentityNotice = (identity: SenderIdentity | undefined) =>
+  identity === undefined
+    ? ""
+    : `<p class="mt-4 rounded-md bg-gray-50 p-3 text-sm text-gray-600">${senderIdentityPreview(identity)}</p>`;
 
 export const profilePage = (state: ProfilePageState) => {
   const incomplete = state.role === "seeker" && !isSeekerProfileComplete(state.values);
@@ -328,6 +332,7 @@ export const profilePage = (state: ProfilePageState) => {
       </div>
 
       <form method="post" action="/profile" class="mt-6">
+        ${enquiryIdentityNotice(state.enquiryIdentity)}
         ${state.role === "seeker" ? seekerFields(state.values) : listerFields(state.values)}
 
         <div class="mt-6 flex flex-wrap items-center gap-3">

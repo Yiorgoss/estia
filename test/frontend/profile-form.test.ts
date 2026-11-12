@@ -19,10 +19,6 @@ import { Schema } from "effect";
  * to render: incomplete, saved, and the other role's form.
  */
 
-// The enquiry contact order the send implements, stated on both profile forms.
-const contactHint =
-  "For an enquiry, the contact on this profile is shown first, then your other profile's, then your account email; if all are empty, the enquiry is refused.";
-
 const seekerForm = (overrides: Record<string, string> = {}): Record<string, string> => ({
   name: "Ada Seeker",
   dateOfBirth: "1995-04-12",
@@ -189,8 +185,41 @@ describe("profilePage", () => {
     assert.include(html, "Add your name, date of birth and gender");
     assert.include(html, 'action="/profile"');
     assert.include(html, "Switch to my listing profile");
-    assert.include(html, contactHint);
     assert.notInclude(html, "Your profile was saved.");
+  });
+
+  it("shows each form the identity its enquiries would carry", () => {
+    const enquiryIdentity = { name: "Ada Seeker", contact: "ada@example.test" };
+    const seeking = profilePage({
+      role: "seeker",
+      values: profileFormValues(seekerForm()),
+      enquiryIdentity,
+    });
+    const listing = profilePage({
+      role: "lister",
+      values: profileFormValues({ name: "Ada Lets", ownership: "owner" }),
+      enquiryIdentity,
+    });
+
+    const preview = "The lister sees this on an enquiry you send: Ada Seeker - ada@example.test.";
+    for (const html of [seeking, listing]) {
+      assert.include(html, preview);
+      assert.notInclude(html, "other profile");
+      assert.notInclude(html, "account email");
+    }
+  });
+
+  it("says on the profile form that an enquiry cannot be sent without a contact", () => {
+    const html = profilePage({
+      role: "lister",
+      values: profileFormValues({ name: "Ada Lets", ownership: "owner" }),
+      enquiryIdentity: { name: "Ada Lets", contact: null },
+    });
+
+    assert.include(
+      html,
+      "An enquiry cannot be sent until you add a contact detail to your profile.",
+    );
   });
 
   it("drops the incomplete notice once the required fields are in place and shows a save", () => {
@@ -215,7 +244,6 @@ describe("profilePage", () => {
     assert.include(html, "Listing profile");
     assert.include(html, '<option value="owner" selected>');
     assert.include(html, "Switch to my seeking profile");
-    assert.include(html, contactHint);
     assert.include(html, "Choose whether you own the place or hold its lease.");
     // A listing profile has no seeking fields to offer.
     assert.notInclude(html, 'name="dateOfBirth"');

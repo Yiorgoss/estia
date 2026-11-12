@@ -1,4 +1,6 @@
 import type { PublicListing } from "@/api/public";
+import type { SenderIdentity } from "@/services/enquiry.service";
+import { senderIdentityPreview } from "@/frontend/enquiry-identity";
 import { head } from "@/frontend/head";
 import { header } from "@/frontend/header";
 import { kindLabels, listingFlags, regionLabels } from "@/frontend/listing-labels";
@@ -35,6 +37,9 @@ export interface ListingContactState {
   readonly isOwner?: boolean | undefined;
   readonly listerName?: string | null | undefined;
   readonly listerContact?: string | null | undefined;
+  // The identity the reader's own enquiry will carry, resolved by the same
+  // service the send uses. The form shows it instead of describing the rule.
+  readonly senderIdentity?: SenderIdentity | undefined;
   // A rejected enquiry comes back to this page with what was typed and why it
   // could not be sent.
   readonly enquiryMessage?: string | undefined;
@@ -126,6 +131,11 @@ const enquiryError = (message: string | undefined) =>
     ? ""
     : `<p class="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">${escapeHtml(message)}</p>`;
 
+const identityPreview = (identity: SenderIdentity | undefined) =>
+  identity === undefined
+    ? ""
+    : `<p class="mt-4 rounded-md bg-gray-50 p-3 text-sm text-gray-600">${senderIdentityPreview(identity)}</p>`;
+
 const contactSection = (listing: PublicListing, state: ListingContactState) => {
   if (!state.signedIn) {
     return `<section class="mt-6 border-t border-gray-100 pt-5">
@@ -155,6 +165,7 @@ const contactSection = (listing: PublicListing, state: ListingContactState) => {
   return `<section class="mt-6 border-t border-gray-100 pt-5">
       <h2 class="${sectionHeadingClass}">Contact the lister</h2>
       <div class="mt-2">${listerContactLines(state)}</div>
+      ${identityPreview(state.senderIdentity)}
 
       <form method="post" action="/listings/${listing.id}/enquiries" class="mt-4">
         <label for="message" class="mb-1 block text-sm font-medium text-gray-700">Your message</label>
@@ -168,7 +179,7 @@ const contactSection = (listing: PublicListing, state: ListingContactState) => {
           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >${escapeHtml(state.enquiryMessage ?? "")}</textarea>
         <p class="mt-1 text-xs text-gray-500">
-          Up to 2000 characters. The lister sees the display name and contact details from your profile, or your account email when those are not published.
+          Up to 2000 characters.
         </p>
         ${enquiryError(state.enquiryError)}
         <p class="mt-4">

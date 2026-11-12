@@ -30,11 +30,20 @@ export const renderListingDetail = (
           })
         : Option.none();
 
+    const senderIdentity =
+      Option.isSome(viewerId) && viewerId.value !== ownerId
+        ? yield* Effect.gen(function* () {
+            const service = yield* EnquiryService;
+            return yield* service.senderIdentityOf(viewerId.value);
+          })
+        : undefined;
+
     return listingDetailPage(listing, {
       signedIn,
       isOwner,
       listerName: Option.getOrNull(Option.map(contact, (details) => details.name)),
       listerContact: Option.getOrNull(Option.map(contact, (details) => details.contact)),
+      senderIdentity,
       enquiryMessage: state.message,
       enquiryError: state.error,
     });

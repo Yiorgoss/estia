@@ -123,12 +123,6 @@ const dateOfBirthMillis = (raw: string): Result.Result<number, FormFailure> => {
   return Result.succeed(millis);
 };
 
-/*
- * The schema reports the limits the form does not parse itself (trimmed names,
- * their length, the controlled gender and ownership sets). Naming the field it
- * rejected keeps that failure readable instead of echoing the decoder's
- * technical message.
- */
 // An emptiable box is an absence: the contact line is only published when the
 // person typed something into it.
 const contactOrNull = (raw: string): string | null => {
@@ -136,6 +130,12 @@ const contactOrNull = (raw: string): string | null => {
   return trimmed === "" ? null : trimmed;
 };
 
+/*
+ * The schema reports the limits the form does not parse itself (trimmed names,
+ * their length, the controlled gender and ownership sets). Naming the field it
+ * rejected keeps that failure readable instead of echoing the decoder's
+ * technical message.
+ */
 const seekerFieldMessages: Record<string, string> = {
   name: "Enter your name, up to 120 characters.",
   dateOfBirth: "Enter your date of birth as a calendar date.",

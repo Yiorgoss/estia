@@ -57,6 +57,17 @@ export interface ListerContact {
   readonly contact: string | null;
 }
 
+/*
+ * What an enquiry from one account carries: the sender's published name and
+ * contact, resolved once and then reused by the send, the enquiry form's
+ * preview, and the profile preview so none of them can promise a different
+ * answer from the one the lister will read.
+ */
+export interface SenderIdentity {
+  readonly name: string | null;
+  readonly contact: string | null;
+}
+
 export interface EnquiryService {
   readonly send: (
     senderId: typeof UserId.Type,
@@ -80,6 +91,15 @@ export interface EnquiryService {
     ownerId: typeof UserId.Type,
     cursor?: KeysetCursor,
   ) => Effect.Effect<typeof ReceivedEnquiryPage.Type, InternalError>;
+
+  /*
+   * The name and contact an enquiry from this account carries right now. It is
+   * the same resolution `send` stores, exposed so a page can show what the
+   * lister will see before the enquiry is written.
+   */
+  readonly senderIdentityOf: (
+    senderId: typeof UserId.Type,
+  ) => Effect.Effect<SenderIdentity, InternalError>;
 
   /*
    * The contact line a lister chose to publish. It is not part of any public
@@ -127,6 +147,21 @@ export const EnquiryServiceLive = Layer.effect(
     const seekers = yield* SeekerRepository;
     const users = yield* UserRepository;
 
+    // One resolver for the sender identity: the send stores what it answers, and
+    // the pages that preview the enquiry render the same answer, so a preview
+    // cannot drift from the record the lister will read.
+    const resolveSenderIdentity = (senderId: typeof UserId.Type) =>
+      Effect.gen(function* () {
+        const seeker = Option.getOrNull(yield* fromSql(seekers.findByUserId(senderId)));
+        const lister = Option.getOrNull(yield* fromSql(listers.findByUserId(senderId)));
+        const account = Option.getOrNull(yield* fromSql(users.findById(senderId)));
+        const accountEmail = nonBlank(account?.email);
+        return {
+          name: nonBlank(seeker?.name) ?? nonBlank(lister?.name) ?? accountEmail ?? null,
+          contact: nonBlank(seeker?.contact) ?? nonBlank(lister?.contact) ?? accountEmail ?? null,
+        } satisfies SenderIdentity;
+      });
+
     return {
       send: (senderId, listingId, input) =>
         Effect.gen(function* () {
@@ -160,12 +195,8 @@ export const EnquiryServiceLive = Layer.effect(
             );
           }
 
-          const seeker = Option.getOrNull(yield* fromSql(seekers.findByUserId(senderId)));
-          const lister = Option.getOrNull(yield* fromSql(listers.findByUserId(senderId)));
-          const account = Option.getOrNull(yield* fromSql(users.findById(senderId)));
-          const accountEmail = nonBlank(account?.email);
-          const senderName = nonBlank(seeker?.name) ?? nonBlank(lister?.name) ?? accountEmail;
-          if (senderName === undefined) {
+          const { name, contact } = yield* resolveSenderIdentity(senderId);
+          if (name === null) {
             return yield* Effect.fail(
               new EnquiryValidationError({
                 message:
@@ -173,9 +204,7 @@ export const EnquiryServiceLive = Layer.effect(
               }),
             );
           }
-          const senderContact =
-            nonBlank(seeker?.contact) ?? nonBlank(lister?.contact) ?? accountEmail;
-          if (senderContact === undefined) {
+          if (contact === null) {
             return yield* Effect.fail(
               new EnquiryValidationError({
                 message:
@@ -184,10 +213,9 @@ export const EnquiryServiceLive = Layer.effect(
             );
           }
 
-          return yield* fromSql(
-            enquiries.create(listingId, senderId, message, senderName, senderContact),
-          );
+          return yield* fromSql(enquiries.create(listingId, senderId, message, name, contact));
         }),
+      senderIdentityOf: resolveSenderIdentity,
       listSent: (senderId, cursor) => fromSql(enquiries.listBySender(senderId, cursor)),
       listReceived: (ownerId, cursor) => fromSql(enquiries.listByOwner(ownerId, cursor)),
       listerContactOf: (ownerId) =>

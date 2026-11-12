@@ -12,6 +12,7 @@ import {
 } from "@/frontend/profile-form";
 import { profileChoicePage, profilePage, profileUnavailablePage } from "@/frontend/pages/profile";
 import { UnauthorizedError } from "@/services/auth.service";
+import { EnquiryService } from "@/services/enquiry.service";
 import { SavedSearchService } from "@/services/saved-search.service";
 import {
   AdminRoleSwitchError,
@@ -136,6 +137,17 @@ const savedSearchesFor = (
 const savedFlag = (params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>) =>
   params["saved"] === "1";
 
+/*
+ * What this account's enquiries carry right now. The form renders it from the
+ * same resolver the send stores, so it shows the record the lister will read
+ * instead of naming a resolution order in prose that can drift from it.
+ */
+const enquiryIdentityFor = (id: typeof UserId.Type) =>
+  Effect.gen(function* () {
+    const enquiryService = yield* EnquiryService;
+    return yield* enquiryService.senderIdentityOf(id);
+  });
+
 const completedFlag = (
   params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
 ) => params["completed"] === "1";
@@ -163,6 +175,7 @@ const getProfilePage = HttpRouter.route("GET", "/profile", () =>
     // Only the listing profile carries the saved-search section; the seeking
     // profile has no place for it and is unchanged.
     const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
+    const enquiryIdentity = yield* enquiryIdentityFor(user.id);
 
     return respond(
       profilePage({
@@ -170,6 +183,7 @@ const getProfilePage = HttpRouter.route("GET", "/profile", () =>
         values: profileFormValuesFrom(Option.getOrNull(profile)),
         saved: savedFlag(params),
         completed: completedFlag(params),
+        enquiryIdentity,
         ...savedSearches,
       }),
       200,
@@ -194,10 +208,14 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
     // A rejected submit is answered with the whole page, so the listing profile
     // keeps the saved-search section it was showing.
     const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
+    const enquiryIdentity = yield* enquiryIdentityFor(user.id);
     const decoded =
       role === "seeker" ? decodeSeekerProfileForm(params) : decodeListerProfileForm(params);
     if (!decoded.ok) {
-      return respond(profilePage({ role, values, error: decoded.message, ...savedSearches }), 400);
+      return respond(
+        profilePage({ role, values, error: decoded.message, enquiryIdentity, ...savedSearches }),
+        400,
+      );
     }
 
     const userService = yield* UserService;
@@ -206,7 +224,10 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
       Effect.catch((error: ProfilePageError) => {
         const { message, status } = describeError(error);
         return Effect.succeed(
-          respond(profilePage({ role, values, error: message, ...savedSearches }), status),
+          respond(
+            profilePage({ role, values, error: message, enquiryIdentity, ...savedSearches }),
+            status,
+          ),
         );
       }),
     );

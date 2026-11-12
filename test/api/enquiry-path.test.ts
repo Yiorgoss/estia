@@ -165,6 +165,79 @@ describe("the contact path's public surfaces", () => {
     }),
   );
 
+  it.effect("shows each sender the identity the lister will read", () =>
+    Effect.gen(function* () {
+      const seeking = yield* call(`/listings/${listingId}`, {
+        headers: { cookie: world.seeker.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(seeking.status, 200, seeking.body);
+      assert.include(
+        seeking.body,
+        "The lister sees this on an enquiry you send: Ada Seeker - ada@example.test.",
+      );
+
+      const listerOnly = yield* listerUser("enq-preview-lister");
+      const savedLister = yield* saveProfile(
+        listerOnly,
+        listerPayload({ name: "Preview Lets", contact: "preview-lets@example.test" }),
+      );
+      assert.strictEqual(savedLister.status, 200, savedLister.body);
+      const listing = yield* call(`/listings/${listingId}`, {
+        headers: { cookie: listerOnly.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(listing.status, 200, listing.body);
+      assert.include(
+        listing.body,
+        "The lister sees this on an enquiry you send: Preview Lets - preview-lets@example.test.",
+      );
+
+      const emailOnly = yield* register("enq-preview-email");
+      const byEmail = yield* call(`/listings/${listingId}`, {
+        headers: { cookie: emailOnly.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(byEmail.status, 200, byEmail.body);
+      assert.include(
+        byEmail.body,
+        `The lister sees this on an enquiry you send: ${emailOnly.email} - ${emailOnly.email}.`,
+      );
+
+      const blank = yield* registerWithoutEmail("    ");
+      const unsendable = yield* call(`/listings/${listingId}`, {
+        headers: { cookie: blank, "user-agent": agent },
+      });
+      assert.strictEqual(unsendable.status, 200, unsendable.body);
+      assert.include(
+        unsendable.body,
+        "An enquiry cannot be sent until you add a contact detail to your profile.",
+      );
+      assert.notInclude(unsendable.body, "The lister sees this on an enquiry you send:");
+    }),
+  );
+
+  it.effect("shows the profile form the identity its enquiries carry", () =>
+    Effect.gen(function* () {
+      const seeking = yield* call("/profile", {
+        headers: { cookie: world.seeker.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(seeking.status, 200, seeking.body);
+      assert.include(
+        seeking.body,
+        "The lister sees this on an enquiry you send: Ada Seeker - ada@example.test.",
+      );
+      assert.notInclude(seeking.body, "other profile");
+
+      const listing = yield* call("/profile", {
+        headers: { cookie: world.lister.cookie, "user-agent": agent },
+      });
+      assert.strictEqual(listing.status, 200, listing.body);
+      assert.include(
+        listing.body,
+        "The lister sees this on an enquiry you send: Ada Lets - lets@example.test.",
+      );
+      assert.notInclude(listing.body, "other profile");
+    }),
+  );
+
   it.effect("offers the owner their enquiries instead of a form to themselves", () =>
     Effect.gen(function* () {
       const page = yield* call(`/listings/${listingId}`, {
@@ -706,6 +779,10 @@ describe("the contact form on a listing detail page", () => {
       );
       assert.strictEqual(refused.status, 400, refused.body);
       assert.include(refused.body, "contact detail");
+      assert.include(
+        refused.body,
+        "An enquiry cannot be sent until you add a contact detail to your profile.",
+      );
       assert.include(refused.body, message);
       assert.include(refused.body, `action="/listings/${listingId}/enquiries"`);
 

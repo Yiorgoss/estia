@@ -209,6 +209,10 @@ layer(TestLive, { concurrent: false })("EnquiryService", (it) => {
 
       yield* service.send(userId("u-enq-lister-sender"), listingId(6113), { message: "Hello" });
 
+      const identity = yield* service.senderIdentityOf(userId("u-enq-lister-sender"));
+      assert.strictEqual(identity.name, "Sender Lets");
+      assert.strictEqual(identity.contact, "sender-contact@example.test");
+
       const received = yield* service.listReceived(userId("u-enq-lister-owner"));
       assert.strictEqual(received.items.length, 1);
       assert.strictEqual(received.items[0]?.senderName, "Sender Lets");
@@ -232,6 +236,10 @@ layer(TestLive, { concurrent: false })("EnquiryService", (it) => {
       const service = yield* EnquiryService;
 
       yield* service.send(userId("u-enq-both-sender"), listingId(6114), { message: "Hello" });
+
+      const identity = yield* service.senderIdentityOf(userId("u-enq-both-sender"));
+      assert.strictEqual(identity.name, "Both Seeking");
+      assert.strictEqual(identity.contact, "both-seeking@example.test");
 
       const received = yield* service.listReceived(userId("u-enq-both-owner"));
       assert.strictEqual(received.items.length, 1);
@@ -260,6 +268,10 @@ layer(TestLive, { concurrent: false })("EnquiryService", (it) => {
 
       const received = yield* service.listReceived(userId("u-enq-no-contact-owner"));
       assert.strictEqual(received.items.length, 0);
+
+      const identity = yield* service.senderIdentityOf(userId("u-enq-no-contact-sender"));
+      assert.strictEqual(identity.name, "Ada Seeker");
+      assert.strictEqual(identity.contact, null);
     }),
   );
 
