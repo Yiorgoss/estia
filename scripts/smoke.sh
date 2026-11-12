@@ -1065,11 +1065,17 @@ assert_status "$CODE" 404 "basemap route reports a missing archive"
 # 5g. saved searches
 #
 # The search page stays the visitor's page: no saved-search control and no list
-# without a session, and the API answers 401. A signed-in save from the results
-# page is then listed by the API with every criterion the results route needs,
-# re-run from the saved search's own link, and deleted from the page control.
+# without a session, and a save without one is refused. A signed-in save from
+# the results page is then listed by the search page with every criterion the
+# results route needs, re-run from the saved search's own link, and deleted from
+# the page control.
 SAVED_NAME="Smoke saved search ${SMOKE_TAG}"
 SAVED_NAME_2="Smoke saved search two ${SMOKE_TAG}"
+
+# The newest row of the saved-search panel, as the id its delete control posts.
+saved_id_of() {
+  sed -nE 's|.*action="/search/saved/([0-9]+)/delete".*|\1|p' "$1" | head -1
+}
 
 CODE=$(curl -s -o "$WORK/search-anon" -w '%{http_code}' "${BASE_URL}/search")
 assert_status "$CODE" 200 "search page for a visitor"
@@ -1085,11 +1091,6 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/search/saved"
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode "name=${SAVED_NAME}")
 assert_status "$CODE" 401 "saving a search without a session is refused"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/saved-searches")
-assert_status "$CODE" 401 "the saved-search API rejects an unauthenticated list"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "${BASE_URL}/api/saved-searches/1")
-assert_status "$CODE" 401 "the saved-search API rejects an unauthenticated delete"
 
 CODE=$(curl -s -o "$WORK/search-results-anon" -w '%{http_code}' \
   "${BASE_URL}/search/results?${FRAGMENT_QUERY}")
@@ -1127,26 +1128,9 @@ CODE=$(curl -s -o "$WORK/saved-create" -w '%{http_code}' -X POST "${BASE_URL}/se
 assert_status "$CODE" 200 "saving a search from the results page"
 grep -q "${SAVED_NAME}" "$WORK/saved-create" || fail "the save response did not list the saved search"
 grep -q 'hx-swap-oob="true"' "$WORK/saved-create" || fail "the save response did not clear the name box"
-pass "the saved search appears in the list and the name box is cleared"
-
-CODE=$(curl -s -o "$WORK/saved-list" -w '%{http_code}' "${BASE_URL}/api/saved-searches" \
-  -H "Cookie: access_token=${ACCESS}")
-assert_status "$CODE" 200 "the saved-search list"
-saved_field() {
-  # $1: name, $2: field, stdin: saved-search list JSON
-  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const item = JSON.parse(s).items.find((row) => row.name === process.argv[1]); process.stdout.write(item === undefined || item[process.argv[2]] == null ? "" : String(item[process.argv[2]])); })' "$1" "$2"
-}
-SAVED_ID="$(saved_field "$SAVED_NAME" id < "$WORK/saved-list")"
-[ -n "$SAVED_ID" ] || fail "the saved-search list did not return the saved search"
-[ "$(saved_field "$SAVED_NAME" regionCode < "$WORK/saved-list")" = "crete" ] \
-  || fail "the saved search did not keep its region"
-[ "$(saved_field "$SAVED_NAME" minPriceMinor < "$WORK/saved-list")" = "${SMOKE_MINOR}" ] \
-  || fail "the saved search did not keep its minimum price"
-[ "$(saved_field "$SAVED_NAME" maxPriceMinor < "$WORK/saved-list")" = "${SMOKE_MINOR}" ] \
-  || fail "the saved search did not keep its maximum price"
-grep -q "\"userId\":\"${USER_ID}\"" "$WORK/saved-list" \
-  || fail "the saved-search list did not name the caller"
-pass "the saved-search list carries the criteria the results page re-runs"
+SAVED_ID="$(saved_id_of "$WORK/saved-create")"
+[ -n "$SAVED_ID" ] || fail "the save response did not name the saved search's id"
+pass "the saved search appears in the list with a delete control"
 
 # The page a saved-search link opens is pre-filled with the stored criteria and
 # asks the results fragment for exactly those criteria on load.
@@ -1173,18 +1157,23 @@ fi
 pass "a saved search re-runs the same search"
 
 # Another account can neither see nor delete it.
-CODE=$(curl -s -o "$WORK/saved-other-list" -w '%{http_code}' "${BASE_URL}/api/saved-searches" \
-  -H "Cookie: access_token=${SECOND_ACCESS}")
-assert_status "$CODE" 200 "another account's saved-search list"
-if grep -q "${SAVED_NAME}" "$WORK/saved-other-list"; then
-  fail "another account's saved-search list leaked a row"
+CODE=$(curl -s -o "$WORK/saved-other-page" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "another account's search page"
+if grep -q "${SAVED_NAME}" "$WORK/saved-other-page"; then
+  fail "another account's search page leaked a saved search"
 fi
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-  "${BASE_URL}/api/saved-searches/${SAVED_ID}" -H "Cookie: access_token=${SECOND_ACCESS}")
-assert_status "$CODE" 404 "another account's delete is not found"
-CODE=$(curl -s -o "$WORK/saved-after-other" -w '%{http_code}' "${BASE_URL}/api/saved-searches" \
-  -H "Cookie: access_token=${ACCESS}")
-assert_status "$CODE" 200 "the owner's saved-search list after another account's delete"
+CODE=$(curl -s -o "$WORK/saved-other-delete" -w '%{http_code}' -X POST \
+  "${BASE_URL}/search/saved/${SAVED_ID}/delete" \
+  -H 'HX-Request: true' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "another account's delete of someone else's saved search"
+grep -q 'That saved search no longer exists.' "$WORK/saved-other-delete" \
+  || fail "another account's delete did not read as no such saved search"
+CODE=$(curl -s -o "$WORK/saved-after-other" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the owner's search page after another account's delete"
 grep -q "${SAVED_NAME}" "$WORK/saved-after-other" \
   || fail "another account's delete removed the owner's saved search"
 pass "another account's saved searches are never readable or deletable"
@@ -1200,23 +1189,26 @@ grep -q 'Saved search deleted.' "$WORK/saved-delete" || fail "the delete respons
 if grep -q "${SAVED_NAME}" "$WORK/saved-delete"; then
   fail "the deleted saved search stayed in the list"
 fi
-CODE=$(curl -s -o "$WORK/saved-gone" -w '%{http_code}' "${BASE_URL}/api/saved-searches" \
-  -H "Cookie: access_token=${ACCESS}")
-assert_status "$CODE" 200 "the saved-search list after a delete"
+CODE=$(curl -s -o "$WORK/saved-gone" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the search page after a delete"
 if grep -q "${SAVED_NAME}" "$WORK/saved-gone"; then
   fail "the deleted saved search is still listed"
 fi
-pass "deleting a saved search removes it from the list and the API"
+pass "deleting a saved search removes it from the list"
 
 # The same delete without htmx is a navigation: a redirect back to the search
 # page rather than a bare fragment.
-CODE=$(curl -s -o "$WORK/saved-create-2" -w '%{http_code}' -X POST "${BASE_URL}/api/saved-searches" \
-  -H 'Content-Type: application/json' \
+CODE=$(curl -s -o "$WORK/saved-create-2" -w '%{http_code}' -X POST "${BASE_URL}/search/saved" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'HX-Request: true' \
   -H "Origin: ${BASE_URL}" \
   -H "Cookie: access_token=${ACCESS}" \
-  -d "{\"name\":\"${SAVED_NAME_2}\",\"kind\":\"room\"}")
-assert_status "$CODE" 200 "the API saves a named search"
-SAVED_ID_2="$(node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { process.stdout.write(String(JSON.parse(s).id)); })' < "$WORK/saved-create-2")"
+  --data-urlencode "name=${SAVED_NAME_2}" \
+  --data-urlencode 'kind=room')
+assert_status "$CODE" 200 "saving a second search from the results page"
+SAVED_ID_2="$(saved_id_of "$WORK/saved-create-2")"
+[ -n "$SAVED_ID_2" ] || fail "the second save response did not name its id"
 CODE=$(curl -s -D "$WORK/saved-delete-redirect.h" -o /dev/null -w '%{http_code}' -X POST \
   "${BASE_URL}/search/saved/${SAVED_ID_2}/delete" \
   -H "Origin: ${BASE_URL}" \

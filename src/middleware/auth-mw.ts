@@ -1,8 +1,8 @@
 import { CurrentUserId } from "@/handlers/private/caller";
-import { sessionResolver } from "@/handlers/optional-caller";
+import { sessionResolver, retrySessionResponse } from "@/handlers/optional-caller";
 import { signInRequiredPage } from "@/frontend/pages/sign-in-required";
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 
 const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
   request.headers["hx-request"] === "true";
@@ -38,13 +38,12 @@ export const AuthMiddleware = HttpRouter.middleware<{ provides: CurrentUserId }>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const session = yield* resolve(request);
-        if (Option.isNone(session.caller)) {
-          return unauthenticatedResponse(request);
-        }
+        if (session._tag === "retry") return retrySessionResponse(request);
+        if (session._tag === "anonymous") return unauthenticatedResponse(request);
         yield* HttpEffect.appendPreResponseHandler((_request, response) =>
           Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
         );
-        return yield* Effect.provideService(app, CurrentUserId, session.caller.value);
+        return yield* Effect.provideService(app, CurrentUserId, session.caller);
       });
   }),
 ).layer;

@@ -19,10 +19,10 @@ import {
 import { Effect, Option, Result, Schema } from "effect";
 
 /*
- * The browser paths for saved searches, next to the JSON endpoints. They live on
- * the private router, so `AuthMiddleware` gates them and `callerId` names the
- * account; every write also passes the shared origin check, because a sibling
- * site can post these forms with the session attached.
+ * The browser paths for saved searches. They live on the private router, so
+ * `AuthMiddleware` gates them and `callerId` names the account; every write also
+ * passes the shared origin check, because a sibling site can post these forms
+ * with the session attached.
  *
  * A save and a delete answer the saved-search list fragment, which is the
  * element htmx targets. A request without htmx is answered with a redirect
@@ -162,41 +162,9 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
   }),
 );
 
-/*
- * The JSON API's delete. A DELETE is a simple request a sibling site can send
- * with the session attached, so the origin check runs before anything is
- * removed. An unknown id and another account's id are the same 404, so the
- * endpoint cannot be used to discover which saved searches exist.
- */
-const deleteSavedSearchApi = HttpRouter.route("DELETE", "/api/saved-searches/:id", (request) =>
-  Effect.gen(function* () {
-    if (!isSameOriginWrite(request)) {
-      return HttpServerResponse.text(crossSiteFormMessage, { status: 403 });
-    }
-
-    const id = yield* Effect.map(HttpRouter.params, (params) =>
-      decodeSavedSearchId(params["id"]),
-    );
-    if (id === undefined) {
-      return HttpServerResponse.text("SavedSearchNotFoundError", { status: 404 });
-    }
-
-    const ownerId = yield* callerId;
-    const savedSearchService = yield* SavedSearchService;
-    const outcome = yield* Effect.result(savedSearchService.delete(ownerId, id));
-    if (Result.isSuccess(outcome)) {
-      return HttpServerResponse.empty({ status: 204 });
-    }
-    return outcome.failure._tag === "SavedSearchNotFoundError"
-      ? HttpServerResponse.text("SavedSearchNotFoundError", { status: 404 })
-      : HttpServerResponse.text("InternalError", { status: 500 });
-  }),
-);
-
 // Exported as routes rather than a layer so the private router can register
 // them next to its other pages under one auth middleware.
 export const SavedSearchRoutes = [
-  deleteSavedSearchApi,
   createSavedSearch,
   deleteSavedSearch,
 ];

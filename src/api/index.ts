@@ -21,7 +21,6 @@ import { UserHandler } from "@/handlers/private/user.handler";
 import { ListingHandler as PrivateListingHandler } from "@/handlers/private/listing.handler";
 import { ListingServiceLive } from "@/services/listing.service";
 import { SavedSearchServiceLive } from "@/services/saved-search.service";
-import { SavedSearchHandler } from "@/handlers/private/saved-search.handler";
 import { ListingHandler as PublicListingHandler } from "@/handlers/public/listing.handler";
 
 // --- Repositories ---
@@ -86,7 +85,7 @@ export const PublicRouterLive = Layer.mergeAll(
  */
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
-  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler, SavedSearchHandler)),
+  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler)),
   Layer.provide(SameOriginWriteMiddleware),
 );
 

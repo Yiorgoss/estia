@@ -14,7 +14,7 @@ import { searchResults, searchResultsError } from "@/frontend/search-results";
 import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
 import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
-import { optionalCaller } from "@/handlers/optional-caller";
+import { optionalCaller, retrySessionResponse } from "@/handlers/optional-caller";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
 import {
@@ -212,6 +212,7 @@ const searchResultsRoute = HttpRouter.route(
   (request) =>
     Effect.gen(function* () {
       const session = yield* optionalCaller(request);
+      if (session._tag === "retry") return retrySessionResponse(request);
 
       const response = yield* Effect.gen(function* () {
         const searchParams = yield* HttpServerRequest.ParsedSearchParams;
@@ -228,7 +229,7 @@ const searchResultsRoute = HttpRouter.route(
         // Only a signed-in visitor can save a search, so only they see the save
         // control; the results themselves are identical for everyone.
         return HttpServerResponse.html(
-          searchResults(page, { canSave: Option.isSome(session.caller) }),
+          searchResults(page, { canSave: session._tag === "caller" }),
         );
       }).pipe(
         Effect.catchTags({
@@ -252,7 +253,10 @@ const searchResultsRoute = HttpRouter.route(
         }),
       );
 
-      return HttpServerResponse.setCookiesUnsafe(response, session.cookies);
+      return HttpServerResponse.setCookiesUnsafe(
+        response,
+        session._tag === "caller" ? session.cookies : [],
+      );
     }),
 );
 
@@ -266,17 +270,13 @@ const searchResultsRoute = HttpRouter.route(
 const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
   Effect.gen(function* () {
     const session = yield* optionalCaller(request);
-    if (Option.isNone(session.caller)) {
-      return HttpServerResponse.setCookiesUnsafe(
-        HttpServerResponse.html(searchPage()),
-        session.cookies,
-      );
-    }
+    if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "anonymous") return HttpServerResponse.html(searchPage());
 
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const savedSearchService = yield* SavedSearchService;
 
-    const listed = yield* Effect.result(savedSearchService.list(session.caller.value));
+    const listed = yield* Effect.result(savedSearchService.list(session.caller));
     if (Result.isFailure(listed)) {
       yield* Effect.logError("Saved searches could not be read", { error: listed.failure });
     }
@@ -287,7 +287,7 @@ const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
     const applied =
       savedId === undefined
         ? Option.none()
-        : yield* savedSearchService.findOwned(session.caller.value, savedId).pipe(
+        : yield* savedSearchService.findOwned(session.caller, savedId).pipe(
             Effect.orElseSucceed(() => Option.none()),
           );
     const appliedSearch = Option.getOrNull(applied);

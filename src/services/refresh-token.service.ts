@@ -70,6 +70,14 @@ export interface RefreshTokenService {
     typeof JWTSchema.Type,
     InternalError | UserNotFoundError | RefreshTokenNotFoundError
   >;
+  /*
+   * Whether the presented token was spent by another request moments ago. Two
+   * overlapping requests carry the same pair, and rotation is single-use, so the
+   * loser holds a token the winner just revoked - the session is still live and
+   * the winner's pair is already travelling back to the browser. A token spent
+   * earlier, revoked by signing out, expired, or never seen is not a race.
+   */
+  readonly justRotated: (token: typeof RefreshTokenValue.Type) => Effect.Effect<boolean>;
   rotateToken: (
     userId: typeof UserId.Type,
     userAgent: string,
@@ -84,9 +92,11 @@ export const RefreshTokenServiceLive = Layer.effect(
     // const domain = yield* Config.string("DOMAIN")
     const hasher = yield* HasherService;
     const refreshTokenRepo = yield* RefreshTokenRepository;
-    // const refreshTokenService = yield* RefreshTokenService
     const userRepo = yield* UserRepository;
     const jwtService = yield* JWTService;
+
+    // A rotation this recent belongs to a request that is still answering.
+    const rotationRaceWindowMs = 10_000;
 
     return {
       asCookie: (token) => Effect.succeed(["refresh_token", token, refreshCookieOptions]),
@@ -174,6 +184,14 @@ export const RefreshTokenServiceLive = Layer.effect(
             SqlError: () => Effect.fail(new InternalError()),
           }),
         ),
+      justRotated: (token) =>
+        Effect.gen(function* () {
+          const hash = yield* hasher.hashRefreshToken(token);
+          const record = yield* refreshTokenRepo.findByHash(hash);
+          if (Option.isNone(record) || record.value.revokedAt === null) return false;
+          const now = yield* Clock.currentTimeMillis;
+          return now - record.value.revokedAt <= rotationRaceWindowMs;
+        }).pipe(Effect.orElseSucceed(() => false)),
       consumeToken: (token) =>
         Effect.gen(function* () {
           //does token exist and is valid

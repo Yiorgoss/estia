@@ -1,54 +1,26 @@
-import { SavedSearchSchema } from "@/db/schema/SavedSearch";
+import { SavedSearchRowSchema } from "@/db/schema/SavedSearch";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
-import { asObject, call, form, register, send } from "../support/api";
+import { call, form, query, register, send } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 /*
- * The saved-search API, driven through the real private router: the cookie is a
- * signed access token from the real registration endpoint, and the rows are read
- * back through the list endpoint the results page uses.
+ * The saved-search feature through the real public and private routers: the
+ * browser's save and delete forms, the search page that lists what was saved,
+ * and the listing search the stored criteria re-run.
  */
 
 const users = await Effect.runPromise(
   Effect.gen(function* () {
     const owner = yield* register("saved-owner");
-    const other = yield* register("saved-other");
-    return { owner, other };
+    return { owner };
   }),
 );
 
-const criteria = () => ({
-  name: "Balcony rooms in Attica",
-  query: "balcony",
-  kind: "room",
-  regionCode: "attica",
-  minPriceMinor: 40_000,
-  maxPriceMinor: 80_000,
-  minSizeSqm: 20,
-  maxSizeSqm: 50,
-  furnished: true,
-  pets: false,
-  availableFrom: Date.UTC(2026, 2, 1),
-});
-
-const create = (user: { readonly cookie: string }, payload: Record<string, unknown>) =>
-  send("POST", "/api/saved-searches", { cookie: user.cookie, payload });
-
-const list = (user: { readonly cookie: string }) =>
-  send("GET", "/api/saved-searches", { cookie: user.cookie });
-
-const remove = (user: { readonly cookie: string }, id: unknown) =>
-  send("DELETE", `/api/saved-searches/${String(id)}`, { cookie: user.cookie });
-
-/*
- * The browser's own paths. A save is the search form's htmx post, so it carries
- * the htmx marker and the criteria as form fields; the session is the cookie
- * pair a browser holds.
- */
 const PASSWORD = "correct horse battery staple";
 
 interface BrowserSession {
+  readonly id: string;
   readonly access: string;
   readonly refresh: string;
 }
@@ -60,19 +32,22 @@ const signIn = (label: string): Effect.Effect<BrowserSession> =>
       payload: { email, password: PASSWORD },
     });
     assert.strictEqual(response.status, 200, response.body);
-    return { access: response.cookies["access_token"], refresh: response.cookies["refresh_token"] };
+    const access = response.cookies["access_token"];
+    const refresh = response.cookies["refresh_token"];
+    const claims = JSON.parse(Buffer.from(access.split(".")[1] ?? "", "base64url").toString());
+    return { id: String(claims.id), access, refresh };
   });
 
-const savedSearches = (cookie: string) =>
-  Effect.gen(function* () {
-    const response = yield* send("GET", "/api/saved-searches", { cookie });
-    assert.strictEqual(response.status, 200, response.body);
-    const items = asObject(response.json)["items"];
-    assert.isArray(items);
-    return (items as ReadonlyArray<unknown>).map((item) =>
-      Schema.decodeUnknownSync(SavedSearchSchema)(item),
-    );
-  });
+// The rows the session's account has stored, newest first, read from the table
+// the routes wrote them to.
+const storedSearches = (userId: string) =>
+  query("SELECT * FROM saved_searches WHERE user_id = ? ORDER BY created_at DESC, id DESC", [
+    userId,
+  ]).pipe(
+    Effect.map((rows) =>
+      rows.map((row) => Schema.decodeUnknownSync(SavedSearchRowSchema)(row)),
+    ),
+  );
 
 const browserSave = (
   cookie: string,
@@ -89,6 +64,8 @@ const browserSave = (
 
 const staleAccess = (session: BrowserSession) =>
   `access_token=an.expired.token; refresh_token=${session.refresh}`;
+
+const browser = (cookie: string) => ({ "user-agent": "estia-tests", cookie });
 
 /*
  * What a browser would post when the search form is submitted: every named
@@ -125,7 +102,7 @@ const resultsUrlOf = (html: string): string => {
   return encoded.replace(/&amp;/g, "&");
 };
 
-const criteriaOf = (saved: typeof SavedSearchSchema.Type) => ({
+const criteriaOf = (saved: typeof SavedSearchRowSchema.Type) => ({
   query: saved.query,
   kind: saved.kind,
   regionCode: saved.regionCode,
@@ -138,144 +115,6 @@ const criteriaOf = (saved: typeof SavedSearchSchema.Type) => ({
   smoking: saved.smoking,
   pets: saved.pets,
   availableFrom: saved.availableFrom,
-});
-
-describe("POST /api/saved-searches", () => {
-  it.effect("stores the criteria and returns the row the results page can re-run", () =>
-    Effect.gen(function* () {
-      const response = yield* create(users.owner, criteria());
-      assert.strictEqual(response.status, 200, response.body);
-
-      const saved = asObject(response.json);
-      assert.strictEqual(saved.name, "Balcony rooms in Attica");
-      assert.strictEqual(saved.userId, users.owner.id);
-      assert.strictEqual(saved.query, "balcony");
-      assert.strictEqual(saved.kind, "room");
-      assert.strictEqual(saved.regionCode, "attica");
-      assert.strictEqual(saved.minPriceMinor, 40_000);
-      assert.strictEqual(saved.maxPriceMinor, 80_000);
-      assert.strictEqual(saved.minSizeSqm, 20);
-      assert.strictEqual(saved.maxSizeSqm, 50);
-      assert.strictEqual(saved.furnished, true);
-      assert.isNull(saved.ensuite);
-      assert.strictEqual(saved.pets, false);
-      assert.strictEqual(saved.availableFrom, Date.UTC(2026, 2, 1));
-      assert.isNumber(saved.createdAt);
-    }),
-  );
-
-  it.effect("names an unnamed search after its criteria", () =>
-    Effect.gen(function* () {
-      const response = yield* create(users.owner, { regionCode: "crete" });
-      assert.strictEqual(response.status, 200, response.body);
-      assert.strictEqual(asObject(response.json).name, "Listings in Crete");
-    }),
-  );
-
-  it.effect("trims a supplied name", () =>
-    Effect.gen(function* () {
-      const response = yield* create(users.owner, { name: "  Trimmed name  " });
-      assert.strictEqual(response.status, 200, response.body);
-      assert.strictEqual(asObject(response.json).name, "Trimmed name");
-    }),
-  );
-
-  it.effect("rejects an inverted range", () =>
-    Effect.gen(function* () {
-      const response = yield* create(users.owner, {
-        minPriceMinor: 90_000,
-        maxPriceMinor: 10_000,
-      });
-      assert.strictEqual(response.status, 400);
-    }),
-  );
-
-  it.effect("rejects an unauthenticated create with a 401", () =>
-    Effect.gen(function* () {
-      const response = yield* send("POST", "/api/saved-searches", { payload: criteria() });
-      assert.strictEqual(response.status, 401);
-    }),
-  );
-});
-
-describe("GET /api/saved-searches", () => {
-  it.effect("lists only the caller's saved searches, newest first", () =>
-    Effect.gen(function* () {
-      const created = yield* create(users.owner, { name: "Newest" });
-      assert.strictEqual(created.status, 200, created.body);
-      yield* create(users.other, { name: "Someone else's" });
-
-      const response = yield* list(users.owner);
-      assert.strictEqual(response.status, 200, response.body);
-      const items = asObject(response.json)["items"];
-      assert.isArray(items);
-      const names = (items as ReadonlyArray<Record<string, unknown>>).map((item) => item["name"]);
-      assert.notInclude(names, "Someone else's");
-      assert.include(names, "Newest");
-    }),
-  );
-
-  it.effect("rejects an unauthenticated list with a 401", () =>
-    Effect.gen(function* () {
-      const response = yield* send("GET", "/api/saved-searches");
-      assert.strictEqual(response.status, 401);
-    }),
-  );
-});
-
-describe("DELETE /api/saved-searches/:id", () => {
-  it.effect("deletes the caller's own saved search", () =>
-    Effect.gen(function* () {
-      const created = yield* create(users.owner, { name: "To delete" });
-      assert.strictEqual(created.status, 200, created.body);
-      const id = asObject(created.json)["id"];
-
-      const deleted = yield* remove(users.owner, id);
-      assert.strictEqual(deleted.status, 204, deleted.body);
-
-      const after = yield* list(users.owner);
-      const items = asObject(after.json)["items"] as ReadonlyArray<Record<string, unknown>>;
-      assert.notInclude(
-        items.map((item) => item["id"]),
-        id,
-      );
-
-      // A second delete has nothing left to remove.
-      const again = yield* remove(users.owner, id);
-      assert.strictEqual(again.status, 404);
-    }),
-  );
-
-  it.effect("never deletes another account's saved search", () =>
-    Effect.gen(function* () {
-      const created = yield* create(users.owner, { name: "Owner only" });
-      assert.strictEqual(created.status, 200, created.body);
-      const id = asObject(created.json)["id"];
-
-      const refused = yield* remove(users.other, id);
-      assert.strictEqual(refused.status, 404);
-
-      const after = yield* list(users.owner);
-      const ids = (asObject(after.json)["items"] as ReadonlyArray<Record<string, unknown>>).map(
-        (item) => item["id"],
-      );
-      assert.include(ids, id);
-    }),
-  );
-
-  it.effect("rejects an unauthenticated delete with a 401", () =>
-    Effect.gen(function* () {
-      const response = yield* send("DELETE", "/api/saved-searches/1");
-      assert.strictEqual(response.status, 401);
-    }),
-  );
-
-  it.effect("treats a malformed id as no such saved search", () =>
-    Effect.gen(function* () {
-      const response = yield* remove(users.owner, "not-an-id");
-      assert.strictEqual(response.status, 404);
-    }),
-  );
 });
 
 describe("the browser's saved-search routes", () => {
@@ -295,7 +134,7 @@ describe("the browser's saved-search routes", () => {
       assert.notStrictEqual(access, "an.expired.token");
       assert.notStrictEqual(refresh, session.refresh);
 
-      const listed = yield* savedSearches(`access_token=${access}`);
+      const listed = yield* storedSearches(session.id);
       assert.lengthOf(listed, 1);
       assert.strictEqual(listed[0]?.pets, false);
 
@@ -322,7 +161,7 @@ describe("the browser's saved-search routes", () => {
       assert.strictEqual(response.location, "/search");
       assert.notStrictEqual(response.cookies["refresh_token"], session.refresh);
 
-      const listed = yield* savedSearches(`access_token=${response.cookies["access_token"]}`);
+      const listed = yield* storedSearches(session.id);
       assert.lengthOf(listed, 1);
     }),
   );
@@ -330,15 +169,15 @@ describe("the browser's saved-search routes", () => {
   it.effect("deletes an htmx post whose access token aged out", () =>
     Effect.gen(function* () {
       const session = yield* signIn("htmx-expired-delete");
-      const created = yield* send("POST", "/api/saved-searches", {
-        cookie: `access_token=${session.access}`,
-        payload: { name: "Removed after a stale click" },
+      const created = yield* browserSave(`access_token=${session.access}`, {
+        name: "Removed after a stale click",
       });
       assert.strictEqual(created.status, 200, created.body);
-      const id = asObject(created.json)["id"];
+      const [stored] = yield* storedSearches(session.id);
+      assert.isDefined(stored);
 
       const response = yield* call(
-        `/search/saved/${String(id)}/delete`,
+        `/search/saved/${String(stored.id)}/delete`,
         form(
           {
             method: "POST",
@@ -351,19 +190,20 @@ describe("the browser's saved-search routes", () => {
       assert.include(response.body, "Saved search deleted.");
       assert.notStrictEqual(response.cookies["refresh_token"], session.refresh);
 
-      const listed = yield* savedSearches(`access_token=${response.cookies["access_token"]}`);
+      const listed = yield* storedSearches(session.id);
       assert.notInclude(
         listed.map((saved) => saved.id),
-        id,
+        stored.id,
       );
     }),
   );
 
   it.effect("renders a cross-site refusal in the panel for htmx", () =>
     Effect.gen(function* () {
-      const created = yield* create(users.owner, { name: "Cross-site target" });
+      const created = yield* browserSave(users.owner.cookie, { name: "Cross-site target" });
       assert.strictEqual(created.status, 200, created.body);
-      const id = asObject(created.json)["id"];
+      const [stored] = yield* storedSearches(users.owner.id);
+      assert.isDefined(stored);
 
       const save = yield* browserSave(
         users.owner.cookie,
@@ -375,7 +215,7 @@ describe("the browser's saved-search routes", () => {
       assert.include(save.body, "can only be submitted from this site");
 
       const removeResponse = yield* call(
-        `/search/saved/${String(id)}/delete`,
+        `/search/saved/${String(stored.id)}/delete`,
         form(
           {
             method: "POST",
@@ -392,11 +232,11 @@ describe("the browser's saved-search routes", () => {
       assert.include(removeResponse.body, 'id="saved-searches"');
       assert.include(removeResponse.body, "can only be submitted from this site");
 
-      const after = yield* list(users.owner);
-      const ids = (asObject(after.json)["items"] as ReadonlyArray<Record<string, unknown>>).map(
-        (item) => item["id"],
+      const after = yield* storedSearches(users.owner.id);
+      assert.include(
+        after.map((saved) => saved.id),
+        stored.id,
       );
-      assert.include(ids, id);
     }),
   );
 
@@ -432,7 +272,7 @@ describe("reopening a saved search from the list", () => {
       assert.strictEqual(saved.status, 200, saved.body);
       assert.include(saved.body, "Saved:");
 
-      const [stored] = yield* savedSearches(users.owner.cookie);
+      const [stored] = yield* storedSearches(users.owner.id);
       assert.isDefined(stored);
       assert.include(stored.name, "No pets");
 
@@ -454,7 +294,7 @@ describe("reopening a saved search from the list", () => {
       const resaved = yield* browserSave(users.owner.cookie, reopened);
       assert.strictEqual(resaved.status, 200, resaved.body);
 
-      const [again] = yield* savedSearches(users.owner.cookie);
+      const [again] = yield* storedSearches(users.owner.id);
       assert.isDefined(again);
       assert.notStrictEqual(again.id, stored.id);
       assert.deepStrictEqual(criteriaOf(again), criteriaOf(stored));
@@ -494,18 +334,13 @@ describe("a stale access token on the public search routes", () => {
   it.effect("still identifies the caller, rotates the session, and keeps the saved-search UI", () =>
     Effect.gen(function* () {
       const session = yield* signIn("search-page-rotation");
-      const created = yield* send("POST", "/api/saved-searches", {
-        cookie: `access_token=${session.access}`,
-        payload: { name: "Returned later", pets: false },
+      const created = yield* browserSave(`access_token=${session.access}`, {
+        name: "Returned later",
+        pets: "false",
       });
       assert.strictEqual(created.status, 200, created.body);
 
-      const page = yield* call("/search", {
-        headers: {
-          "user-agent": "estia-tests",
-          cookie: `access_token=an.expired.token; refresh_token=${session.refresh}`,
-        },
-      });
+      const page = yield* call("/search", { headers: browser(staleAccess(session)) });
       assert.strictEqual(page.status, 200, page.body);
       assert.include(page.body, 'id="saved-searches"');
       assert.include(page.body, "Returned later");
@@ -517,20 +352,14 @@ describe("a stale access token on the public search routes", () => {
       assert.notStrictEqual(access, "an.expired.token");
       assert.notStrictEqual(refresh, session.refresh);
 
-      const listed = yield* send("GET", "/api/saved-searches", {
-        cookie: `access_token=${access}`,
-      });
-      assert.strictEqual(listed.status, 200, listed.body);
-      const names = (
-        asObject(listed.json)["items"] as ReadonlyArray<Record<string, unknown>>
-      ).map((item) => item["name"]);
-      assert.include(names, "Returned later");
+      const stored = yield* storedSearches(session.id);
+      assert.include(
+        stored.map((saved) => saved.name),
+        "Returned later",
+      );
 
       const results = yield* call("/search/results", {
-        headers: {
-          "user-agent": "estia-tests",
-          cookie: `access_token=an.expired.token; refresh_token=${refresh}`,
-        },
+        headers: browser(`access_token=an.expired.token; refresh_token=${refresh}`),
       });
       assert.strictEqual(results.status, 200, results.body);
       assert.include(results.body, 'hx-post="/search/saved"');
@@ -550,32 +379,131 @@ describe("a stale access token on the public search routes", () => {
       assert.notInclude(results.body, 'hx-post="/search/saved"');
     }),
   );
+
+  it.effect("does not retry a pair it has never seen", () =>
+    Effect.gen(function* () {
+      const page = yield* call("/search", {
+        headers: browser("access_token=an.expired.token; refresh_token=never-issued"),
+      });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.notInclude(page.body, 'id="saved-searches"');
+      assert.isUndefined(page.cookies["refresh_token"]);
+    }),
+  );
 });
 
-describe("a stale access token on the private API", () => {
+describe("a stale access token on a private page", () => {
   it.effect("names the caller and rotates the pair", () =>
     Effect.gen(function* () {
-      const session = yield* signIn("private-rotation");
-      const created = yield* send("POST", "/api/saved-searches", {
-        cookie: `access_token=${session.access}`,
-        payload: { name: "Read after the access token aged out" },
-      });
-      assert.strictEqual(created.status, 200, created.body);
+      const session = yield* signIn("private-page-rotation");
 
-      const listed = yield* send("GET", "/api/saved-searches", { cookie: staleAccess(session) });
-      assert.strictEqual(listed.status, 200, listed.body);
+      const page = yield* call("/listings/mine", { headers: browser(staleAccess(session)) });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.notInclude(page.body, "Sign in required");
 
-      const access = listed.cookies["access_token"];
-      const refresh = listed.cookies["refresh_token"];
+      const access = page.cookies["access_token"];
+      const refresh = page.cookies["refresh_token"];
       assert.isDefined(access);
       assert.isDefined(refresh);
       assert.notStrictEqual(access, "an.expired.token");
       assert.notStrictEqual(refresh, session.refresh);
+    }),
+  );
+});
 
-      const names = (asObject(listed.json)["items"] as ReadonlyArray<Record<string, unknown>>).map(
-        (item) => item["name"],
+describe("two overlapping requests that share one refresh token", () => {
+  it.effect("answers the loser with a retry that lands it signed in", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("rotation-race-pages");
+      const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const cookie = staleAccess(session);
+      const responses = yield* Effect.all(
+        [
+          call("/search", { headers: browser(cookie) }),
+          call("/search", { headers: browser(cookie) }),
+        ],
+        { concurrency: 2 },
       );
-      assert.include(names, "Read after the access token aged out");
+
+      const winner = responses.find((response) => response.status === 200);
+      const loser = responses.find((response) => response.status === 307);
+      assert.isDefined(winner);
+      assert.isDefined(loser);
+      assert.include(winner.body, 'id="saved-searches"');
+      assert.strictEqual(loser.location, "/search");
+
+      const access = winner.cookies["access_token"];
+      const refresh = winner.cookies["refresh_token"];
+      assert.isDefined(access);
+      assert.isDefined(refresh);
+      assert.notStrictEqual(refresh, session.refresh);
+
+      const retried = yield* call(loser.location ?? "/search", {
+        headers: browser(`access_token=${access}; refresh_token=${refresh}`),
+      });
+      assert.strictEqual(retried.status, 200, retried.body);
+      assert.include(retried.body, 'id="saved-searches"');
+      assert.include(retried.body, "Listings No pets");
+    }),
+  );
+
+  it.effect("answers an htmx loser with a page refresh", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("rotation-race-htmx");
+      const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
+      assert.strictEqual(saved.status, 200, saved.body);
+
+      const cookie = staleAccess(session);
+      const fragment = "/search/results?pets=false";
+      const responses = yield* Effect.all(
+        [
+          call(fragment, { headers: { ...browser(cookie), "hx-request": "true" } }),
+          call(fragment, { headers: { ...browser(cookie), "hx-request": "true" } }),
+        ],
+        { concurrency: 2 },
+      );
+
+      const winner = responses.find((response) => response.headers.get("HX-Refresh") === null);
+      const loser = responses.find((response) => response.headers.get("HX-Refresh") === "true");
+      assert.isDefined(winner);
+      assert.isDefined(loser);
+      assert.strictEqual(loser.status, 200);
+      assert.strictEqual(loser.body, "");
+      assert.include(winner.body, 'hx-post="/search/saved"');
+
+      const retried = yield* call(fragment, {
+        headers: {
+          ...browser(
+            `access_token=${winner.cookies["access_token"]}; refresh_token=${winner.cookies["refresh_token"]}`,
+          ),
+          "hx-request": "true",
+        },
+      });
+      assert.strictEqual(retried.status, 200, retried.body);
+      assert.include(retried.body, 'hx-post="/search/saved"');
+    }),
+  );
+
+  it.effect("reads a rotation that is over as an abandoned tab, not a race", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("rotation-abandoned");
+      const rotated = yield* call("/search", { headers: browser(staleAccess(session)) });
+      assert.strictEqual(rotated.status, 200, rotated.body);
+      assert.notStrictEqual(rotated.cookies["refresh_token"], session.refresh);
+
+      // The tab that still holds the old pair comes back once the rotation is
+      // older than any request that could have been in flight with it.
+      yield* query(
+        "UPDATE refresh_tokens SET revoked_at = 0 WHERE user_id = ? AND revoked_at IS NOT NULL",
+        [session.id],
+      );
+
+      const page = yield* call("/search", { headers: browser(staleAccess(session)) });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.notInclude(page.body, 'id="saved-searches"');
+      assert.isUndefined(page.cookies["refresh_token"]);
     }),
   );
 });
