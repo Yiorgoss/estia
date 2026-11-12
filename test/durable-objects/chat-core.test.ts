@@ -203,7 +203,7 @@ describe("chat core ordering and fan-out", () => {
     assert.strictEqual(chat.store.rows[0]?.senderId, "user-a");
   });
 
-  it("writes one row for a repeated client id and does not broadcast it twice", async () => {
+  it("writes one row for a repeated client id, echoes it to the retry and does not broadcast it twice", async () => {
     const chat = makeChat();
     const alice = await connect(chat, "user-a");
     const bob = await connect(chat, "user-b");
@@ -213,7 +213,7 @@ describe("chat core ordering and fan-out", () => {
 
     assert.strictEqual(chat.store.rows.length, 1);
     assert.deepEqual(messageSeqs(bob), [1]);
-    assert.deepEqual(messageSeqs(alice), [1]);
+    assert.deepEqual(messageSeqs(alice), [1, 1]);
   });
 
   it("rejects a blank message and an unknown frame with an error for that socket only", async () => {
@@ -338,18 +338,6 @@ describe("chat core replay", () => {
     await accepting;
 
     assert.deepEqual(messageSeqs(socket), [1, 2]);
-  });
-
-  it("answers a replay frame with the same page", async () => {
-    const chat = makeChat();
-    const alice = await connect(chat, "user-a");
-    await send(chat.core, alice, "one", "a-1");
-    await send(chat.core, alice, "two", "a-2");
-
-    const bob = await connect(chat, "user-b", 2);
-    await chat.core.receive(bob, JSON.stringify({ type: "replay", after: 1 }));
-
-    assert.deepEqual(messageSeqs(bob), [2]);
   });
 
   it("continues the sequence after a hibernation wake and still replays from D1", async () => {

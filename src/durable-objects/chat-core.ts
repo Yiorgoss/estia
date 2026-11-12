@@ -33,7 +33,7 @@ export const CHAT_POLICY_CLOSE_CODE = 1008;
 
 export const CHAT_RATE_LIMIT = { windowMs: 10_000, maxMessages: 20 } as const;
 
-// A reconnect replays what it missed; it is a catch-up frame, not an export.
+// A reconnect catches up over the upgrade's `after` query, in pages of this size.
 export const CHAT_REPLAY_LIMIT = 100;
 
 export interface ChatMessageRow {
@@ -107,9 +107,11 @@ export interface ChatSocketAttachment {
   readonly connectionId: string;
 }
 
-export type ChatClientFrame =
-  | { readonly type: "send"; readonly clientMessageId: string; readonly body: string }
-  | { readonly type: "replay"; readonly after: number };
+export type ChatClientFrame = {
+  readonly type: "send";
+  readonly clientMessageId: string;
+  readonly body: string;
+};
 
 export type ChatServerFrame =
   | { readonly type: "message"; readonly message: ChatMessageRow }
@@ -177,23 +179,12 @@ const attachmentOf = (socket: ChatSocket): ChatSocketAttachment | undefined => {
  */
 export const parseClientFrame = (value: unknown): ChatClientFrame | undefined => {
   const record = asRecord(value);
-  if (record === undefined) return undefined;
+  if (record === undefined || record["type"] !== "send") return undefined;
 
-  switch (record["type"]) {
-    case "replay": {
-      const after = record["after"];
-      if (typeof after !== "number" || !Number.isSafeInteger(after) || after < 0) return undefined;
-      return { type: "replay", after };
-    }
-    case "send": {
-      const clientMessageId = record["clientMessageId"];
-      const body = record["body"];
-      if (typeof clientMessageId !== "string" || typeof body !== "string") return undefined;
-      return { type: "send", clientMessageId, body };
-    }
-    default:
-      return undefined;
-  }
+  const clientMessageId = record["clientMessageId"];
+  const body = record["body"];
+  if (typeof clientMessageId !== "string" || typeof body !== "string") return undefined;
+  return { type: "send", clientMessageId, body };
 };
 
 const parseAfter = (raw: string | null): number => {
@@ -205,8 +196,7 @@ const parseAfter = (raw: string | null): number => {
 const badFrame: ChatServerFrame = {
   type: "error",
   code: "bad_frame",
-  message:
-    'A frame is {"type":"send","clientMessageId":"...","body":"..."} or {"type":"replay","after":N}.',
+  message: 'A frame is {"type":"send","clientMessageId":"...","body":"..."}.',
 };
 
 export const createChatCore = (
@@ -402,11 +392,6 @@ export const createChatCore = (
       return;
     }
 
-    if (frame.type === "replay") {
-      await replayInto(socket, attachment.connectionId, frame.after);
-      return;
-    }
-
     const result = await append(
       {
         userId: attachment.userId,
@@ -424,6 +409,8 @@ export const createChatCore = (
         code: "rate_limited",
         message: `At most ${rateLimit.maxMessages} messages per ${Math.round(rateLimit.windowMs / 1000)} seconds.`,
       });
+    } else if (result.duplicate) {
+      sendFrame(socket, { type: "message", message: result.message });
     }
   };
 
