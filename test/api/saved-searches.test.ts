@@ -103,7 +103,6 @@ const resultsUrlOf = (html: string): string => {
 };
 
 const criteriaOf = (saved: typeof SavedSearchRowSchema.Type) => ({
-  query: saved.query,
   kind: saved.kind,
   regionCode: saved.regionCode,
   minPriceMinor: saved.minPriceMinor,
@@ -213,6 +212,7 @@ describe("the browser's saved-search routes", () => {
       assert.strictEqual(save.status, 200, save.body);
       assert.include(save.body, 'id="saved-searches"');
       assert.include(save.body, "can only be submitted from this site");
+      assert.include(save.body, "Cross-site target");
 
       const removeResponse = yield* call(
         `/search/saved/${String(stored.id)}/delete`,
@@ -231,6 +231,7 @@ describe("the browser's saved-search routes", () => {
       assert.strictEqual(removeResponse.status, 200, removeResponse.body);
       assert.include(removeResponse.body, 'id="saved-searches"');
       assert.include(removeResponse.body, "can only be submitted from this site");
+      assert.include(removeResponse.body, "Cross-site target");
 
       const after = yield* storedSearches(users.owner.id);
       assert.include(
@@ -259,7 +260,6 @@ describe("reopening a saved search from the list", () => {
   it.effect("keeps a negative flag and re-runs the exact stored criteria", () =>
     Effect.gen(function* () {
       const saved = yield* browserSave(users.owner.cookie, {
-        query: "balcony",
         kind: "room",
         regionCode: "attica",
         minPrice: "400",
@@ -412,7 +412,7 @@ describe("a stale access token on a private page", () => {
 });
 
 describe("two overlapping requests that share one refresh token", () => {
-  it.effect("answers the loser with a retry that lands it signed in", () =>
+  it.effect("rotates once and lands the winner signed in", () =>
     Effect.gen(function* () {
       const session = yield* signIn("rotation-race-pages");
       const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
@@ -427,12 +427,11 @@ describe("two overlapping requests that share one refresh token", () => {
         { concurrency: 2 },
       );
 
-      const winner = responses.find((response) => response.status === 200);
-      const loser = responses.find((response) => response.status === 307);
+      const winners = responses.filter((response) => response.cookies["refresh_token"] !== undefined);
+      assert.lengthOf(winners, 1);
+      const [winner] = winners;
       assert.isDefined(winner);
-      assert.isDefined(loser);
       assert.include(winner.body, 'id="saved-searches"');
-      assert.strictEqual(loser.location, "/search");
 
       const access = winner.cookies["access_token"];
       const refresh = winner.cookies["refresh_token"];
@@ -440,38 +439,59 @@ describe("two overlapping requests that share one refresh token", () => {
       assert.isDefined(refresh);
       assert.notStrictEqual(refresh, session.refresh);
 
-      const retried = yield* call(loser.location ?? "/search", {
+      // The other request either lost the rotation itself and is told to retry,
+      // or found the token already spent and reads as a visitor - never as the
+      // signed-in page the winner saw.
+      const other = responses.find((response) => response !== winner);
+      assert.isDefined(other);
+      if (other.status === 303) {
+        assert.strictEqual(other.location, "/search");
+      } else {
+        assert.strictEqual(other.status, 200);
+        assert.notInclude(other.body, 'id="saved-searches"');
+      }
+
+      const page = yield* call("/search", {
         headers: browser(`access_token=${access}; refresh_token=${refresh}`),
       });
-      assert.strictEqual(retried.status, 200, retried.body);
-      assert.include(retried.body, 'id="saved-searches"');
-      assert.include(retried.body, "Listings No pets");
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.include(page.body, "Listings No pets");
     }),
   );
 
-  it.effect("answers an htmx loser with a page refresh", () =>
+  it.effect("lets exactly one results fragment carry the save control", () =>
     Effect.gen(function* () {
       const session = yield* signIn("rotation-race-htmx");
       const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
       assert.strictEqual(saved.status, 200, saved.body);
 
-      const cookie = staleAccess(session);
       const fragment = "/search/results?pets=false";
       const responses = yield* Effect.all(
         [
-          call(fragment, { headers: { ...browser(cookie), "hx-request": "true" } }),
-          call(fragment, { headers: { ...browser(cookie), "hx-request": "true" } }),
+          call(fragment, {
+            headers: { ...browser(staleAccess(session)), "hx-request": "true" },
+          }),
+          call(fragment, {
+            headers: { ...browser(staleAccess(session)), "hx-request": "true" },
+          }),
         ],
         { concurrency: 2 },
       );
 
-      const winner = responses.find((response) => response.headers.get("HX-Refresh") === null);
-      const loser = responses.find((response) => response.headers.get("HX-Refresh") === "true");
+      const winners = responses.filter((response) => response.cookies["refresh_token"] !== undefined);
+      assert.lengthOf(winners, 1);
+      const [winner] = winners;
       assert.isDefined(winner);
-      assert.isDefined(loser);
-      assert.strictEqual(loser.status, 200);
-      assert.strictEqual(loser.body, "");
       assert.include(winner.body, 'hx-post="/search/saved"');
+
+      const other = responses.find((response) => response !== winner);
+      assert.isDefined(other);
+      if (other.headers.get("HX-Refresh") === "true") {
+        assert.strictEqual(other.body, "");
+      } else {
+        assert.notInclude(other.body, 'hx-post="/search/saved"');
+      }
 
       const retried = yield* call(fragment, {
         headers: {
@@ -486,19 +506,12 @@ describe("two overlapping requests that share one refresh token", () => {
     }),
   );
 
-  it.effect("reads a rotation that is over as an abandoned tab, not a race", () =>
+  it.effect("does not retry a token a previous request already spent", () =>
     Effect.gen(function* () {
       const session = yield* signIn("rotation-abandoned");
       const rotated = yield* call("/search", { headers: browser(staleAccess(session)) });
       assert.strictEqual(rotated.status, 200, rotated.body);
       assert.notStrictEqual(rotated.cookies["refresh_token"], session.refresh);
-
-      // The tab that still holds the old pair comes back once the rotation is
-      // older than any request that could have been in flight with it.
-      yield* query(
-        "UPDATE refresh_tokens SET revoked_at = 0 WHERE user_id = ? AND revoked_at IS NOT NULL",
-        [session.id],
-      );
 
       const page = yield* call("/search", { headers: browser(staleAccess(session)) });
       assert.strictEqual(page.status, 200, page.body);

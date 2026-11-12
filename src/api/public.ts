@@ -34,7 +34,7 @@ import {
   listingNotFoundPage,
   listingUnavailablePage,
 } from "@/frontend/pages/listing-detail";
-import { omitBlankSearchText, withMinorUnitPrices } from "@/utils";
+import { withMinorUnitPrices } from "@/utils";
 import { head } from "@/frontend/head";
 
 const AuthGroup = HttpApiGroup.make("auth")
@@ -221,7 +221,7 @@ const searchResultsRoute = HttpRouter.route(
         // The form collects euros; the listings API filters on minor units, so the
         // helper converts and rounds before decoding.
         const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
-          withMinorUnitPrices(omitBlankSearchText(searchParams)),
+          withMinorUnitPrices(searchParams),
         );
         const { limit, cursor, ...filters } = query;
         const page = yield* listingService.search(filters, { limit, cursor });

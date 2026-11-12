@@ -10,7 +10,6 @@ import type { SavedSearch } from "@/db/schema/SavedSearch";
 export type SearchFlagValue = "" | "true" | "false";
 
 export interface SearchFormValues {
-  readonly query: string;
   readonly regionCode: string;
   readonly kind: string;
   readonly minPrice: string;
@@ -25,7 +24,6 @@ export interface SearchFormValues {
 }
 
 export const emptySearchFormValues: SearchFormValues = {
-  query: "",
   regionCode: "",
   kind: "",
   minPrice: "",
@@ -55,7 +53,6 @@ const flagValue = (value: boolean | null | undefined): SearchFlagValue =>
   value == null ? "" : value ? "true" : "false";
 
 export const searchFormValuesFromSavedSearch = (saved: SavedSearch): SearchFormValues => ({
-  query: saved.query ?? "",
   regionCode: saved.regionCode ?? "",
   kind: saved.kind ?? "",
   minPrice: saved.minPriceMinor == null ? "" : eurosFromMinor(saved.minPriceMinor),

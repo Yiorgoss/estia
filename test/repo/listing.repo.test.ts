@@ -228,54 +228,6 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
     }),
   );
 
-  it.effect("search matches the free-text query in the title and description", () =>
-    Effect.gen(function* () {
-      yield* insertUser("u-listing-text", "listing-text@test.local");
-      yield* insertListing(4801, "u-listing-text", {
-        status: "published",
-        regionCode: "thessaly",
-        title: "Sunny studio",
-        description: "A balcony over the street",
-        createdAt: AT + 1_000,
-      });
-      yield* insertListing(4802, "u-listing-text", {
-        status: "published",
-        regionCode: "thessaly",
-        title: "Basement room",
-        description: "No balcony access",
-        createdAt: AT + 2_000,
-      });
-      yield* insertListing(4803, "u-listing-text", {
-        status: "published",
-        regionCode: "thessaly",
-        title: "Room_42",
-        description: null,
-        createdAt: AT + 3_000,
-      });
-      yield* insertListing(4804, "u-listing-text", {
-        status: "published",
-        regionCode: "thessaly",
-        title: "Room 42",
-        description: null,
-        createdAt: AT + 4_000,
-      });
-
-      const repo = yield* ListingRepository;
-      const ids = (result: {
-        readonly items: ReadonlyArray<{ readonly id: number }>;
-      }): Array<number> => result.items.map((item) => item.id);
-
-      // Both the title and the description are searched, newest first.
-      assert.deepStrictEqual(ids(yield* repo.search({ query: "balcony" }, page(50))), [4802, 4801]);
-      // SQLite LIKE folds ASCII case.
-      assert.deepStrictEqual(ids(yield* repo.search({ query: "SUNNY" }, page(50))), [4801]);
-      // Wildcards in the query are matched literally, not as SQL patterns.
-      assert.deepStrictEqual(ids(yield* repo.search({ query: "_" }, page(50))), [4803]);
-      assert.deepStrictEqual(ids(yield* repo.search({ query: "Room_" }, page(50))), [4803]);
-      assert.deepStrictEqual(ids(yield* repo.search({ query: "nothing here" }, page(50))), []);
-    }),
-  );
-
   it.effect("search paging is stable when timestamps are identical", () =>
     Effect.gen(function* () {
       yield* insertUser("u-listing-cursor", "listing-cursor@test.local");

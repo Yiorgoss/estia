@@ -18,7 +18,6 @@ const savedSearch = (overrides: Record<string, unknown> = {}) =>
     id: Schema.decodeSync(SavedSearchId)(7),
     userId: Schema.decodeSync(UserId)("u-saved-search"),
     name: "Balcony rooms in Attica",
-    query: "balcony",
     kind: "room",
     regionCode: "attica",
     minPriceMinor: 40_000,
@@ -43,7 +42,6 @@ describe("searchPage", () => {
     assert.notInclude(html, 'id="saved-searches"');
     assert.notInclude(html, 'hx-post="/search/saved"');
     assert.include(html, 'hx-get="/search/results"');
-    assert.include(html, 'name="query"');
   });
 
   it("renders the saved-search list for a signed-in caller", () => {
@@ -64,7 +62,6 @@ describe("searchPage", () => {
       appliedSavedSearchId: saved.id,
     });
 
-    assert.include(html, 'value="balcony"');
     assert.include(html, '<option value="attica" selected>Attica</option>');
     assert.include(html, 'value="400"');
     assert.include(html, 'value="1200.5"');
@@ -72,7 +69,6 @@ describe("searchPage", () => {
     assert.include(html, "<option value=\"true\" selected>Yes</option>");
     assert.include(html, "<option value=\"false\" selected>No</option>");
     assert.include(html, 'aria-current="page"');
-    assert.include(html, "query=balcony");
     assert.include(html, "regionCode=attica");
     assert.include(html, "hx-get=\"/search/results?");
   });
@@ -132,7 +128,6 @@ describe("saved search helpers", () => {
     const href = savedSearchResultsHref(savedSearch());
     const params = new URLSearchParams(href.split("?")[1] ?? "");
 
-    assert.strictEqual(params.get("query"), "balcony");
     assert.strictEqual(params.get("kind"), "room");
     assert.strictEqual(params.get("regionCode"), "attica");
     assert.strictEqual(params.get("minPriceMinor"), "40000");
@@ -148,7 +143,6 @@ describe("saved search helpers", () => {
 
   it("uses the plain results route for a criteria-less saved search", () => {
     const saved = savedSearch({
-      query: null,
       kind: null,
       regionCode: null,
       minPriceMinor: null,

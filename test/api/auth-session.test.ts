@@ -1,9 +1,10 @@
 import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 import { optionalCaller } from "@/handlers/optional-caller";
 import { AuthMiddleware } from "@/middleware/auth-mw";
-import { AuthService, UnauthorizedError } from "@/services/auth.service";
+import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
+import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
-import { RefreshTokenService } from "@/services/refresh-token.service";
+import { RefreshTokenRotatedError, RefreshTokenService } from "@/services/refresh-token.service";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Ref, Schema } from "effect";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -30,17 +31,31 @@ const rotated = {
 const unused = () => Effect.die("the test stub does not implement this path");
 
 interface StubOptions {
-  readonly fails?: boolean;
-  readonly justRotated?: boolean;
+  // How the flow loses the presented refresh token, when it does.
+  readonly failure?: "rotated" | "revoked";
 }
 
-const AuthStub = (calls: Ref.Ref<number>, fails: boolean) =>
+type FlowFailure = RefreshTokenRotatedError | RefreshTokenNotFoundError;
+
+const AuthStub = (calls: Ref.Ref<number>, failure: StubOptions["failure"]) =>
   Layer.succeed(AuthService, {
-    tokenAuthFlow: () =>
-      Effect.flatMap(Ref.update(calls, (count) => count + 1), () =>
-        fails
-          ? Effect.fail(new UnauthorizedError())
-          : Effect.succeed({ user: caller, tokens: rotated }),
+    tokenAuthFlow: (): Effect.Effect<
+      { readonly user: typeof caller; readonly tokens: typeof rotated },
+      FlowFailure
+    > =>
+      Effect.flatMap(
+        Ref.update(calls, (count) => count + 1),
+        (): Effect.Effect<
+          { readonly user: typeof caller; readonly tokens: typeof rotated },
+          FlowFailure
+        > =>
+          failure === undefined
+            ? Effect.succeed({ user: caller, tokens: rotated })
+            : Effect.fail<FlowFailure>(
+                failure === "rotated"
+                  ? new RefreshTokenRotatedError()
+                  : new RefreshTokenNotFoundError(),
+              ),
       ),
     authenticate: unused,
     endAllSessions: unused,
@@ -54,25 +69,19 @@ const JwtStub = Layer.succeed(JWTService, {
   extractUser: unused,
 });
 
-const RefreshStub = (justRotated: boolean) =>
-  Layer.succeed(RefreshTokenService, {
-    asCookie: () => Effect.succeed(["refresh_token", rotated.refreshToken]),
-    justRotated: () => Effect.succeed(justRotated),
-    clearCookie: unused,
-    issueToken: unused,
-    revokeToken: unused,
-    userIdForToken: unused,
-    revokeAllSessions: unused,
-    consumeToken: unused,
-    rotateToken: unused,
-  });
+const RefreshStub = Layer.succeed(RefreshTokenService, {
+  asCookie: () => Effect.succeed(["refresh_token", rotated.refreshToken]),
+  clearCookie: unused,
+  issueToken: unused,
+  revokeToken: unused,
+  userIdForToken: unused,
+  revokeAllSessions: unused,
+  consumeToken: unused,
+  rotateToken: unused,
+});
 
 const stubs = (calls: Ref.Ref<number>, options: StubOptions = {}) =>
-  Layer.mergeAll(
-    AuthStub(calls, options.fails ?? false),
-    JwtStub,
-    RefreshStub(options.justRotated ?? false),
-  );
+  Layer.mergeAll(AuthStub(calls, options.failure), JwtStub, RefreshStub);
 
 const request = (path: string, cookie?: string) =>
   HttpServerRequest.fromWeb(
@@ -140,7 +149,7 @@ describe("resolving a request's session", () => {
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
       const session = yield* optionalCaller(request("/search", "refresh_token=presented")).pipe(
-        Effect.provide(stubs(calls, { fails: true, justRotated: true })),
+        Effect.provide(stubs(calls, { failure: "rotated" })),
       );
 
       assert.deepStrictEqual(session, { _tag: "retry" });
@@ -148,11 +157,11 @@ describe("resolving a request's session", () => {
     }),
   );
 
-  it.effect("reads a session whose rotation is over as anonymous", () =>
+  it.effect("reads an unknown, revoked or expired token as anonymous", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
       const session = yield* optionalCaller(request("/search", "refresh_token=presented")).pipe(
-        Effect.provide(stubs(calls, { fails: true, justRotated: false })),
+        Effect.provide(stubs(calls, { failure: "revoked" })),
       );
 
       assert.deepStrictEqual(session, { _tag: "anonymous" });
@@ -198,7 +207,7 @@ describe("a private route reached by a request that lost the rotation race", () 
   it.effect("tells htmx to reload the page", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
-      const response = yield* send(privateApp(calls, { fails: true, justRotated: true }), {
+      const response = yield* send(privateApp(calls, { failure: "rotated" }), {
         cookie: "refresh_token=presented",
         "user-agent": "estia-tests",
         "hx-request": "true",
@@ -210,16 +219,31 @@ describe("a private route reached by a request that lost the rotation race", () 
     }),
   );
 
-  it.effect("replays a navigation against the same page", () =>
+  it.effect("redirects a navigation back to the same page", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
-      const response = yield* send(privateApp(calls, { fails: true, justRotated: true }), {
+      const response = yield* send(privateApp(calls, { failure: "rotated" }), {
         cookie: "refresh_token=presented",
         "user-agent": "estia-tests",
       });
 
-      assert.strictEqual(response.status, 307);
+      assert.strictEqual(response.status, 303);
       assert.strictEqual(response.headers.get("location"), "/private-page");
+    }),
+  );
+
+  it.effect("sends a spent token to sign-in instead of retrying again", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0);
+      const response = yield* send(privateApp(calls, { failure: "revoked" }), {
+        cookie: "refresh_token=presented",
+        "user-agent": "estia-tests",
+        "hx-request": "true",
+      });
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(response.headers.get("HX-Redirect"), "/login");
+      assert.isNull(response.headers.get("HX-Refresh"));
     }),
   );
 });

@@ -125,19 +125,7 @@ export const searchPage = (options: SearchPageOptions = {}) => {
       hx-trigger="submit, change delay:200ms"
       class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
     >
-      <div>
-        <label for="query" class="mb-1 block text-sm font-medium text-gray-700">Search words</label>
-        <input
-          id="query"
-          name="query"
-          type="search"
-          placeholder="A word from the title or description"
-          ${values.query === "" ? "" : `value="${escapeHtml(values.query)}"`}
-          class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
-      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         ${selectField("regionCode", "Region", "Any region", regionOptions, values.regionCode)}
         ${selectField("kind", "Kind", "Any kind", kindOptions, values.kind)}
         ${numberField("minPrice", "Min price (€)", "0", values.minPrice)}

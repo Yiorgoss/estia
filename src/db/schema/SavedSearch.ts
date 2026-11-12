@@ -1,17 +1,12 @@
 import { SavedSearchId, UserId } from "@/db/schema/brands";
-import {
-  GreekRegion,
-  ListingKind,
-  ListingSearchText,
-  validateFilterRanges,
-} from "@/db/schema/Listing";
+import { GreekRegion, ListingKind } from "@/db/schema/Listing";
 import { Schema, SchemaTransformation } from "effect";
 
 /*
- * A saved search is the listing feed's criteria, plus the free-text query, kept
- * under a name for one account. The criteria are nullable because "any" is a
- * real state: a null column means the search did not narrow on that field, and a
- * saved `furnished = 0` is a filter rather than an absent one.
+ * A saved search is the listing feed's criteria kept under a name for one
+ * account. The criteria are nullable because "any" is a real state: a null
+ * column means the search did not narrow on that field, and a saved
+ * `furnished = 0` is a filter rather than an absent one.
  *
  * The name is trimmed before it is bounded, exactly like a listing title, so a
  * padded name is stored trimmed and a whitespace-only one is rejected instead of
@@ -36,7 +31,6 @@ const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
  * rule the search query uses, so a stored range can always be re-run.
  */
 export const SavedSearchCriteria = Schema.Struct({
-  query: Schema.optional(ListingSearchText),
   kind: Schema.optional(ListingKind),
   regionCode: Schema.optional(GreekRegion),
   minPriceMinor: Schema.optional(NonNegativeInt),
@@ -52,15 +46,13 @@ export const SavedSearchCriteria = Schema.Struct({
 export type SavedSearchCriteria = typeof SavedSearchCriteria.Type;
 
 /*
- * Creating a saved search takes the criteria and an optional name. An omitted
- * name is filled in by the service with a readable summary of the criteria, so
- * the browser form can leave its name box blank.
+ * The values a caller saves: the criteria plus an optional name. The route
+ * decodes both before this point, and the service fills in a name when it is
+ * absent, so the browser form can leave its name box blank.
  */
-export const CreateSavedSearchInput = Schema.Struct({
-  name: Schema.optional(SavedSearchName),
-  ...SavedSearchCriteria.fields,
-}).check(Schema.makeFilter(validateFilterRanges));
-export type CreateSavedSearchInput = typeof CreateSavedSearchInput.Type;
+export type SavedSearchInput = typeof SavedSearchCriteria.Type & {
+  readonly name?: typeof SavedSearchName.Type | undefined;
+};
 
 // The values the repository insert takes: a name the service has already
 // defaulted, plus the decoded criteria.
@@ -79,7 +71,6 @@ export const SavedSearchSchema = Schema.Struct({
   id: SavedSearchId,
   userId: UserId,
   name: Schema.String,
-  query: Schema.NullishOr(Schema.String),
   kind: Schema.NullishOr(ListingKind),
   regionCode: Schema.NullishOr(GreekRegion),
   minPriceMinor: Schema.NullishOr(Schema.Int),

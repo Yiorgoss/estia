@@ -16,14 +16,6 @@ export interface RefreshTokenRepository {
   readonly findValidByHash: (
     hash: typeof RefreshTokenHash.Type,
   ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
-  /*
-   * The row a presented token hashes to, whatever state it is in. A token that
-   * another request just rotated is revoked and still worth recognizing: the
-   * session is live, and the browser only needs the winner's pair.
-   */
-  readonly findByHash: (
-    hash: typeof RefreshTokenHash.Type,
-  ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
   readonly revoke: (
     hash: typeof RefreshTokenHash.Type,
   ) => Effect.Effect<Option.Option<RefreshToken>, SqlError>;
@@ -72,15 +64,6 @@ export const RefreshTokenRepositoryLive = Layer.effect(
            RETURNING *;`;
           return revoked.length;
         }),
-      findByHash: (hash) =>
-        sql<RefreshToken>`
-            SELECT *
-              FROM refresh_tokens
-             WHERE token_hash = ${hash}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-        ),
       findValidByHash: (hash) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;

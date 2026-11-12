@@ -1,9 +1,5 @@
 import { SavedSearchId, UserId } from "@/db/schema/brands";
-import type {
-  CreateSavedSearchInput,
-  SavedSearch,
-  SavedSearchCriteria,
-} from "@/db/schema/SavedSearch";
+import type { SavedSearch, SavedSearchCriteria, SavedSearchInput } from "@/db/schema/SavedSearch";
 import { SavedSearchRepository } from "@/repos/saved-search.repo";
 import { InternalError } from "@/services/user.service";
 import { kindLabels, regionLabels } from "@/frontend/listing-labels";
@@ -38,14 +34,13 @@ const rangeSummary = (
 
 /*
  * A readable name for a search saved without one. It reads in the same order
- * the form does - words, kind, region, price, size, flags, availability - and
- * never exceeds the name bound, so it can be stored as a name as-is.
+ * the form does - kind, region, price, size, flags, availability - and never
+ * exceeds the name bound, so it can be stored as a name as-is.
  */
 export const summarizeSavedSearch = (criteria: SavedSearchCriteria): string => {
   // A search that narrows on nothing reads as the whole feed, not as a list of
   // missing filters.
   if (
-    criteria.query === undefined &&
     criteria.kind === undefined &&
     criteria.regionCode === undefined &&
     criteria.minPriceMinor === undefined &&
@@ -62,7 +57,6 @@ export const summarizeSavedSearch = (criteria: SavedSearchCriteria): string => {
   }
 
   const head: Array<string> = [];
-  if (criteria.query !== undefined) head.push(`"${criteria.query}"`);
   head.push(criteria.kind === undefined ? "Listings" : kindLabels[criteria.kind]);
   if (criteria.regionCode !== undefined) head.push(`in ${regionLabels[criteria.regionCode]}`);
 
@@ -101,7 +95,7 @@ export const summarizeSavedSearch = (criteria: SavedSearchCriteria): string => {
 export interface SavedSearchService {
   readonly create: (
     ownerId: typeof UserId.Type,
-    input: CreateSavedSearchInput,
+    input: SavedSearchInput,
   ) => Effect.Effect<SavedSearch, InternalError>;
 
   readonly list: (

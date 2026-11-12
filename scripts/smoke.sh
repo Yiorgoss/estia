@@ -1117,7 +1117,6 @@ CODE=$(curl -s -o "$WORK/saved-create" -w '%{http_code}' -X POST "${BASE_URL}/se
   -H "Origin: ${BASE_URL}" \
   -H "Cookie: access_token=${ACCESS}" \
   --data-urlencode "name=${SAVED_NAME}" \
-  --data-urlencode 'query=' \
   --data-urlencode 'regionCode=crete' \
   --data-urlencode 'kind=' \
   --data-urlencode "minPrice=${SMOKE_EUR}" \

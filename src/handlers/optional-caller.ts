@@ -4,7 +4,7 @@ import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { Cookies, HttpServerResponse } from "effect/http";
 import type { HttpServerRequest } from "effect/http";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /*
  * The session a request's cookie pair proves, resolved once per request. A
@@ -17,11 +17,10 @@ import { Effect, Result, Schema } from "effect";
  * public page load is not an auth event.
  *
  * Rotation is single-use, so two overlapping requests carrying the same pair
- * leave one of them holding a token the other just spent. That is not an
- * anonymous visit: the session is live and the winner's pair is on its way, so
- * the loser asks the browser to retry with it. Only a token that was never seen,
- * or was spent long enough ago that no request can still be carrying it, is
- * answered as anonymous.
+ * leave one of them holding a token the other just spent. The loser is told to
+ * retry with the winner's pair, but only when its own rotation lost that race: a
+ * request that never proved the token was live, or found it already spent, is an
+ * anonymous visit and never retries.
  */
 export type OptionalCallerSession =
   | {
@@ -63,25 +62,33 @@ export const sessionResolver: Effect.Effect<
 
       if (accessToken === null && refreshToken === null) return anonymous;
 
-      const outcome = yield* Effect.result(
-        auth.tokenAuthFlow({ accessToken, refreshToken }, request.headers["user-agent"]),
-      );
-      if (Result.isFailure(outcome)) {
-        if (refreshToken !== null && (yield* refreshTokenService.justRotated(refreshToken))) {
-          return retry;
-        }
-        return anonymous;
-      }
-
-      const { tokens, user } = outcome.success;
-      const cookies: Array<readonly [string, string, Cookies.Cookie["options"]?]> = [];
-      if (tokens.accessToken != null) {
-        cookies.push(yield* jwtService.asCookie(tokens.accessToken));
-      }
-      if (tokens.refreshToken != null) {
-        cookies.push(yield* refreshTokenService.asCookie(tokens.refreshToken));
-      }
-      return { _tag: "caller", caller: user.id, cookies };
+      return yield* auth
+        .tokenAuthFlow({ accessToken, refreshToken }, request.headers["user-agent"])
+        .pipe(
+          Effect.flatMap(({ tokens, user }) =>
+            Effect.gen(function* () {
+              const cookies: Array<readonly [string, string, Cookies.Cookie["options"]?]> = [];
+              if (tokens.accessToken != null) {
+                cookies.push(yield* jwtService.asCookie(tokens.accessToken));
+              }
+              if (tokens.refreshToken != null) {
+                cookies.push(yield* refreshTokenService.asCookie(tokens.refreshToken));
+              }
+              return { _tag: "caller", caller: user.id, cookies } as const;
+            }),
+          ),
+          Effect.catchTags({
+            // The token was live when this request consumed it and spent when
+            // it tried to rotate it: another request rotated it in between.
+            RefreshTokenRotatedError: () => Effect.succeed(retry),
+            InvalidJWTError: () => Effect.succeed(anonymous),
+            ExpiredJWTError: () => Effect.succeed(anonymous),
+            UnauthorizedError: () => Effect.succeed(anonymous),
+            UserNotFoundError: () => Effect.succeed(anonymous),
+            RefreshTokenNotFoundError: () => Effect.succeed(anonymous),
+            InternalError: () => Effect.succeed(anonymous),
+          }),
+        );
     });
 });
 
@@ -92,10 +99,10 @@ export const optionalCaller = (
 
 /*
  * The answer to a request that lost the rotation race: htmx reloads the page and
- * a browser navigation replays the request, both with the winner's pair once its
- * response lands. The JSON API has no page to reload, so it keeps the 401 its
- * callers already handle. A stale pair only reaches here inside the rotation
- * window, so a session that is really gone falls through to the anonymous page.
+ * a browser navigation is redirected back to it, both with the winner's pair
+ * once its response lands. The JSON API has no page to reload, so it keeps the
+ * 401 its callers already handle. The race is detected at the rotation itself,
+ * so a retry with the spent pair is answered as anonymous instead of looping.
  */
 export const retrySessionResponse = (
   request: HttpServerRequest.HttpServerRequest,
@@ -107,5 +114,5 @@ export const retrySessionResponse = (
   if (url.pathname.startsWith("/api/")) {
     return HttpServerResponse.text("UnauthorizedError", { status: 401 });
   }
-  return HttpServerResponse.redirect(`${url.pathname}${url.search}`, { status: 307 });
+  return HttpServerResponse.redirect(`${url.pathname}${url.search}`, { status: 303 });
 };

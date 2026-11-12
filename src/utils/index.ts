@@ -31,21 +31,6 @@ export const omitEmptySearchParams = (
   return kept;
 };
 
-/*
- * A search words box holding only spaces is an empty search, not a bad one. The
- * free-text codec trims and then requires a non-empty value, so a whitespace-only
- * value is dropped here rather than reported as a filter the page could not read.
- */
-export const omitBlankSearchText = (
-  params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-) => {
-  const query = params["query"];
-  if (typeof query !== "string" || query.trim() !== "") return params;
-  const kept: Record<string, string | ReadonlyArray<string> | undefined> = { ...params };
-  delete kept["query"];
-  return kept;
-};
-
 // Listing prices are stored in minor units; a whole price shows no decimals and
 // a price with cents shows exactly two, so a card never reads "€455.5".
 export const formatPriceMinor = (priceMinor: number) =>

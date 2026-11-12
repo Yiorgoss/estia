@@ -68,12 +68,12 @@ export const SavedSearchRepositoryLive = Layer.effect(
           const now = yield* Clock.currentTimeMillis;
           const rows = yield* sql<Record<string, unknown>>`
               INSERT INTO saved_searches (
-                       user_id, name, query, kind, region_code, min_price_minor, max_price_minor,
+                       user_id, name, kind, region_code, min_price_minor, max_price_minor,
                 min_size_sqm, max_size_sqm, furnished, ensuite, smoking, pets, available_from,
                     created_at
               )
               VALUES (
-                       ${userId}, ${values.name}, ${values.query ?? null}, ${values.kind ?? null}, ${values.regionCode ?? null}, ${values.minPriceMinor ?? null}, ${values.maxPriceMinor ?? null},
+                       ${userId}, ${values.name}, ${values.kind ?? null}, ${values.regionCode ?? null}, ${values.minPriceMinor ?? null}, ${values.maxPriceMinor ?? null},
                 ${values.minSizeSqm ?? null}, ${values.maxSizeSqm ?? null}, ${toBit(values.furnished)}, ${toBit(values.ensuite)}, ${toBit(values.smoking)}, ${toBit(values.pets)}, ${toEpochMillis(values.availableFrom)},
                     ${now}
               )

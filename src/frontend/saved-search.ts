@@ -23,7 +23,6 @@ export const savedSearchHref = (id: number): string => `/search?saved=${id}`;
  */
 export const savedSearchResultsHref = (saved: SavedSearch): string => {
   const params = new URLSearchParams();
-  if (saved.query != null) params.set("query", saved.query);
   if (saved.kind != null) params.set("kind", saved.kind);
   if (saved.regionCode != null) params.set("regionCode", saved.regionCode);
   if (saved.minPriceMinor != null) params.set("minPriceMinor", String(saved.minPriceMinor));

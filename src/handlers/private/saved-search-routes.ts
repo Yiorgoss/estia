@@ -9,7 +9,7 @@ import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin"
 import { clearedNameInput, savedSearchesPanel } from "@/frontend/saved-search";
 import type { SavedSearchesPanelOptions } from "@/frontend/saved-search";
 import { SavedSearchService } from "@/services/saved-search.service";
-import { omitBlankSearchText, withMinorUnitPrices } from "@/utils";
+import { withMinorUnitPrices } from "@/utils";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -39,20 +39,6 @@ const seeOther = (location: string): HttpServerResponse.HttpServerResponse =>
 const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
   request.headers["hx-request"] === "true";
 
-/*
- * htmx only swaps 2xx responses, so a refused htmx save or delete has to answer
- * the list section with a 200 and the error banner; a 4xx would leave the old
- * list in place and the person would see nothing happen. A request without htmx
- * is a navigation and keeps the status that describes it.
- */
-const refuse = (
-  request: HttpServerRequest.HttpServerRequest,
-  message: string,
-): HttpServerResponse.HttpServerResponse =>
-  isHtmx(request)
-    ? respond(savedSearchesPanel([], { error: message }), 200)
-    : respond(message, 403);
-
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
 
@@ -78,6 +64,22 @@ const panelFor = (
   });
 
 /*
+ * htmx only swaps 2xx responses, so a refused htmx save or delete has to answer
+ * the list section with a 200 and the error banner; a 4xx would leave the old
+ * list in place and the person would see nothing happen. The banner rides on the
+ * stored rows, because a refused write must not look like an empty list. A
+ * request without htmx is a navigation and keeps the status that describes it.
+ */
+const refuse = (
+  request: HttpServerRequest.HttpServerRequest,
+  ownerId: typeof UserId.Type,
+  message: string,
+) =>
+  isHtmx(request)
+    ? panelFor(ownerId, { error: message })
+    : Effect.succeed(respond(message, 403));
+
+/*
  * Saving from the results page. The form's own field is the optional name; the
  * criteria arrive from the search form through `hx-include`, so the server reads
  * the same query parameters the results route reads and no criteria is trusted
@@ -86,11 +88,11 @@ const panelFor = (
  */
 const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
   Effect.gen(function* () {
+    const ownerId = yield* callerId;
     if (!isSameOriginWrite(request)) {
-      return refuse(request, crossSiteFormMessage);
+      return yield* refuse(request, ownerId, crossSiteFormMessage);
     }
 
-    const ownerId = yield* callerId;
     const params = yield* readForm(request);
     const { name: rawName, ...rawCriteria } = params;
 
@@ -107,7 +109,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
     }
 
     const decoded = Schema.decodeUnknownResult(ListingSearchQueryCodec)(
-      withMinorUnitPrices(omitBlankSearchText(rawCriteria)),
+      withMinorUnitPrices(rawCriteria),
     );
     if (Result.isFailure(decoded)) {
       return yield* panelFor(ownerId, { error: "Those filters could not be read." });
@@ -135,11 +137,11 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
 
 const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (request) =>
   Effect.gen(function* () {
+    const ownerId = yield* callerId;
     if (!isSameOriginWrite(request)) {
-      return refuse(request, crossSiteFormMessage);
+      return yield* refuse(request, ownerId, crossSiteFormMessage);
     }
 
-    const ownerId = yield* callerId;
     const id = yield* Effect.map(HttpRouter.params, (params) =>
       decodeSavedSearchId(params["id"]),
     );

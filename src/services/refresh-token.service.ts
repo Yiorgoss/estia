@@ -29,6 +29,17 @@ const refreshCookieOptions = {
   sameSite: "lax",
 } as const satisfies NonNullable<Cookies.Cookie["options"]>;
 
+/*
+ * The presented refresh token was live when this request consumed it and spent
+ * when the same request tried to rotate it, so another request rotated it in
+ * between. The session is still live and the winner's pair is already on its
+ * way back to the browser.
+ */
+export class RefreshTokenRotatedError extends Schema.TaggedError<RefreshTokenRotatedError>()(
+  "RefreshTokenRotatedError",
+  {},
+) {}
+
 export interface RefreshTokenService {
   asCookie: (
     token: typeof RefreshTokenValue.Type,
@@ -70,19 +81,11 @@ export interface RefreshTokenService {
     typeof JWTSchema.Type,
     InternalError | UserNotFoundError | RefreshTokenNotFoundError
   >;
-  /*
-   * Whether the presented token was spent by another request moments ago. Two
-   * overlapping requests carry the same pair, and rotation is single-use, so the
-   * loser holds a token the winner just revoked - the session is still live and
-   * the winner's pair is already travelling back to the browser. A token spent
-   * earlier, revoked by signing out, expired, or never seen is not a race.
-   */
-  readonly justRotated: (token: typeof RefreshTokenValue.Type) => Effect.Effect<boolean>;
   rotateToken: (
     userId: typeof UserId.Type,
     userAgent: string,
     token: typeof RefreshTokenValue.Type,
-  ) => Effect.Effect<typeof RefreshTokenValue.Type, InternalError | RefreshTokenNotFoundError>;
+  ) => Effect.Effect<typeof RefreshTokenValue.Type, InternalError | RefreshTokenRotatedError>;
 }
 export const RefreshTokenService = Context.Service<RefreshTokenService>("RefreshTokenService");
 
@@ -94,9 +97,6 @@ export const RefreshTokenServiceLive = Layer.effect(
     const refreshTokenRepo = yield* RefreshTokenRepository;
     const userRepo = yield* UserRepository;
     const jwtService = yield* JWTService;
-
-    // A rotation this recent belongs to a request that is still answering.
-    const rotationRaceWindowMs = 10_000;
 
     return {
       asCookie: (token) => Effect.succeed(["refresh_token", token, refreshCookieOptions]),
@@ -159,7 +159,7 @@ export const RefreshTokenServiceLive = Layer.effect(
           const revoked = yield* refreshTokenRepo.revoke(oldToken);
           yield* revoked.pipe(
             Option.match({
-              onNone: () => Effect.fail(new RefreshTokenNotFoundError()),
+              onNone: () => Effect.fail(new RefreshTokenRotatedError()),
               onSome: Effect.succeed,
             }),
           );
@@ -184,14 +184,6 @@ export const RefreshTokenServiceLive = Layer.effect(
             SqlError: () => Effect.fail(new InternalError()),
           }),
         ),
-      justRotated: (token) =>
-        Effect.gen(function* () {
-          const hash = yield* hasher.hashRefreshToken(token);
-          const record = yield* refreshTokenRepo.findByHash(hash);
-          if (Option.isNone(record) || record.value.revokedAt === null) return false;
-          const now = yield* Clock.currentTimeMillis;
-          return now - record.value.revokedAt <= rotationRaceWindowMs;
-        }).pipe(Effect.orElseSucceed(() => false)),
       consumeToken: (token) =>
         Effect.gen(function* () {
           //does token exist and is valid

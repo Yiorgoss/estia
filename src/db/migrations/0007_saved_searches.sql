@@ -4,16 +4,14 @@
 -- saved searches a signed-in account keeps next to the listing feed; it does not
 -- touch an existing table.
 --
--- A saved search stores the same criteria the search feed filters on, plus the
--- free-text query. Every criterion is nullable because "any" is a real state:
--- NULL means the search did not narrow on that field. The flags keep the same
--- `0 | 1 | NULL` shape the listing table uses, so a saved `furnished = 0` is a
--- filter, not an absent one.
+-- A saved search stores the same criteria the search feed filters on. Every
+-- criterion is nullable because "any" is a real state: NULL means the search did
+-- not narrow on that field. The flags keep the same `0 | 1 | NULL` shape the
+-- listing table uses, so a saved `furnished = 0` is a filter, not an absent one.
 CREATE TABLE saved_searches (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
            name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 120),
-          query TEXT CHECK (query IS NULL OR length(query) BETWEEN 1 AND 200),
            kind TEXT CHECK (kind IS NULL OR kind IN ('room', 'whole_property', 'room_wanted')),
     region_code TEXT REFERENCES regions(code),
  min_price_minor INTEGER CHECK (min_price_minor IS NULL OR min_price_minor >= 0),

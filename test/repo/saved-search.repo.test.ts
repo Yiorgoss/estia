@@ -27,7 +27,6 @@ layer(TestLive, { concurrent: false })("SavedSearchRepository", (it) => {
       const repo = yield* SavedSearchRepository;
       const created = yield* repo.create(userId("u-saved-create"), {
         name: "Balcony rooms in Attica",
-        query: "balcony",
         kind: "room",
         regionCode: "attica",
         minPriceMinor: 40_000,
@@ -42,7 +41,6 @@ layer(TestLive, { concurrent: false })("SavedSearchRepository", (it) => {
       assert.isNumber(created.id);
       assert.strictEqual(created.userId, "u-saved-create");
       assert.strictEqual(created.name, "Balcony rooms in Attica");
-      assert.strictEqual(created.query, "balcony");
       assert.strictEqual(created.kind, "room");
       assert.strictEqual(created.regionCode, "attica");
       assert.strictEqual(created.minPriceMinor, 40_000);
@@ -67,7 +65,6 @@ layer(TestLive, { concurrent: false })("SavedSearchRepository", (it) => {
 
       assert.strictEqual(created.name, "All listings");
       for (const value of [
-        created.query,
         created.kind,
         created.regionCode,
         created.minPriceMinor,

@@ -54,7 +54,6 @@ layer(TestLive, { concurrent: false })("SavedSearchService", (it) => {
       const service = yield* SavedSearchService;
 
       const created = yield* service.create(ownerId("u-svc-saved-default"), {
-        query: "balcony",
         kind: "room",
         regionCode: "attica",
         minPriceMinor: 40_000,
@@ -68,7 +67,7 @@ layer(TestLive, { concurrent: false })("SavedSearchService", (it) => {
 
       assert.strictEqual(
         created.name,
-        '"balcony" Room in Attica €400-€800/mo 20-50 m² Furnished, No pets available from 1 Mar 2026',
+        "Room in Attica €400-€800/mo 20-50 m² Furnished, No pets available from 1 Mar 2026",
       );
     }),
   );
@@ -154,7 +153,16 @@ layer(TestLive, { concurrent: false })("SavedSearchService", (it) => {
   );
 
   it("summarizeSavedSearch keeps a long summary inside the name bound", () => {
-    const summary = summarizeSavedSearch({ query: "x".repeat(300) });
+    const summary = summarizeSavedSearch({
+      kind: "whole_property",
+      regionCode: "eastern_macedonia_and_thrace",
+      minPriceMinor: Number.MAX_SAFE_INTEGER,
+      maxPriceMinor: Number.MAX_SAFE_INTEGER,
+      minSizeSqm: Number.MAX_SAFE_INTEGER,
+      maxSizeSqm: Number.MAX_SAFE_INTEGER,
+      furnished: true,
+      pets: true,
+    });
     assert.isAtMost(summary.length, 120);
     assert.isTrue(summary.endsWith("..."));
   });
