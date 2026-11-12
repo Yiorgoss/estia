@@ -435,6 +435,9 @@ const matchesIfNoneMatch = (header: string | undefined, etag: string): boolean =
  * hidden behind an `immutable` lifetime. The version is the object's etag, which
  * changes whenever the bytes do, and a revalidation that already holds it is
  * answered with a body-less 304 instead of the same bytes again.
+ *
+ * The bytes of a draft or unlisted listing are the owner's private preview, so
+ * that response is marked `private` and never enters a shared cache at all.
  */
 const photoResponse = (
   found: {

@@ -19,8 +19,9 @@ import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The gallery service owns every photo rule: who may write to a gallery, what
- * bytes may enter it, the ten-photo and five-megabyte limits, and the ordering
- * that puts exactly one photo first.
+ * bytes may enter it, the per-listing and per-photo ceilings declared in
+ * `@/db/schema/ListingPhoto`, and the ordering that puts exactly one photo
+ * first.
  *
  * The bytes are validated here, on the server, from the content the request
  * actually delivered. The declared multipart content type must be one of the
