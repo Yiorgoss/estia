@@ -651,11 +651,13 @@ describe("the chat pages", () => {
         `/chats/${chatId}/messages`,
         form(
           { method: "POST", headers: { cookie: users.owner.cookie, origin: testOrigin } },
-          { body: "   " },
+          { body: "   ", clientMessageId: '<img src=x onerror=alert(1)>' },
         ),
       );
       assert.strictEqual(refused.status, 400, refused.body);
       assert.include(refused.body, `1 to ${CHAT_MESSAGE_MAX_LENGTH} characters`);
+      assert.notInclude(refused.body, '<img src=x onerror=');
+      assert.include(refused.body, '&lt;img src=x onerror=alert(1)&gt;');
     }),
   );
 

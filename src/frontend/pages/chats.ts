@@ -196,7 +196,7 @@ export const chatThreadPage = (
           <label for="chat-body" class="block text-sm font-medium text-gray-900">Message</label>
           <textarea id="chat-body" name="body" rows="3" required maxlength="${CHAT_MESSAGE_MAX_LENGTH}"
                     class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none">${options.draft === undefined ? "" : escapeHtml(options.draft)}</textarea>
-          <input type="hidden" name="clientMessageId" value="${options.clientMessageId ?? crypto.randomUUID()}" />
+          <input type="hidden" name="clientMessageId" value="${escapeHtml(options.clientMessageId ?? crypto.randomUUID())}" />
           <div class="mt-3 flex items-center gap-3">
             <button type="submit" class="${primaryButtonClass}">Send</button>
             <p id="chat-status" class="text-sm text-gray-500" role="status"></p>
@@ -278,6 +278,10 @@ export const chatThreadPage = (
 
         const distanceFromBottom = () =>
           document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+
+        const scrollToBottom = () => {
+          window.scrollTo(0, document.documentElement.scrollHeight);
+        };
 
         const clearNewMessages = () => {
           const atBottom = shouldFollowNewMessage(
@@ -366,8 +370,7 @@ export const chatThreadPage = (
 
         if (newMessagesButton !== null) {
           newMessagesButton.addEventListener("click", () => {
-            const last = list.lastElementChild;
-            if (last !== null) last.scrollIntoView({ block: "end" });
+            scrollToBottom();
             newMessagesButton.hidden = true;
             acknowledge();
           });
@@ -393,7 +396,7 @@ export const chatThreadPage = (
           if (empty !== null) empty.remove();
           list.appendChild(item);
           if (follow) {
-            item.scrollIntoView({ block: "end" });
+            scrollToBottom();
             if (newMessagesButton !== null) newMessagesButton.hidden = true;
           } else if (newMessagesButton !== null) {
             newMessagesButton.hidden = false;
@@ -519,8 +522,7 @@ export const chatThreadPage = (
           if (document.visibilityState === "visible") acknowledge();
         });
 
-        const newest = list.lastElementChild;
-        if (newest !== null) newest.scrollIntoView({ block: "end" });
+        scrollToBottom();
         acknowledge();
         connect();
       })();
