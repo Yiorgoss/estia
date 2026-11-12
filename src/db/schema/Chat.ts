@@ -150,6 +150,21 @@ export const SendMessageInput = Schema.Struct({
 export type SendMessageInput = typeof SendMessageInput.Type;
 
 /*
+ * The reader's acknowledgement: the highest sequence number the open thread has
+ * shown. The server clamps it to the chat's own last sequence number, so a
+ * receipt can never mark messages that do not exist yet as read.
+ */
+export const ChatReadInput = Schema.Struct({
+  seq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type ChatReadInput = typeof ChatReadInput.Type;
+
+export const ChatReadSchema = Schema.Struct({
+  lastReadSeq: Schema.Int,
+});
+export type ChatRead = typeof ChatReadSchema.Type;
+
+/*
  * A cursor over the archive: `after` is the highest sequence number the caller
  * already has, so a reconnect asks for what it missed rather than for a page
  * number. Query parameters arrive as strings, so both fields carry a string

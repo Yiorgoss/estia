@@ -6,8 +6,8 @@ import { Effect } from "effect";
 /*
  * The chat HTTP surface, driven through the real private router over the
  * in-memory database: the page forms that start and reply to a chat, the JSON
- * inbox, one chat, its messages, and the no-socket POST path. The chat object is
- * supplied by the harness's `ChatObject` layer, which verifies the same ticket the
+ * inbox, one chat, its messages, the read acknowledgement, and the no-socket POST
+ * path. The chat object is supplied by the harness's `ChatObject` layer, which verifies the same ticket the
  * Worker signs; the real object is exercised end to end by
  * `scripts/chat-socket-e2e.mjs`.
  */
@@ -115,6 +115,9 @@ const postMessage = (
   payload: { body: string; clientMessageId?: string },
 ) => send("POST", `/api/chats/${chatId}/messages`, { cookie: user.cookie, payload });
 
+const acknowledge = (user: TestUser, chatId: number, seq: number) =>
+  send("POST", `/api/chats/${chatId}/read`, { cookie: user.cookie, payload: { seq } });
+
 describe("starting a chat from a listing", () => {
   it.effect("opens the chat with the contact message as its first message", () =>
     Effect.gen(function* () {
@@ -221,6 +224,54 @@ describe("the chat JSON API", () => {
       // to the owner; nothing about the seeker's own inbox changed.
       const seekerRow = (yield* inbox(users.seeker)).find((item) => Number(item["id"]) === chatId);
       assert.strictEqual(seekerRow?.["unreadCount"], 0);
+    }),
+  );
+
+  it.effect("advances the read mark only to the messages the reader reports seeing", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const started = yield* startChat(users.seeker, listing.id, "First");
+      const chatId = chatIdFrom(started.location);
+
+      const opened = yield* send("GET", `/api/chats/${chatId}`, { cookie: users.owner.cookie });
+      assert.strictEqual(opened.status, 200, opened.body);
+
+      const second = yield* postMessage(users.seeker, chatId, {
+        body: "Second",
+        clientMessageId: "read-second",
+      });
+      assert.strictEqual(second.status, 200, second.body);
+
+      const beforeAck = (yield* inbox(users.owner)).find(
+        (item) => Number(item["id"]) === chatId,
+      );
+      assert.strictEqual(beforeAck?.["unreadCount"], 1);
+
+      const stale = yield* acknowledge(users.owner, chatId, 1);
+      assert.strictEqual(stale.status, 200, stale.body);
+      assert.strictEqual(asObject(stale.json)["lastReadSeq"], 1);
+      const stillUnread = (yield* inbox(users.owner)).find(
+        (item) => Number(item["id"]) === chatId,
+      );
+      assert.strictEqual(stillUnread?.["unreadCount"], 1);
+
+      const acknowledged = yield* acknowledge(users.owner, chatId, 2);
+      assert.strictEqual(acknowledged.status, 200, acknowledged.body);
+      assert.strictEqual(asObject(acknowledged.json)["lastReadSeq"], 2);
+      const cleared = (yield* inbox(users.owner)).find((item) => Number(item["id"]) === chatId);
+      assert.strictEqual(cleared?.["unreadCount"], 0);
+
+      const ahead = yield* acknowledge(users.owner, chatId, 999);
+      assert.strictEqual(asObject(ahead.json)["lastReadSeq"], 2);
+      const third = yield* postMessage(users.seeker, chatId, {
+        body: "Third",
+        clientMessageId: "read-third",
+      });
+      assert.strictEqual(third.status, 200, third.body);
+      const afterThird = (yield* inbox(users.owner)).find(
+        (item) => Number(item["id"]) === chatId,
+      );
+      assert.strictEqual(afterThird?.["unreadCount"], 1);
     }),
   );
 
@@ -352,6 +403,9 @@ describe("the chat JSON API", () => {
       const write = yield* postMessage(users.other, chatId, { body: "Butting in" });
       assert.strictEqual(write.status, 404, write.body);
 
+      const read = yield* acknowledge(users.other, chatId, 1);
+      assert.strictEqual(read.status, 404, read.body);
+
       assert.deepEqual(yield* inbox(users.other), []);
     }),
   );
@@ -366,6 +420,9 @@ describe("the chat JSON API", () => {
         const response = yield* call(path);
         assert.strictEqual(response.status, 401, `${path}: ${response.status}`);
       }
+
+      const read = yield* send("POST", `/api/chats/${chatId}/read`, { payload: { seq: 1 } });
+      assert.strictEqual(read.status, 401, read.body);
     }),
   );
 

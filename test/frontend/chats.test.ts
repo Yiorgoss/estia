@@ -119,6 +119,7 @@ describe("chatThreadPage", () => {
     assert.include(html, 'data-chat-id="4"');
     assert.include(html, 'data-user-id="user-owner"');
     assert.include(html, 'data-last-seq="2"');
+    assert.include(html, 'data-last-read-seq="2"');
     // The header names the other side, not the reader.
     assert.include(html, ">Seeker Name</h1>");
     assert.include(html, "Sunny studio in Athens");

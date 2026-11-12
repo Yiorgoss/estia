@@ -9,6 +9,7 @@ import {
   type ChatInbox,
   type ChatMessage,
   type ChatMessages,
+  type ChatRead,
   type SendMessageInput,
 } from "@/db/schema/Chat";
 import type { ChatMessageRow } from "@/durable-objects/chat-core";
@@ -71,6 +72,17 @@ export interface ChatService {
     chatId: typeof ChatId.Type,
     page: { readonly after: number; readonly limit: number },
   ) => Effect.Effect<ChatMessages, ChatNotFoundError | InternalError>;
+
+  /*
+   * A reader's acknowledgement that the open thread has shown messages up to
+   * `seq`. It is clamped to the chat's own last sequence number, so a receipt
+   * cannot mark future messages as already read.
+   */
+  readonly markRead: (
+    userId: typeof UserId.Type,
+    chatId: typeof ChatId.Type,
+    seq: number,
+  ) => Effect.Effect<ChatRead, ChatNotFoundError | InternalError>;
 
   /*
    * The no-socket fallback. It goes through the chat object exactly as a socket
@@ -235,6 +247,16 @@ export const ChatServiceLive = Layer.effect(
             ),
           );
           return { items, lastSeq: access.lastSeq } satisfies ChatMessages;
+        }),
+
+      markRead: (userId, chatId, seq) =>
+        Effect.gen(function* () {
+          const access = yield* load(userId, chatId);
+          const next = Math.min(seq, access.lastSeq);
+          if (next > access.lastReadSeq) {
+            yield* fromSql(repo.markRead(chatId, userId, next));
+          }
+          return { lastReadSeq: Math.max(access.lastReadSeq, next) } satisfies ChatRead;
         }),
 
       sendMessage: (userId, chatId, input) =>

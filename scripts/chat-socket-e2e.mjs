@@ -261,10 +261,15 @@ const main = async () => {
     JSON.stringify(limited),
   );
 
-  // Drop one side, send on the other, then reconnect asking for the gap.
-  const lastBeforeDrop = Math.max(...messages(ownerSocket.frames).map((message) => message.seq));
+  // Drop one side, then take the gap cursor from the archive once that side's
+  // pending frames have settled. The owner's socket is a different connection,
+  // so its frames are not a happens-before for what the archive contains.
   seekerSocket.close();
   await sleep(100);
+  const beforeDrop = await request(`/api/chats/${chatId}/messages`, {
+    headers: json(seeker.cookie),
+  });
+  const lastBeforeDrop = beforeDrop.json.lastSeq;
 
   ownerSocket.send({
     type: "send",
@@ -336,6 +341,19 @@ const main = async () => {
     seekerRow !== undefined && seekerRow.unreadCount === ownerMessages,
     `${seekerRow?.unreadCount} vs ${ownerMessages}`,
   );
+
+  const acknowledged = await request(`/api/chats/${chatId}/read`, {
+    method: "POST",
+    headers: json(seeker.cookie),
+    body: JSON.stringify({ seq: ordered.json.lastSeq }),
+  });
+  check("a read acknowledgement is accepted", acknowledged.status === 200, acknowledged.text);
+  const acknowledgedInbox = await request("/api/chats", { headers: json(seeker.cookie) });
+  check(
+    "a read acknowledgement clears the unread count without reopening the thread",
+    acknowledgedInbox.json.items.find((item) => item.id === chatId)?.unreadCount === 0,
+  );
+
   await request(`/api/chats/${chatId}`, { headers: json(seeker.cookie) });
   const cleared = await request("/api/chats", { headers: json(seeker.cookie) });
   check(

@@ -8,6 +8,8 @@ import {
   ChatMessageSchema,
   ChatMessagesQuery,
   ChatMessagesSchema,
+  ChatReadInput,
+  ChatReadSchema,
   SendMessageInput,
 } from "@/db/schema/Chat";
 import { CurrentUser } from "@/db/schema/User";
@@ -235,6 +237,14 @@ export const ChatGroup = HttpApiGroup.make("chat-group")
         UnauthorizedError,
         InternalError,
       ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("read", "/:id/read", {
+      params: { id: ChatId },
+      payload: ChatReadInput,
+      success: ChatReadSchema,
+      error: [ChatNotFoundError, UnauthorizedError, InternalError],
     }),
   )
   // A group prefix only applies to the endpoints added before it.

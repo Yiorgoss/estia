@@ -13,8 +13,9 @@ import { escapeHtml, formatDateTime } from "@/utils";
  *
  * Both are server-rendered. The thread page carries one small inline script that
  * upgrades it to live delivery: it opens the socket after the newest sequence
- * number it rendered, appends what arrives, and reconnects with that same number
- * after a drop, so a hibernated object and a sleeping laptop both resume where
+ * number it rendered, appends what arrives, acknowledges what the visible thread
+ * has shown, and reconnects with that same number after a drop or a back/forward
+ * cache restore, so a hibernated object and a sleeping laptop both resume where
  * the reader left off. Without the script the page still works - the form posts
  * to the no-socket fallback and the browser reloads the thread.
  */
@@ -136,7 +137,8 @@ export const chatThreadPage = (
          data-chat-id="${detail.id}"
          data-user-id="${escapeHtml(options.userId)}"
          data-counterpart="${escapeHtml(counterpartName)}"
-         data-last-seq="${messages.lastSeq}">
+         data-last-seq="${messages.lastSeq}"
+         data-last-read-seq="${detail.lastReadSeq}">
       ${backLink}
 
       <article class="mt-3 rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -196,6 +198,7 @@ export const chatThreadPage = (
         if (list === null || form === null || input === null || template === null) return;
 
         let lastSeq = Number(root.dataset.lastSeq || "0");
+        let acknowledged = Number(root.dataset.lastReadSeq || "0");
         let socket = null;
         let retry = 0;
         let leaving = false;
@@ -203,6 +206,20 @@ export const chatThreadPage = (
 
         const setStatus = (text) => {
           if (status !== null) status.textContent = text;
+        };
+
+        const acknowledge = () => {
+          if (document.visibilityState !== "visible" || lastSeq <= acknowledged) return;
+          const seq = lastSeq;
+          void fetch("/api/chats/" + chatId + "/read", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ seq: seq }),
+          })
+            .then((response) => {
+              if (response.ok) acknowledged = Math.max(acknowledged, seq);
+            })
+            .catch(() => {});
         };
 
         const newId = () =>
@@ -240,6 +257,7 @@ export const chatThreadPage = (
           list.appendChild(fragment);
           item.scrollIntoView({ block: "end" });
           if (pending === null) setStatus("");
+          acknowledge();
         };
 
         const connect = () => {
@@ -309,6 +327,17 @@ export const chatThreadPage = (
         window.addEventListener("pagehide", () => {
           leaving = true;
           if (socket !== null) socket.close();
+        });
+
+        window.addEventListener("pageshow", (event) => {
+          if (!event.persisted) return;
+          leaving = false;
+          if (socket === null) connect();
+          acknowledge();
+        });
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") acknowledge();
         });
 
         connect();

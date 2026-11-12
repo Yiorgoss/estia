@@ -1,5 +1,6 @@
 import {
   CHAT_POLICY_CLOSE_CODE,
+  CHAT_REPLAY_LIMIT,
   CHAT_SESSION_CLOSE_CODE,
   createChatCore,
   type ChatCore,
@@ -268,6 +269,30 @@ describe("chat core replay", () => {
 
     const upToDate = await connect(chat, "user-d", 3);
     assert.deepEqual(messageSeqs(upToDate), []);
+  });
+
+  it("replays the whole gap when it is longer than one page", async () => {
+    const chat = makeChat({ rateLimit: { windowMs: 10_000, maxMessages: 200 } });
+    const ticket = {
+      userId: "user-a",
+      chatId: CHAT_ID,
+      exp: START + 60_000,
+      sessionExp: START + 3_600_000,
+    };
+    const total = CHAT_REPLAY_LIMIT + 5;
+    for (let index = 1; index <= total; index += 1) {
+      await chat.core.append(ticket, {
+        clientMessageId: `a-${index}`,
+        body: `message ${index}`,
+      });
+    }
+
+    const bob = await connect(chat, "user-b", 0);
+    const seqs = messageSeqs(bob);
+
+    assert.strictEqual(seqs.length, total);
+    assert.strictEqual(seqs.at(0), 1);
+    assert.strictEqual(seqs.at(-1), total);
   });
 
   it("holds live frames until a socket's replay has finished", async () => {
