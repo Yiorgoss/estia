@@ -418,14 +418,6 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
 const photoNotFound = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text("Not found", { status: 404 });
 
-/*
- * Photo bytes are revocable: unpublishing a listing or deleting a photo turns
- * the same URL into a 404. A shared cache may store the bytes, but it has to
- * revalidate before reusing them, so the revocation the origin applies is not
- * hidden behind an `immutable` lifetime. The version is the object's etag, which
- * changes whenever the bytes do, and a revalidation that already holds it is
- * answered with a body-less 304 instead of the same bytes again.
- */
 const matchesIfNoneMatch = (header: string | undefined, etag: string): boolean => {
   if (header === undefined) return false;
   const current = etag.replace(/^W\//, "");
@@ -436,6 +428,14 @@ const matchesIfNoneMatch = (header: string | undefined, etag: string): boolean =
     );
 };
 
+/*
+ * Photo bytes are revocable: unpublishing a listing or deleting a photo turns
+ * the same URL into a 404. A shared cache may store the bytes, but it has to
+ * revalidate before reusing them, so the revocation the origin applies is not
+ * hidden behind an `immutable` lifetime. The version is the object's etag, which
+ * changes whenever the bytes do, and a revalidation that already holds it is
+ * answered with a body-less 304 instead of the same bytes again.
+ */
 const photoResponse = (
   found: {
     readonly object: R2ObjectBody;
