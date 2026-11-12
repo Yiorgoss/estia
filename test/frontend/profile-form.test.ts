@@ -19,6 +19,10 @@ import { Schema } from "effect";
  * to render: incomplete, saved, and the other role's form.
  */
 
+// The enquiry contact order the send implements, stated on both profile forms.
+const contactHint =
+  "For an enquiry, the contact on this profile is shown first, then your other profile's, then your account email; if all are empty, the enquiry is refused.";
+
 const seekerForm = (overrides: Record<string, string> = {}): Record<string, string> => ({
   name: "Ada Seeker",
   dateOfBirth: "1995-04-12",
@@ -185,10 +189,7 @@ describe("profilePage", () => {
     assert.include(html, "Add your name, date of birth and gender");
     assert.include(html, 'action="/profile"');
     assert.include(html, "Switch to my listing profile");
-    assert.include(
-      html,
-      "Shown to a lister when you send them an enquiry. Your account email is shown instead when this is empty.",
-    );
+    assert.include(html, contactHint);
     assert.notInclude(html, "Your profile was saved.");
   });
 
@@ -214,6 +215,7 @@ describe("profilePage", () => {
     assert.include(html, "Listing profile");
     assert.include(html, '<option value="owner" selected>');
     assert.include(html, "Switch to my seeking profile");
+    assert.include(html, contactHint);
     assert.include(html, "Choose whether you own the place or hold its lease.");
     // A listing profile has no seeking fields to offer.
     assert.notInclude(html, 'name="dateOfBirth"');

@@ -29,6 +29,11 @@ const selectClass =
   "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
 const hintClass = "mt-1 text-xs text-gray-500";
 
+// One statement of the enquiry's contact order, shared by both profile forms so
+// neither promises a source the send does not use.
+const contactHint =
+  "For an enquiry, the contact on this profile is shown first, then your other profile's, then your account email; if all are empty, the enquiry is refused.";
+
 const genderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
@@ -181,7 +186,7 @@ const seekerFields = (values: ProfileFormValues) => `
     <p class="${hintClass}">Optional. Shown to people whose listings you answer.</p>
   </div>
 
-  ${contactField(values.contact, "Shown to a lister when you send them an enquiry. Your account email is shown instead when this is empty.")}
+  ${contactField(values.contact, contactHint)}
 
   <fieldset class="mt-4">
     <legend class="${labelClass}">Habits</legend>
@@ -209,7 +214,7 @@ const listerFields = (values: ProfileFormValues) => `
     </p>
   </div>
 
-  ${contactField(values.contact, "Optional. Shown to signed-in people viewing your listings.")}`;
+  ${contactField(values.contact, contactHint)}`;
 
 const switchControl = (role: EditableProfileRole) => {
   const label = role === "seeker" ? "Switch to my listing profile" : "Switch to my seeking profile";
