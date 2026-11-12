@@ -33,9 +33,18 @@ export type OptionalCallerSession =
   | { readonly _tag: "anonymous" }
   | { readonly _tag: "retry" };
 
-export type SessionResolver = (
-  request: HttpServerRequest.HttpServerRequest,
-) => Effect.Effect<OptionalCallerSession>;
+/*
+ * What a session is proved from. A page or route has these on its request; a
+ * WebSocket upgrade has the same two things, but the Effect HTTP request object
+ * only exists for requests the router handles. Naming the pair is what lets the
+ * upgrade path run the one session model instead of a second copy of it.
+ */
+export interface SessionRequest {
+  readonly cookies: Readonly<Record<string, string>>;
+  readonly userAgent: string;
+}
+
+export type SessionResolver = (request: SessionRequest) => Effect.Effect<OptionalCallerSession>;
 
 const anonymous: OptionalCallerSession = { _tag: "anonymous" };
 const retry: OptionalCallerSession = { _tag: "retry" };
@@ -51,7 +60,7 @@ export const sessionResolver: Effect.Effect<
   const jwtService = yield* JWTService;
   const refreshTokenService = yield* RefreshTokenService;
 
-  return (request) =>
+  return (request: SessionRequest) =>
     Effect.gen(function* () {
       const accessToken = yield* Schema.decodeUnknownEffect(JWTSchema)(
         request.cookies["access_token"],
@@ -62,40 +71,45 @@ export const sessionResolver: Effect.Effect<
 
       if (accessToken === null && refreshToken === null) return anonymous;
 
-      return yield* auth
-        .tokenAuthFlow({ accessToken, refreshToken }, request.headers["user-agent"])
-        .pipe(
-          Effect.flatMap(({ tokens, user }) =>
-            Effect.gen(function* () {
-              const cookies: Array<readonly [string, string, Cookies.Cookie["options"]?]> = [];
-              if (tokens.accessToken != null) {
-                cookies.push(yield* jwtService.asCookie(tokens.accessToken));
-              }
-              if (tokens.refreshToken != null) {
-                cookies.push(yield* refreshTokenService.asCookie(tokens.refreshToken));
-              }
-              return { _tag: "caller", caller: user.id, cookies } as const;
-            }),
-          ),
-          Effect.catchTags({
-            // The token was live when this request consumed it and spent when
-            // it tried to rotate it: another request rotated it in between.
-            RefreshTokenRotatedError: () => Effect.succeed(retry),
-            InvalidJWTError: () => Effect.succeed(anonymous),
-            ExpiredJWTError: () => Effect.succeed(anonymous),
-            UnauthorizedError: () => Effect.succeed(anonymous),
-            UserNotFoundError: () => Effect.succeed(anonymous),
-            RefreshTokenNotFoundError: () => Effect.succeed(anonymous),
-            InternalError: () => Effect.succeed(anonymous),
+      return yield* auth.tokenAuthFlow({ accessToken, refreshToken }, request.userAgent).pipe(
+        Effect.flatMap(({ tokens, user }) =>
+          Effect.gen(function* () {
+            const cookies: Array<readonly [string, string, Cookies.Cookie["options"]?]> = [];
+            if (tokens.accessToken != null) {
+              cookies.push(yield* jwtService.asCookie(tokens.accessToken));
+            }
+            if (tokens.refreshToken != null) {
+              cookies.push(yield* refreshTokenService.asCookie(tokens.refreshToken));
+            }
+            return { _tag: "caller", caller: user.id, cookies } as const;
           }),
-        );
+        ),
+        Effect.catchTags({
+          // The token was live when this request consumed it and spent when
+          // it tried to rotate it: another request rotated it in between.
+          RefreshTokenRotatedError: () => Effect.succeed(retry),
+          InvalidJWTError: () => Effect.succeed(anonymous),
+          ExpiredJWTError: () => Effect.succeed(anonymous),
+          UnauthorizedError: () => Effect.succeed(anonymous),
+          UserNotFoundError: () => Effect.succeed(anonymous),
+          RefreshTokenNotFoundError: () => Effect.succeed(anonymous),
+          InternalError: () => Effect.succeed(anonymous),
+        }),
+      );
     });
 });
 
+/*
+ * The session of a request the router is handling. The cookie record and the user
+ * agent are the only inputs the resolver takes, so this is the one adapter from an
+ * HTTP request to it.
+ */
 export const optionalCaller = (
   request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<OptionalCallerSession, never, AuthService | JWTService | RefreshTokenService> =>
-  Effect.flatMap(sessionResolver, (resolve) => resolve(request));
+  Effect.flatMap(sessionResolver, (resolve) =>
+    resolve({ cookies: request.cookies, userAgent: request.headers["user-agent"] }),
+  );
 
 /*
  * The answer to a request that lost the rotation race: htmx reloads the page and

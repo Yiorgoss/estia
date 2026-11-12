@@ -172,3 +172,32 @@ export const insertListingPhoto = (
       ],
     );
   });
+
+/*
+ * One archived message, written straight into the table. In production the chat
+ * object is the only writer of `chat_messages`; a repository test that needs an
+ * archive seeds it here rather than standing up an object, and the object's own
+ * write is covered end to end by `scripts/chat-socket-e2e.mjs`.
+ */
+export const insertChatMessage = (values: {
+  readonly chatId: number;
+  readonly seq: number;
+  readonly senderId: string;
+  readonly body: string;
+  readonly clientMessageId: string;
+  readonly createdAt?: number;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const createdAt = values.createdAt ?? 1_700_000_000_000 + values.seq;
+    yield* sql.unsafe(
+      `INSERT INTO chat_messages (chat_id, seq, sender_id, body, client_message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [values.chatId, values.seq, values.senderId, values.body, values.clientMessageId, createdAt],
+    );
+    yield* sql.unsafe(`UPDATE chats SET last_seq = ?, last_message_at = ? WHERE id = ?`, [
+      values.seq,
+      createdAt,
+      values.chatId,
+    ]);
+  });

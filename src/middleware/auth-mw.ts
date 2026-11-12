@@ -37,7 +37,10 @@ export const AuthMiddleware = HttpRouter.middleware<{ provides: CurrentUserId }>
     return (app) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const session = yield* resolve(request);
+        const session = yield* resolve({
+          cookies: request.cookies,
+          userAgent: request.headers["user-agent"],
+        });
         if (session._tag === "retry") return retrySessionResponse(request);
         if (session._tag === "anonymous") return unauthenticatedResponse(request);
         yield* HttpEffect.appendPreResponseHandler((_request, response) =>

@@ -24,6 +24,10 @@ import { ListingServiceLive } from "@/services/listing.service";
 import { SavedSearchServiceLive } from "@/services/saved-search.service";
 import { ListingPhotoServiceLive } from "@/services/listing-photo.service";
 import { ListingHandler as PublicListingHandler } from "@/handlers/public/listing.handler";
+import { ChatRepositoryLive } from "@/repos/chat.repo";
+import { ChatServiceLive } from "@/services/chat.service";
+import { ChatTicketServiceLive } from "@/services/chat-ticket.service";
+import { ChatHandler } from "@/handlers/private/chat.handler";
 
 // --- Repositories ---
 export const RepositoriesLive = Layer.mergeAll(
@@ -34,10 +38,17 @@ export const RepositoriesLive = Layer.mergeAll(
   ListingRepositoryLive,
   SavedSearchRepositoryLive,
   ListingPhotoRepositoryLive,
+  ChatRepositoryLive,
 );
 
 // --- Low-level / infra services ---
-export const InfraServicesLive = Layer.mergeAll(HasherServiceLive, JWTServiceLive);
+export const InfraServicesLive = Layer.mergeAll(
+  HasherServiceLive,
+  JWTServiceLive,
+  // Signing a chat ticket needs only the shared secret, so it lives beside the
+  // access-token signer it borrows that secret from.
+  ChatTicketServiceLive,
+);
 
 // --- Domain services (depend on repos + infra) ---
 export const DomainServicesLive = Layer.mergeAll(
@@ -46,6 +57,9 @@ export const DomainServicesLive = Layer.mergeAll(
   ListingServiceLive,
   SavedSearchServiceLive,
   ListingPhotoServiceLive.pipe(Layer.provide(ListingServiceLive)),
+  // `ChatService` posts through the chat object, whose binding belongs to the
+  // Worker edge; the object client is supplied there and in the test harness.
+  ChatServiceLive.pipe(Layer.provide(ListingServiceLive)),
 );
 
 // --- Final app layer ---
@@ -89,7 +103,7 @@ export const PublicRouterLive = Layer.mergeAll(
  */
 
 export const PrivateApiRouterLive = HttpApiBuilder.layer(PrivateApi).pipe(
-  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler)),
+  Layer.provide(Layer.mergeAll(UserHandler, PrivateListingHandler, ChatHandler)),
   Layer.provide(SameOriginWriteMiddleware),
 );
 
