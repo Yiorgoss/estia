@@ -70,11 +70,11 @@ describe("searchPage", () => {
     assert.include(html, 'value="400"');
     assert.include(html, 'value="1200.5"');
     assert.include(html, 'value="2026-03-01"');
-    assert.include(html, "<option value=\"true\" selected>Yes</option>");
-    assert.include(html, "<option value=\"false\" selected>No</option>");
+    assert.include(html, '<option value="true" selected>Yes</option>');
+    assert.include(html, '<option value="false" selected>No</option>');
     assert.include(html, 'aria-current="page"');
     assert.include(html, "regionCode=attica");
-    assert.include(html, "hx-get=\"/search/results?");
+    assert.include(html, 'hx-get="/search/results?');
   });
 
   it("keeps a negative flag expressible when the form is reopened", () => {
@@ -84,7 +84,7 @@ describe("searchPage", () => {
 
     assert.strictEqual(values.pets, "false");
     assert.strictEqual(values.furnished, "");
-    assert.include(html, "<option value=\"false\" selected>No</option>");
+    assert.include(html, '<option value="false" selected>No</option>');
     assert.include(savedSearchResultsHref(saved), "pets=false");
   });
 });

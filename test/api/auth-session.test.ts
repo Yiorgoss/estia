@@ -119,9 +119,7 @@ describe("resolving a request's session", () => {
   it.effect("does not ask the auth flow about a visitor with no session cookies", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
-      const session = yield* optionalCaller(request("/search")).pipe(
-        Effect.provide(stubs(calls)),
-      );
+      const session = yield* optionalCaller(request("/search")).pipe(Effect.provide(stubs(calls)));
 
       assert.deepStrictEqual(session, { _tag: "anonymous" });
       assert.strictEqual(yield* Ref.get(calls), 0);

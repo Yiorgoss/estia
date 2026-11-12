@@ -1,7 +1,4 @@
-import {
-  decodeSavedSearchId,
-  SavedSearchName,
-} from "@/db/schema/SavedSearch";
+import { decodeSavedSearchId, SavedSearchName } from "@/db/schema/SavedSearch";
 import { UserId } from "@/db/schema/brands";
 import { ListingSearchQueryCodec } from "@/db/schema/Listing";
 import { callerId } from "@/handlers/private/caller";
@@ -10,12 +7,7 @@ import { clearedNameInput, savedSearchesPanel } from "@/frontend/saved-search";
 import type { SavedSearchesPanelOptions } from "@/frontend/saved-search";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { withMinorUnitPrices } from "@/utils";
-import {
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-  UrlParams,
-} from "effect/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
 import { Effect, Option, Result, Schema } from "effect";
 
 /*
@@ -25,9 +17,10 @@ import { Effect, Option, Result, Schema } from "effect";
  * with the session attached.
  *
  * A save and a delete answer the saved-search list fragment, which is the
- * element htmx targets. A request without htmx is answered with a redirect
- * instead, so a browser with no script still ends up on the search page rather
- * than staring at a fragment.
+ * element htmx targets. A request without htmx is a navigation and is answered
+ * with a redirect, so a browser with no script still ends up on the search page
+ * rather than staring at a fragment; only a refused cross-site write keeps the
+ * status that describes it.
  */
 
 const respond = (body: string, status: number): HttpServerResponse.HttpServerResponse =>
@@ -46,10 +39,10 @@ const panelError = "Your saved searches could not be loaded just now.";
 
 /*
  * The list as the page shows it, with an optional banner. An htmx request gets
- * the section it targets; a request without htmx is a navigation, and every
- * answer to one - saved, refused, or failed - is the search page rather than a
- * bare fragment. A failed read is rendered inside the section, so the
- * surrounding search page stays usable.
+ * the section it targets; a request without htmx is a navigation, and a saved
+ * or failed one is answered with the search page rather than a bare fragment.
+ * A failed read is rendered inside the section, so the surrounding search page
+ * stays usable.
  */
 const panelFor = (
   request: HttpServerRequest.HttpServerRequest,
@@ -121,9 +114,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
 
     const { limit: _limit, cursor: _cursor, ...criteria } = decoded.success;
     const savedSearchService = yield* SavedSearchService;
-    const created = yield* Effect.result(
-      savedSearchService.create(ownerId, { name, ...criteria }),
-    );
+    const created = yield* Effect.result(savedSearchService.create(ownerId, { name, ...criteria }));
     if (Result.isFailure(created)) {
       return yield* panelFor(request, ownerId, {
         error: "This search could not be saved just now. Please try again.",
@@ -146,9 +137,7 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
       return yield* refuse(request, ownerId, crossSiteFormMessage);
     }
 
-    const id = yield* Effect.map(HttpRouter.params, (params) =>
-      decodeSavedSearchId(params["id"]),
-    );
+    const id = yield* Effect.map(HttpRouter.params, (params) => decodeSavedSearchId(params["id"]));
     if (id === undefined) {
       return yield* panelFor(request, ownerId, {
         error: "That saved search no longer exists.",
@@ -171,7 +160,4 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
 
 // Exported as routes rather than a layer so the private router can register
 // them next to its other pages under one auth middleware.
-export const SavedSearchRoutes = [
-  createSavedSearch,
-  deleteSavedSearch,
-];
+export const SavedSearchRoutes = [createSavedSearch, deleteSavedSearch];

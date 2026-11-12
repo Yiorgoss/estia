@@ -4,11 +4,7 @@ import { kindLabels, regionLabels } from "../listing-labels";
 import { head } from "../head";
 import { header } from "../header";
 import { savedSearchesPanel, saveSearchForm } from "../saved-search";
-import {
-  emptySearchFormValues,
-  type SearchFlagValue,
-  type SearchFormValues,
-} from "../search-form";
+import { emptySearchFormValues, type SearchFlagValue, type SearchFormValues } from "../search-form";
 import { escapeHtml } from "@/utils";
 
 const numberField = (

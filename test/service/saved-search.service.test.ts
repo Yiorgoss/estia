@@ -130,7 +130,9 @@ layer(TestLive, { concurrent: false })("SavedSearchService", (it) => {
         yield* tagOf(service.delete(ownerId("u-svc-saved-delete-other"), mine.id)),
         "SavedSearchNotFoundError",
       );
-      assert.isTrue(Option.isSome(yield* service.findOwned(ownerId("u-svc-saved-delete"), mine.id)));
+      assert.isTrue(
+        Option.isSome(yield* service.findOwned(ownerId("u-svc-saved-delete"), mine.id)),
+      );
 
       // An unknown id is the same refusal as another account's id.
       assert.strictEqual(

@@ -149,24 +149,18 @@ layer(TestLive, { concurrent: false })("SavedSearchRepository", (it) => {
       assert.isTrue(
         Option.isNone(yield* repo.deleteForUser(userId("u-saved-delete-other"), mine.id)),
       );
-      assert.isTrue(
-        Option.isSome(yield* repo.findByIdForUser(userId("u-saved-delete"), mine.id)),
-      );
+      assert.isTrue(Option.isSome(yield* repo.findByIdForUser(userId("u-saved-delete"), mine.id)));
 
       const deleted = yield* repo.deleteForUser(userId("u-saved-delete"), mine.id);
       assert.isTrue(Option.isSome(deleted));
       assert.strictEqual(Option.getOrThrow(deleted).id, mine.id);
-      assert.isTrue(
-        Option.isNone(yield* repo.findByIdForUser(userId("u-saved-delete"), mine.id)),
-      );
+      assert.isTrue(Option.isNone(yield* repo.findByIdForUser(userId("u-saved-delete"), mine.id)));
 
       // The other account's row is untouched, and a second delete has nothing left.
       assert.isTrue(
         Option.isSome(yield* repo.findByIdForUser(userId("u-saved-delete-other"), theirs.id)),
       );
-      assert.isTrue(
-        Option.isNone(yield* repo.deleteForUser(userId("u-saved-delete"), mine.id)),
-      );
+      assert.isTrue(Option.isNone(yield* repo.deleteForUser(userId("u-saved-delete"), mine.id)));
     }),
   );
 });

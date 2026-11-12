@@ -44,9 +44,7 @@ const storedSearches = (userId: string) =>
   query("SELECT * FROM saved_searches WHERE user_id = ? ORDER BY created_at DESC, id DESC", [
     userId,
   ]).pipe(
-    Effect.map((rows) =>
-      rows.map((row) => Schema.decodeUnknownSync(SavedSearchRowSchema)(row)),
-    ),
+    Effect.map((rows) => rows.map((row) => Schema.decodeUnknownSync(SavedSearchRowSchema)(row))),
   );
 
 const browserSave = (
@@ -56,10 +54,7 @@ const browserSave = (
 ) =>
   call(
     "/search/saved",
-    form(
-      { method: "POST", headers: { cookie, "hx-request": "true", ...headers } },
-      fields,
-    ),
+    form({ method: "POST", headers: { cookie, "hx-request": "true", ...headers } }, fields),
   );
 
 const staleAccess = (session: BrowserSession) =>
@@ -139,10 +134,9 @@ describe("the browser's saved-search routes", () => {
 
       // The rotated pair, not the consumed refresh token, is the credential the
       // next click carries.
-      const next = yield* browserSave(
-        `access_token=${access}; refresh_token=${refresh}`,
-        { pets: "false" },
-      );
+      const next = yield* browserSave(`access_token=${access}; refresh_token=${refresh}`, {
+        pets: "false",
+      });
       assert.strictEqual(next.status, 200, next.body);
       assert.include(next.body, "Saved:");
     }),
@@ -296,7 +290,10 @@ describe("the browser's saved-search routes", () => {
       const response = yield* call(
         "/search/saved",
         form(
-          { method: "POST", headers: { cookie: users.owner.cookie, origin: "https://evil.example" } },
+          {
+            method: "POST",
+            headers: { cookie: users.owner.cookie, origin: "https://evil.example" },
+          },
           { pets: "false" },
         ),
       );
@@ -481,7 +478,9 @@ describe("two overlapping requests that share one refresh token", () => {
         { concurrency: 2 },
       );
 
-      const winners = responses.filter((response) => response.cookies["refresh_token"] !== undefined);
+      const winners = responses.filter(
+        (response) => response.cookies["refresh_token"] !== undefined,
+      );
       assert.lengthOf(winners, 1);
       const [winner] = winners;
       assert.isDefined(winner);
