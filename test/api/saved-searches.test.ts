@@ -381,7 +381,7 @@ describe("an htmx save with no session", () => {
 });
 
 describe("a stale access token on the public search routes", () => {
-  it.effect("still identifies the caller, rotates the session, and keeps the saved-search UI", () =>
+  it.effect("rotates on the page and leaves the results fragment public", () =>
     Effect.gen(function* () {
       const session = yield* signIn("search-page-rotation");
       const created = yield* browserSave(`access_token=${session.access}`, {
@@ -409,10 +409,15 @@ describe("a stale access token on the public search routes", () => {
       );
 
       const results = yield* call("/search/results", {
-        headers: browser(`access_token=an.expired.token; refresh_token=${refresh}`),
+        headers: {
+          ...browser(`access_token=an.expired.token; refresh_token=${refresh}`),
+          "hx-request": "true",
+        },
       });
       assert.strictEqual(results.status, 200, results.body);
-      assert.notStrictEqual(results.cookies["refresh_token"], refresh);
+      assert.isNull(results.headers.get("HX-Refresh"));
+      assert.isUndefined(results.cookies["access_token"]);
+      assert.isUndefined(results.cookies["refresh_token"]);
     }),
   );
 
@@ -502,47 +507,6 @@ describe("two overlapping requests that share one refresh token", () => {
 
       const page = yield* call("/search", {
         headers: browser(`access_token=${access}; refresh_token=${refresh}`),
-      });
-      assert.strictEqual(page.status, 200, page.body);
-      assert.include(page.body, 'id="saved-searches"');
-      assert.include(page.body, "Listings No pets");
-    }),
-  );
-
-  it.effect("lets exactly one htmx request rotate and reload the other", () =>
-    Effect.gen(function* () {
-      const session = yield* signIn("rotation-race-htmx");
-      const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
-      assert.strictEqual(saved.status, 200, saved.body);
-
-      const fragment = "/search/results?pets=false";
-      const responses = yield* Effect.all(
-        [
-          call(fragment, {
-            headers: { ...browser(staleAccess(session)), "hx-request": "true" },
-          }),
-          call(fragment, {
-            headers: { ...browser(staleAccess(session)), "hx-request": "true" },
-          }),
-        ],
-        { concurrency: 2 },
-      );
-
-      const winners = responses.filter((response) => response.cookies["refresh_token"] !== undefined);
-      assert.lengthOf(winners, 1);
-      const [winner] = winners;
-      assert.isDefined(winner);
-
-      const other = responses.find((response) => response !== winner);
-      assert.isDefined(other);
-      if (other.headers.get("HX-Refresh") === "true") {
-        assert.strictEqual(other.body, "");
-      }
-
-      const page = yield* call("/search", {
-        headers: browser(
-          `access_token=${winner.cookies["access_token"]}; refresh_token=${winner.cookies["refresh_token"]}`,
-        ),
       });
       assert.strictEqual(page.status, 200, page.body);
       assert.include(page.body, 'id="saved-searches"');

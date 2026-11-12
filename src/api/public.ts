@@ -209,51 +209,41 @@ export const PublicApi = HttpApi.make("public").add(AuthGroup).add(ListingsGroup
 const searchResultsRoute = HttpRouter.route(
   "GET",
   "/search/results",
-  (request) =>
+  () =>
     Effect.gen(function* () {
-      const session = yield* optionalCaller(request);
-      if (session._tag === "retry") return retrySessionResponse(request);
+      const searchParams = yield* HttpServerRequest.ParsedSearchParams;
+      const listingService = yield* ListingService;
 
-      const response = yield* Effect.gen(function* () {
-        const searchParams = yield* HttpServerRequest.ParsedSearchParams;
-        const listingService = yield* ListingService;
-
-        // The form collects euros; the listings API filters on minor units, so the
-        // helper converts and rounds before decoding.
-        const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
-          withMinorUnitPrices(searchParams),
-        );
-        const { limit, cursor, ...filters } = query;
-        const page = yield* listingService.search(filters, { limit, cursor });
-
-        return HttpServerResponse.html(searchResults(page));
-      }).pipe(
-        Effect.catchTags({
-          // htmx only swaps 2xx responses by default, so a bad filter has to come
-          // back as 200 with the error fragment; a 4xx here would leave the page
-          // showing the previous results with no explanation. The JSON endpoint
-          // still rejects bad filters with the runtime's 400.
-          SchemaError: () =>
-            Effect.succeed(
-              HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
-                contentType: "text/html",
-              }),
-            ),
-          InternalError: () =>
-            Effect.succeed(
-              HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
-                status: 500,
-                contentType: "text/html",
-              }),
-            ),
-        }),
+      // The form collects euros; the listings API filters on minor units, so the
+      // helper converts and rounds before decoding.
+      const query = yield* Schema.decodeUnknownEffect(ListingSearchQueryCodec)(
+        withMinorUnitPrices(searchParams),
       );
+      const { limit, cursor, ...filters } = query;
+      const page = yield* listingService.search(filters, { limit, cursor });
 
-      return HttpServerResponse.setCookiesUnsafe(
-        response,
-        session._tag === "caller" ? session.cookies : [],
-      );
-    }),
+      return HttpServerResponse.html(searchResults(page));
+    }).pipe(
+      Effect.catchTags({
+        // htmx only swaps 2xx responses by default, so a bad filter has to come
+        // back as 200 with the error fragment; a 4xx here would leave the page
+        // showing the previous results with no explanation. The JSON endpoint
+        // still rejects bad filters with the runtime's 400.
+        SchemaError: () =>
+          Effect.succeed(
+            HttpServerResponse.text(searchResultsError("Those filters could not be read."), {
+              contentType: "text/html",
+            }),
+          ),
+        InternalError: () =>
+          Effect.succeed(
+            HttpServerResponse.text(searchResultsError("Search failed. Please try again."), {
+              status: 500,
+              contentType: "text/html",
+            }),
+          ),
+      }),
+    ),
 );
 
 /*
