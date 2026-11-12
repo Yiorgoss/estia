@@ -1,3 +1,4 @@
+import { CHAT_MESSAGE_MAX_LENGTH } from "@/db/schema/Chat";
 import { asObject, call, form, register, send, testOrigin } from "../support/api";
 import type { TestUser } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
@@ -551,6 +552,32 @@ describe("the chat pages", () => {
     }),
   );
 
+  it.effect("names the feature Chat on the inbox, thread and listing contact surfaces", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const started = yield* startChat(users.seeker, listing.id, "Chat naming");
+      const chatId = chatIdFrom(started.location);
+
+      const pages = [
+        yield* call("/chats", {
+          headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
+        }),
+        yield* call(`/chats/${chatId}`, {
+          headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
+        }),
+        yield* call(`/listings/${listing.id}`, {
+          headers: { cookie: users.seeker.cookie, "user-agent": "estia-tests" },
+        }),
+      ];
+
+      for (const page of pages) {
+        assert.strictEqual(page.status, 200, page.body);
+        assert.include(page.body, "Chat");
+        assert.notInclude(page.body.toLowerCase(), "conversation");
+      }
+    }),
+  );
+
   it.effect("explains a rejected reply on the thread instead of dropping it", () =>
     Effect.gen(function* () {
       const listing = yield* createListing(users.owner);
@@ -565,7 +592,7 @@ describe("the chat pages", () => {
         ),
       );
       assert.strictEqual(refused.status, 400, refused.body);
-      assert.include(refused.body, "1 to 4000 characters");
+      assert.include(refused.body, `1 to ${CHAT_MESSAGE_MAX_LENGTH} characters`);
     }),
   );
 
@@ -574,7 +601,7 @@ describe("the chat pages", () => {
       const listing = yield* createListing(users.owner);
       const started = yield* startChat(users.seeker, listing.id, "Hello");
       const chatId = chatIdFrom(started.location);
-      const draft = `draft-${"x".repeat(4000)}`;
+      const draft = `draft-${"x".repeat(CHAT_MESSAGE_MAX_LENGTH)}`;
 
       const refused = yield* call(
         `/chats/${chatId}/messages`,

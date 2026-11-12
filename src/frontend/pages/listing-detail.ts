@@ -1,4 +1,5 @@
 import type { PublicListing } from "@/api/public";
+import { CHAT_MESSAGE_MAX_LENGTH } from "@/db/schema/Chat";
 import { head } from "@/frontend/head";
 import { header } from "@/frontend/header";
 import { kindLabels, listingFlags, regionLabels } from "@/frontend/listing-labels";
@@ -168,7 +169,7 @@ const contactSection = (listing: PublicListing, contact: ListingContact): string
         <input type="hidden" name="listingId" value="${listing.id}" />
         <input type="hidden" name="clientMessageId" value="${crypto.randomUUID()}" />
         <label for="contact-body" class="block text-sm font-medium text-gray-900">Your message</label>
-        <textarea id="contact-body" name="body" rows="3" required maxlength="4000"
+        <textarea id="contact-body" name="body" rows="3" required maxlength="${CHAT_MESSAGE_MAX_LENGTH}"
                   class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"></textarea>
         <button type="submit" class="mt-3 ${primaryButtonClass}">Send message</button>
       </form>

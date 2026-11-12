@@ -1,4 +1,5 @@
 import { ListingId, ListingPhotoId } from "@/db/schema/brands";
+import { CHAT_MESSAGE_MAX_LENGTH } from "@/db/schema/Chat";
 import {
   listingDetailPage,
   listingNotFoundPage,
@@ -55,6 +56,7 @@ describe("listingDetailPage", () => {
     assert.include(html, 'action="/chats/start"');
     assert.include(html, 'name="listingId" value="7"');
     assert.match(html, /name="clientMessageId" value="[^"]+"/);
+    assert.include(html, `maxlength="${CHAT_MESSAGE_MAX_LENGTH}"`);
   });
 
   it("carries shareable title and description metadata", () => {
