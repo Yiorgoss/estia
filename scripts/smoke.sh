@@ -1066,9 +1066,9 @@ assert_status "$CODE" 404 "basemap route reports a missing archive"
 #
 # The search page stays the visitor's page: no saved-search control and no list
 # without a session, and a save without one is refused. A signed-in save from
-# the results page is then listed by the search page with every criterion the
-# results route needs, re-run from the saved search's own link, and deleted from
-# the page control.
+# the search page is then listed there with every criterion the results route
+# needs, re-run from the saved search's own link, and deleted from the page
+# control.
 SAVED_NAME="Smoke saved search ${SMOKE_TAG}"
 SAVED_NAME_2="Smoke saved search two ${SMOKE_TAG}"
 
@@ -1103,13 +1103,26 @@ pass "a visitor's results fragment has no save control"
 CODE=$(curl -s -o "$WORK/search-results-signed" -w '%{http_code}' \
   "${BASE_URL}/search/results?${FRAGMENT_QUERY}" -H "Cookie: access_token=${ACCESS}")
 assert_status "$CODE" 200 "search results for a signed-in caller"
-grep -q 'hx-post="/search/saved"' "$WORK/search-results-signed" \
-  || fail "the results fragment did not offer a signed-in caller a save control"
-grep -q 'hx-include="#search-form"' "$WORK/search-results-signed" \
-  || fail "the save control does not capture the current search form"
-pass "a signed-in caller can save the current search"
+if grep -q 'hx-post="/search/saved"' "$WORK/search-results-signed"; then
+  fail "the results fragment carried the save control a search refresh would swap"
+fi
+pass "a signed-in caller's results fragment leaves the save control alone"
 
-# Saving from the results page: the form's own field is the optional name, and
+# The save control lives on the search page, outside the results fragment, so a
+# name typed there survives a search refresh. Its criteria come from the form
+# through hx-include and it targets the saved-search list.
+CODE=$(curl -s -o "$WORK/search-signed" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "search page for a signed-in caller"
+grep -q 'hx-post="/search/saved"' "$WORK/search-signed" \
+  || fail "the signed-in search page did not offer a save control"
+grep -q 'hx-include="#search-form"' "$WORK/search-signed" \
+  || fail "the save control does not capture the current search form"
+grep -q 'hx-target="#saved-searches"' "$WORK/search-signed" \
+  || fail "the save control does not target the saved-search list"
+pass "a signed-in caller can save the current search from the page"
+
+# Saving from the search page: the form's own field is the optional name, and
 # the criteria travel from the search form through hx-include.
 CODE=$(curl -s -o "$WORK/saved-create" -w '%{http_code}' -X POST "${BASE_URL}/search/saved" \
   -H 'Content-Type: application/x-www-form-urlencoded' \
@@ -1124,7 +1137,7 @@ CODE=$(curl -s -o "$WORK/saved-create" -w '%{http_code}' -X POST "${BASE_URL}/se
   --data-urlencode 'minSizeSqm=' \
   --data-urlencode 'maxSizeSqm=' \
   --data-urlencode 'availableFrom=')
-assert_status "$CODE" 200 "saving a search from the results page"
+assert_status "$CODE" 200 "saving a search from the search page"
 grep -q "${SAVED_NAME}" "$WORK/saved-create" || fail "the save response did not list the saved search"
 grep -q 'hx-swap-oob="true"' "$WORK/saved-create" || fail "the save response did not clear the name box"
 SAVED_ID="$(saved_id_of "$WORK/saved-create")"
@@ -1205,7 +1218,7 @@ CODE=$(curl -s -o "$WORK/saved-create-2" -w '%{http_code}' -X POST "${BASE_URL}/
   -H "Cookie: access_token=${ACCESS}" \
   --data-urlencode "name=${SAVED_NAME_2}" \
   --data-urlencode 'kind=room')
-assert_status "$CODE" 200 "saving a second search from the results page"
+assert_status "$CODE" 200 "saving a second search from the search page"
 SAVED_ID_2="$(saved_id_of "$WORK/saved-create-2")"
 [ -n "$SAVED_ID_2" ] || fail "the second save response did not name its id"
 CODE=$(curl -s -D "$WORK/saved-delete-redirect.h" -o /dev/null -w '%{http_code}' -X POST \

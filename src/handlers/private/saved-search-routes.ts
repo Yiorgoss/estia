@@ -84,7 +84,7 @@ const refuse = (
     : Effect.succeed(respond(message, 403));
 
 /*
- * Saving from the results page. The form's own field is the optional name; the
+ * Saving from the search page. The form's own field is the optional name; the
  * criteria arrive from the search form through `hx-include`, so the server reads
  * the same query parameters the results route reads and no criteria is trusted
  * from a hidden field. A blank name is left to the service, which names the
