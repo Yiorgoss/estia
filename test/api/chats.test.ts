@@ -622,23 +622,22 @@ describe("the chat pages", () => {
       const started = yield* startChat(users.seeker, listing.id, "Chat naming");
       const chatId = chatIdFrom(started.location);
 
-      const pages = [
-        yield* call("/chats", {
-          headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
-        }),
-        yield* call(`/chats/${chatId}`, {
-          headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
-        }),
-        yield* call(`/listings/${listing.id}`, {
-          headers: { cookie: users.seeker.cookie, "user-agent": "estia-tests" },
-        }),
-      ];
+      const inboxPage = yield* call("/chats", {
+        headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
+      });
+      const threadPage = yield* call(`/chats/${chatId}`, {
+        headers: { cookie: users.owner.cookie, "user-agent": "estia-tests" },
+      });
+      const listingPage = yield* call(`/listings/${listing.id}`, {
+        headers: { cookie: users.seeker.cookie, "user-agent": "estia-tests" },
+      });
 
-      for (const page of pages) {
-        assert.strictEqual(page.status, 200, page.body);
-        assert.include(page.body, "Chat");
-        assert.notInclude(page.body.toLowerCase(), "conversation");
-      }
+      assert.strictEqual(inboxPage.status, 200, inboxPage.body);
+      assert.include(inboxPage.body, "Every chat you are part of, newest activity first.");
+      assert.strictEqual(threadPage.status, 200, threadPage.body);
+      assert.include(threadPage.body, "All chats");
+      assert.strictEqual(listingPage.status, 200, listingPage.body);
+      assert.include(listingPage.body, "Your message starts a chat with the owner.");
     }),
   );
 

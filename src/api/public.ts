@@ -386,6 +386,11 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
     // control that starts the chat.
     const session = yield* optionalCaller(request);
     if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "caller") {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
+      );
+    }
 
     const listingService = yield* ListingService;
     const listing = yield* listingService.getPublic(id);
@@ -399,12 +404,9 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
           ? { _tag: "owner" }
           : { _tag: "member" };
 
-    const page = HttpServerResponse.html(
+    return HttpServerResponse.html(
       listingDetailPage(toPublicListing(listing, photos), contact),
     );
-    return session._tag === "anonymous"
-      ? page
-      : HttpServerResponse.setCookiesUnsafe(page, session.cookies);
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),

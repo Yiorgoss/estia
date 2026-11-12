@@ -22,6 +22,12 @@ export const shouldFollowNewMessage = (
   threshold: number,
 ): boolean => distanceFromBottom <= threshold;
 
+export const nextAcknowledgedSeq = (
+  newestSeq: number,
+  acknowledgedSeq: number,
+  atBottom: boolean,
+): number | undefined => (atBottom && newestSeq > acknowledgedSeq ? newestSeq : undefined);
+
 /*
  * The two chat pages: the caller's inbox and one thread.
  *
@@ -227,6 +233,7 @@ export const chatThreadPage = (
 
         const NEW_MESSAGES_THRESHOLD_PX = ${NEW_MESSAGES_THRESHOLD_PX};
         const shouldFollowNewMessage = ${shouldFollowNewMessage.toString()};
+        const nextAcknowledgedSeq = ${nextAcknowledgedSeq.toString()};
 
         let lastSeq = Number(root.dataset.lastSeq || "0");
         let acknowledged = Number(root.dataset.lastReadSeq || "0");
@@ -235,14 +242,21 @@ export const chatThreadPage = (
         let leaving = false;
         let pending = null;
         let reconnectTimer = null;
+        let ackInFlight = false;
 
         const setStatus = (text) => {
           if (status !== null) status.textContent = text;
         };
 
         const acknowledge = () => {
-          if (document.visibilityState !== "visible" || lastSeq <= acknowledged) return;
-          const seq = lastSeq;
+          if (ackInFlight || document.visibilityState !== "visible") return;
+          const seq = nextAcknowledgedSeq(
+            lastSeq,
+            acknowledged,
+            shouldFollowNewMessage(distanceFromBottom(), NEW_MESSAGES_THRESHOLD_PX),
+          );
+          if (seq === undefined) return;
+          ackInFlight = true;
           void fetch("/api/chats/" + chatId + "/read", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -251,7 +265,10 @@ export const chatThreadPage = (
             .then((response) => {
               if (response.ok) acknowledged = Math.max(acknowledged, seq);
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+              ackInFlight = false;
+            });
         };
 
         const newId = () =>
@@ -263,12 +280,12 @@ export const chatThreadPage = (
           document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
 
         const clearNewMessages = () => {
-          if (
-            newMessagesButton !== null &&
-            shouldFollowNewMessage(distanceFromBottom(), NEW_MESSAGES_THRESHOLD_PX)
-          ) {
-            newMessagesButton.hidden = true;
-          }
+          const atBottom = shouldFollowNewMessage(
+            distanceFromBottom(),
+            NEW_MESSAGES_THRESHOLD_PX,
+          );
+          if (newMessagesButton !== null && atBottom) newMessagesButton.hidden = true;
+          if (atBottom) acknowledge();
         };
 
         const renderMessage = (message) => {
@@ -352,6 +369,7 @@ export const chatThreadPage = (
             const last = list.lastElementChild;
             if (last !== null) last.scrollIntoView({ block: "end" });
             newMessagesButton.hidden = true;
+            acknowledge();
           });
         }
 
@@ -432,7 +450,8 @@ export const chatThreadPage = (
               setStatus(frame.message || "That message was refused.");
             }
           });
-          socket.addEventListener("close", () => {
+          socket.addEventListener("close", (event) => {
+            if (socket !== event.target) return;
             socket = null;
             if (leaving) return;
             setStatus("Reconnecting...");
@@ -475,7 +494,10 @@ export const chatThreadPage = (
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
           }
-          if (socket !== null) socket.close();
+          if (socket !== null) {
+            socket.close();
+            socket = null;
+          }
         });
 
         window.addEventListener("pageshow", (event) => {
@@ -485,7 +507,11 @@ export const chatThreadPage = (
             reconnectTimer = null;
           }
           leaving = false;
-          if (socket === null) connect();
+          if (socket === null || socket.readyState > WebSocket.OPEN) {
+            if (socket !== null) socket.close();
+            socket = null;
+            connect();
+          }
           acknowledge();
         });
 
@@ -493,6 +519,9 @@ export const chatThreadPage = (
           if (document.visibilityState === "visible") acknowledge();
         });
 
+        const newest = list.lastElementChild;
+        if (newest !== null) newest.scrollIntoView({ block: "end" });
+        acknowledge();
         connect();
       })();
     </script>

@@ -247,4 +247,22 @@ describe("GET /listings/:id", () => {
       }
     }),
   );
+
+  it.effect("carries a rotated session pair on a not-found page", () =>
+    Effect.gen(function* () {
+      const user = yield* register("public-detail-session");
+      const response = yield* call("/listings/9999998", {
+        headers: {
+          cookie: `access_token=an.expired.token; refresh_token=${user.refreshToken}`,
+          "user-agent": "estia-tests",
+        },
+      });
+
+      assert.strictEqual(response.status, 404, response.body);
+      assert.isString(response.cookies["access_token"]);
+      const rotatedRefresh = response.cookies["refresh_token"];
+      assert.isString(rotatedRefresh);
+      assert.notStrictEqual(rotatedRefresh, user.refreshToken);
+    }),
+  );
 });
