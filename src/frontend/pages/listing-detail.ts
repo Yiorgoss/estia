@@ -17,6 +17,8 @@ import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 
 const backLinkClass =
   "inline-flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800";
+const primaryButtonClass =
+  "inline-block rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800";
 const secondaryButtonClass =
   "inline-block rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50";
 const chipClass = "rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700";
@@ -122,7 +124,60 @@ const gallery = (listing: PublicListing): string => {
       </section>`;
 };
 
-export const listingDetailPage = (listing: PublicListing) => {
+/*
+ * What the page may offer the visitor about contacting the owner. The listing
+ * detail page is public, so the caller is resolved before it renders: a visitor
+ * gets a sign-in link, the owner is told the messages land in their own chats,
+ * and anyone else gets the one control that starts or reopens the thread.
+ */
+export type ListingContact =
+  | { readonly _tag: "anonymous" }
+  | { readonly _tag: "owner" }
+  | { readonly _tag: "member" };
+
+const contactSection = (listing: PublicListing, contact: ListingContact): string => {
+  if (contact._tag === "owner") {
+    return `
+      <section class="mt-6 border-t border-gray-100 pt-4">
+        <h2 class="${sectionHeadingClass}">Contact</h2>
+        <p class="mt-2 text-sm text-gray-600">
+          This is your listing. Messages about it appear in <a href="/chats" class="font-medium text-blue-700 hover:text-blue-800">your chats</a>.
+        </p>
+      </section>`;
+  }
+
+  if (contact._tag === "anonymous") {
+    return `
+      <section class="mt-6 border-t border-gray-100 pt-4">
+        <h2 class="${sectionHeadingClass}">Contact the owner</h2>
+        <p class="mt-2 text-sm text-gray-600">Sign in to message the owner about this listing.</p>
+        <p class="mt-3">
+          <a href="/login" class="${primaryButtonClass}">Sign in to message</a>
+        </p>
+      </section>`;
+  }
+
+  return `
+    <section class="mt-6 border-t border-gray-100 pt-4">
+      <h2 class="${sectionHeadingClass}">Contact the owner</h2>
+      <p class="mt-2 text-sm text-gray-600">
+        Your message starts a chat with the owner. Replies appear in
+        <a href="/chats" class="font-medium text-blue-700 hover:text-blue-800">your chats</a>.
+      </p>
+      <form method="post" action="/chats/start" class="mt-3">
+        <input type="hidden" name="listingId" value="${listing.id}" />
+        <label for="contact-body" class="block text-sm font-medium text-gray-900">Your message</label>
+        <textarea id="contact-body" name="body" rows="3" required maxlength="4000"
+                  class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"></textarea>
+        <button type="submit" class="mt-3 ${primaryButtonClass}">Send message</button>
+      </form>
+    </section>`;
+};
+
+export const listingDetailPage = (
+  listing: PublicListing,
+  contact: ListingContact = { _tag: "anonymous" },
+) => {
   const region = regionLabels[listing.regionCode];
   const kind = kindLabels[listing.kind];
   const available = formatDate(listing.availableFrom);
@@ -189,6 +244,8 @@ export const listingDetailPage = (listing: PublicListing) => {
             ${detailRow("Published", published ?? "Not stated")}
           </dl>
         </section>
+
+        ${contactSection(listing, contact)}
       </div>
     </article>
     `,

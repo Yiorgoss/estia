@@ -78,3 +78,17 @@ export const formatDate = (date: Date | null | undefined) =>
         year: "numeric",
         timeZone: "UTC",
       });
+
+// A chat message needs a time of day, not just a day: two messages on the same
+// day are minutes apart and the order already says so, but the reader still wants
+// to know when. UTC everywhere, like the rest of the app's date formatting.
+export const formatDateTime = (date: Date | null | undefined) =>
+  date == null
+    ? null
+    : date.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+      });

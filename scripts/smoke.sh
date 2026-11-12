@@ -635,7 +635,18 @@ grep -q 'Crete' "$WORK/detail-page" || fail "detail page did not render the regi
 grep -q '<title>' "$WORK/detail-page" || fail "detail page has no title metadata"
 grep -q 'name="description"' "$WORK/detail-page" || fail "detail page has no description metadata"
 grep -q 'href="/search"' "$WORK/detail-page" || fail "detail page has no back-to-search link"
+# The contact control starts the chat; a signed-out visitor is offered the
+# sign-in link rather than a form the server would refuse.
+grep -q 'Sign in to message' "$WORK/detail-page" \
+  || fail "detail page has no contact control for a signed-out visitor"
+grep -q 'action="/chats/start"' "$WORK/detail-page" \
+  && fail "detail page offers the contact form to a signed-out visitor"
 pass "public listing detail page renders the listing with metadata and a way back"
+
+CODE=$(curl -s -o "$WORK/chats-signed-out" -w '%{http_code}' "${BASE_URL}/chats")
+assert_status "$CODE" 401 "the chat list asks a signed-out visitor to sign in"
+grep -q 'Sign in' "$WORK/chats-signed-out" || fail "the chat list has no sign-in prompt"
+pass "the chat list answers a signed-out visitor with the sign-in prompt"
 
 CODE=$(curl -s -o "$WORK/detail-page-draft" -w '%{http_code}' "${BASE_URL}/listings/${DRAFT_ID}")
 assert_status "$CODE" 404 "public listing detail page hides a draft"
