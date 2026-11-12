@@ -47,21 +47,26 @@ const isUniqueViolation = (error: unknown): boolean =>
 /*
  * The archive, written in D1. The insert and the chat's projection move in one
  * batch, which D1 runs as a transaction, so the row and the inbox's `last_seq`
- * cannot disagree. A client id the chat already holds answers with the row it
- * already wrote, which is what makes a reconnect's retry idempotent.
+ * cannot disagree. A client id the same sender already holds answers with the row
+ * it already wrote, which is what makes a reconnect's retry idempotent.
  */
 const d1MessageStore = (db: D1Database): ChatMessageStore => {
-  const findByClientMessageId = (chatId: number, clientMessageId: string) =>
+  const findByClientMessageId = (chatId: number, senderId: string, clientMessageId: string) =>
     db
       .prepare(
-        `SELECT ${MESSAGE_COLUMNS} FROM chat_messages WHERE chat_id = ? AND client_message_id = ?`,
+        `SELECT ${MESSAGE_COLUMNS} FROM chat_messages
+          WHERE chat_id = ? AND sender_id = ? AND client_message_id = ?`,
       )
-      .bind(chatId, clientMessageId)
+      .bind(chatId, senderId, clientMessageId)
       .first<Record<string, unknown>>();
 
   return {
     append: async (values) => {
-      const existing = await findByClientMessageId(values.chatId, values.clientMessageId);
+      const existing = await findByClientMessageId(
+        values.chatId,
+        values.senderId,
+        values.clientMessageId,
+      );
       if (existing !== null) return { _tag: "duplicate", message: toMessageRow(existing) };
 
       try {
@@ -89,9 +94,14 @@ const d1MessageStore = (db: D1Database): ChatMessageStore => {
         return { _tag: "stored", message: toMessageRow(row) };
       } catch (error) {
         // Two sends can never share a sequence number, so the only unique index a
-        // write here can trip is the client id one: the row exists, answer with it.
+        // write here can trip is the sender's client id one: the row exists, answer
+        // with it.
         if (!isUniqueViolation(error)) throw error;
-        const written = await findByClientMessageId(values.chatId, values.clientMessageId);
+        const written = await findByClientMessageId(
+          values.chatId,
+          values.senderId,
+          values.clientMessageId,
+        );
         if (written === null) throw error;
         return { _tag: "duplicate", message: toMessageRow(written) };
       }

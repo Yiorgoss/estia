@@ -41,6 +41,7 @@ export class AuthService extends Context.Service<
           accessToken?: typeof JWTSchema.Type | null | undefined;
         };
         user: typeof CurrentUser.Type;
+        accessExpiresAt: number;
       },
       | InvalidJWTError
       | ExpiredJWTError
@@ -84,20 +85,23 @@ export const AuthServiceLive = Layer.effect(
     return {
       tokenAuthFlow: ({ accessToken: oldAccessToken, refreshToken }, userAgent) =>
         Effect.gen(function* () {
-          let jwtUser = yield* Effect.fromNullishOr(oldAccessToken).pipe(
+          const access = yield* Effect.fromNullishOr(oldAccessToken).pipe(
             Effect.flatMap((x) => jwtService.verify(x)),
-            Effect.flatMap((x) => jwtService.extractUser(x)),
-            Effect.catch(() => Effect.succeed(null)), // if it fails no user seeif refresh works
+            Effect.flatMap((jwtObject) =>
+              Effect.map(jwtService.extractUser(jwtObject), (user) => ({ user, jwtObject })),
+            ),
+            Effect.catch(() => Effect.succeed(null)),
           );
 
-          if (jwtUser) {
-            return yield* Effect.succeed({
-              user: jwtUser,
+          if (access) {
+            return {
+              user: access.user,
               tokens: {
                 accessToken: oldAccessToken,
-                refreshToken: refreshToken,
+                refreshToken,
               },
-            });
+              accessExpiresAt: access.jwtObject.payload.exp * 1000,
+            };
           }
 
           let oldRefreshToken = yield* Effect.fromNullishOr(refreshToken).pipe(
@@ -114,12 +118,13 @@ export const AuthServiceLive = Layer.effect(
             Effect.bind("newRefresh", ({ currentUser }) =>
               refreshTokenService.rotateToken(currentUser.id, userAgent, oldRefreshToken),
             ),
-            Effect.map(({ newAccess, currentUser, newRefresh }) => ({
+            Effect.map(({ newAccess, currentUser, newRefresh, jwtObject }) => ({
               user: currentUser,
               tokens: {
                 accessToken: newAccess,
                 refreshToken: newRefresh,
               },
+              accessExpiresAt: jwtObject.payload.exp * 1000,
             })),
           );
         }).pipe(Effect.tapError((err) => Effect.logError({ err }))),

@@ -58,8 +58,8 @@ export interface AppendMessageValues {
 /*
  * The archive as the object sees it. `append` writes the message and moves the
  * chat's projection (`last_seq`, `last_message_at`) in one D1 batch, so the row
- * and the inbox's view of it cannot disagree; a client id the chat already holds
- * comes back as `duplicate` instead of a second row.
+ * and the inbox's view of it cannot disagree; a client id the same sender already
+ * holds comes back as `duplicate` instead of a second row.
  */
 export interface ChatMessageStore {
   readonly append: (values: AppendMessageValues) => Promise<
@@ -104,23 +104,22 @@ export interface ChatSocket {
 export interface ChatSocketAttachment {
   readonly userId: string;
   readonly exp: number;
+  readonly connectionId: string;
 }
 
 export type ChatClientFrame =
   | { readonly type: "send"; readonly clientMessageId: string; readonly body: string }
-  | { readonly type: "replay"; readonly after: number }
-  | { readonly type: "ping" };
+  | { readonly type: "replay"; readonly after: number };
 
 export type ChatServerFrame =
   | { readonly type: "message"; readonly message: ChatMessageRow }
-  | { readonly type: "error"; readonly code: string; readonly message: string }
-  | { readonly type: "pong" };
+  | { readonly type: "error"; readonly code: string; readonly message: string };
 
 export type AppendResult =
   | {
       readonly _tag: "stored";
       readonly message: ChatMessageRow;
-      /** The row this client id already wrote, so nothing was broadcast again. */
+      /** The row this sender's client id already wrote, so nothing was broadcast again. */
       readonly duplicate: boolean;
     }
   | { readonly _tag: "invalid"; readonly reason: string }
@@ -164,10 +163,11 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const attachmentOf = (socket: ChatSocket): ChatSocketAttachment | undefined => {
   const value = asRecord(socket.deserializeAttachment());
   if (value === undefined) return undefined;
-  const { userId, exp } = value;
+  const { userId, exp, connectionId } = value;
   if (typeof userId !== "string" || userId === "") return undefined;
   if (typeof exp !== "number" || !Number.isFinite(exp)) return undefined;
-  return { userId, exp };
+  if (typeof connectionId !== "string" || connectionId === "") return undefined;
+  return { userId, exp, connectionId };
 };
 
 /*
@@ -180,8 +180,6 @@ export const parseClientFrame = (value: unknown): ChatClientFrame | undefined =>
   if (record === undefined) return undefined;
 
   switch (record["type"]) {
-    case "ping":
-      return { type: "ping" };
     case "replay": {
       const after = record["after"];
       if (typeof after !== "number" || !Number.isSafeInteger(after) || after < 0) return undefined;
@@ -208,7 +206,7 @@ const badFrame: ChatServerFrame = {
   type: "error",
   code: "bad_frame",
   message:
-    'A frame is {"type":"send","clientMessageId":"...","body":"..."}, {"type":"replay","after":N}, or {"type":"ping"}.',
+    'A frame is {"type":"send","clientMessageId":"...","body":"..."} or {"type":"replay","after":N}.',
 };
 
 export const createChatCore = (
@@ -263,13 +261,43 @@ export const createChatCore = (
     }
   };
 
+  /*
+   * Live frames wait for a socket's replay to finish. A socket is registered with
+   * the runtime before its history is read, and the read is an await that does not
+   * hold the object's input gate: without this, a concurrent append could reach
+   * the socket ahead of rows it is about to replay, and the reader's monotonic
+   * cursor would then discard the replay.
+   */
+  const replayBuffers = new Map<string, Array<ChatServerFrame>>();
+
   const broadcast = (message: ChatMessageRow): void => {
-    for (const socket of ctx.getWebSockets()) sendFrame(socket, { type: "message", message });
+    const frame: ChatServerFrame = { type: "message", message };
+    for (const socket of ctx.getWebSockets()) {
+      const connectionId = attachmentOf(socket)?.connectionId;
+      const buffered = connectionId === undefined ? undefined : replayBuffers.get(connectionId);
+      if (buffered !== undefined) buffered.push(frame);
+      else sendFrame(socket, frame);
+    }
   };
 
   const replay = async (socket: ChatSocket, after: number): Promise<void> => {
     const rows = await store.listAfter(options.chatId, after, CHAT_REPLAY_LIMIT);
     for (const message of rows) sendFrame(socket, { type: "message", message });
+  };
+
+  const replayInto = async (
+    socket: ChatSocket,
+    connectionId: string,
+    after: number,
+  ): Promise<void> => {
+    const buffered: Array<ChatServerFrame> = [];
+    replayBuffers.set(connectionId, buffered);
+    try {
+      await replay(socket, after);
+      for (const frame of buffered) sendFrame(socket, frame);
+    } finally {
+      replayBuffers.delete(connectionId);
+    }
   };
 
   /*
@@ -368,17 +396,18 @@ export const createChatCore = (
       return;
     }
 
-    if (frame.type === "ping") {
-      sendFrame(socket, { type: "pong" });
-      return;
-    }
     if (frame.type === "replay") {
-      await replay(socket, frame.after);
+      await replayInto(socket, attachment.connectionId, frame.after);
       return;
     }
 
     const result = await append(
-      { userId: attachment.userId, chatId: options.chatId, exp: attachment.exp },
+      {
+        userId: attachment.userId,
+        chatId: options.chatId,
+        exp: attachment.exp,
+        sessionExp: attachment.exp,
+      },
       frame,
     );
     if (result._tag === "invalid") {
@@ -412,12 +441,17 @@ export const createChatCore = (
   };
 
   const accept = async (socket: ChatSocket, ticket: ChatTicket, after: number): Promise<void> => {
+    const connectionId = crypto.randomUUID();
     socket.serializeAttachment({
       userId: ticket.userId,
-      exp: ticket.exp,
+      exp: ticket.sessionExp,
+      connectionId,
     } satisfies ChatSocketAttachment);
-    await scheduleAlarm();
-    await replay(socket, after);
+    try {
+      await replayInto(socket, connectionId, after);
+    } finally {
+      await scheduleAlarm();
+    }
   };
 
   const close = (socket: ChatSocket, code: number, reason: string): void => {

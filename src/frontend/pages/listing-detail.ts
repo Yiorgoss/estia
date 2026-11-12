@@ -166,6 +166,7 @@ const contactSection = (listing: PublicListing, contact: ListingContact): string
       </p>
       <form method="post" action="/chats/start" class="mt-3">
         <input type="hidden" name="listingId" value="${listing.id}" />
+        <input type="hidden" name="clientMessageId" value="${crypto.randomUUID()}" />
         <label for="contact-body" class="block text-sm font-medium text-gray-900">Your message</label>
         <textarea id="contact-body" name="body" rows="3" required maxlength="4000"
                   class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"></textarea>

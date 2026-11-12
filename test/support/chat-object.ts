@@ -52,6 +52,7 @@ export const ChatObjectTestLive = Layer.effect(
           const existing = yield* sql<Record<string, unknown>>`
               SELECT * FROM chat_messages
                WHERE chat_id = ${values.chatId}
+                 AND sender_id = ${ticket.userId}
                  AND client_message_id = ${values.clientMessageId}
             `;
           const found = existing[0];

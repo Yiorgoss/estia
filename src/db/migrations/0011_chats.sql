@@ -42,8 +42,9 @@ CREATE INDEX idx_chat_participants_user ON chat_participants(user_id, chat_id);
 -- The message archive. `seq` is allocated by the chat object, which is the only
 -- writer of this table, and it is the display order: `created_at` is wall-clock
 -- data and two rows may share it. The unique `(chat_id, seq)` index makes a
--- duplicated sequence number impossible, and `(chat_id, client_message_id)`
--- makes a retried send land on the row it already wrote instead of a second one.
+-- duplicated sequence number impossible, and `(chat_id, sender_id, client_message_id)`
+-- makes a retried send land on the row the same sender already wrote instead of a
+-- second one, without letting one participant's id collide with the other's.
 CREATE TABLE chat_messages (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
          chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -53,5 +54,5 @@ CREATE TABLE chat_messages (
 client_message_id TEXT NOT NULL CHECK (length(client_message_id) BETWEEN 1 AND 120),
      created_at INTEGER NOT NULL,
    UNIQUE (chat_id, seq),
-   UNIQUE (chat_id, client_message_id)
+   UNIQUE (chat_id, sender_id, client_message_id)
 );

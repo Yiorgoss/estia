@@ -61,14 +61,17 @@ const fakeSocket = (): FakeSocket => {
   };
 };
 
-const fakeStore = () => {
+const fakeStore = (holdListAfter?: () => Promise<void>) => {
   const rows: Array<ChatMessageRow> = [];
   let nextId = 1;
   const store: ChatMessageStore & { readonly rows: ReadonlyArray<ChatMessageRow> } = {
     rows,
     append: async (values) => {
       const existing = rows.find(
-        (row) => row.chatId === values.chatId && row.clientMessageId === values.clientMessageId,
+        (row) =>
+          row.chatId === values.chatId &&
+          row.senderId === values.senderId &&
+          row.clientMessageId === values.clientMessageId,
       );
       if (existing !== undefined) return { _tag: "duplicate", message: existing };
       const row: ChatMessageRow = { id: nextId, ...values };
@@ -76,22 +79,28 @@ const fakeStore = () => {
       rows.push(row);
       return { _tag: "stored", message: row };
     },
-    listAfter: async (chatId, afterSeq, limit) =>
-      rows
+    listAfter: async (chatId, afterSeq, limit) => {
+      const snapshot = rows
         .filter((row) => row.chatId === chatId && row.seq > afterSeq)
         .sort((left, right) => left.seq - right.seq)
-        .slice(0, limit),
+        .slice(0, limit);
+      if (holdListAfter !== undefined) await holdListAfter();
+      return snapshot;
+    },
   };
   return store;
 };
 
 const makeChat = (
-  options: { readonly rateLimit?: { windowMs: number; maxMessages: number } } = {},
+  options: {
+    readonly rateLimit?: { windowMs: number; maxMessages: number };
+    readonly holdListAfter?: () => Promise<void>;
+  } = {},
 ) => {
   const values = new Map<string, unknown>();
   const sockets: Array<FakeSocket> = [];
   const alarms: Array<number> = [];
-  const store = fakeStore();
+  const store = fakeStore(options.holdListAfter);
   let now = START;
 
   const ctx: ChatObjectContext = {
@@ -137,7 +146,12 @@ const makeChat = (
 const connect = async (chat: ReturnType<typeof makeChat>, userId: string, after = 0) => {
   const socket = fakeSocket();
   chat.sockets.push(socket);
-  await chat.core.accept(socket, { userId, chatId: CHAT_ID, exp: chat.clock() + 60_000 }, after);
+  const now = chat.clock();
+  await chat.core.accept(
+    socket,
+    { userId, chatId: CHAT_ID, exp: now + 60_000, sessionExp: now + 3_600_000 },
+    after,
+  );
   return socket;
 };
 
@@ -218,14 +232,22 @@ describe("chat core ordering and fan-out", () => {
     assert.deepEqual(bob.frames, []);
   });
 
-  it("answers a ping without touching the archive", async () => {
+  it("stores the same client id from the other sender as its own message", async () => {
     const chat = makeChat();
     const alice = await connect(chat, "user-a");
+    const bob = await connect(chat, "user-b");
 
-    await chat.core.receive(alice, JSON.stringify({ type: "ping" }));
+    await send(chat.core, alice, "from alice", "same-id");
+    await send(chat.core, bob, "from bob", "same-id");
 
-    assert.deepEqual(alice.frames, [{ type: "pong" }]);
-    assert.strictEqual(chat.store.rows.length, 0);
+    assert.deepEqual(
+      chat.store.rows.map((row) => [row.senderId, row.body]),
+      [
+        ["user-a", "from alice"],
+        ["user-b", "from bob"],
+      ],
+    );
+    assert.deepEqual(messageSeqs(bob), [1, 2]);
   });
 });
 
@@ -246,6 +268,51 @@ describe("chat core replay", () => {
 
     const upToDate = await connect(chat, "user-d", 3);
     assert.deepEqual(messageSeqs(upToDate), []);
+  });
+
+  it("holds live frames until a socket's replay has finished", async () => {
+    let snapshotTaken: () => void = () => undefined;
+    const snapshot = new Promise<void>((resolve) => {
+      snapshotTaken = resolve;
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chat = makeChat({
+      holdListAfter: async () => {
+        snapshotTaken();
+        await gate;
+      },
+    });
+
+    await chat.core.append(
+      { userId: "user-a", chatId: CHAT_ID, exp: START + 60_000, sessionExp: START + 3_600_000 },
+      { clientMessageId: "a-1", body: "before" },
+    );
+
+    const socket = fakeSocket();
+    chat.sockets.push(socket);
+    const accepting = chat.core.accept(
+      socket,
+      {
+        userId: "user-a",
+        chatId: CHAT_ID,
+        exp: START + 60_000,
+        sessionExp: START + 3_600_000,
+      },
+      0,
+    );
+    await snapshot;
+
+    await chat.core.append(
+      { userId: "user-b", chatId: CHAT_ID, exp: START + 60_000, sessionExp: START + 3_600_000 },
+      { clientMessageId: "b-1", body: "during replay" },
+    );
+    release();
+    await accepting;
+
+    assert.deepEqual(messageSeqs(socket), [1, 2]);
   });
 
   it("answers a replay frame with the same page", async () => {
@@ -272,7 +339,12 @@ describe("chat core replay", () => {
     chat.sockets.push(aliceAgain);
     await woken.accept(
       aliceAgain,
-      { userId: "user-a", chatId: CHAT_ID, exp: chat.clock() + 60_000 },
+      {
+        userId: "user-a",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 60_000,
+        sessionExp: chat.clock() + 3_600_000,
+      },
       0,
     );
     assert.deepEqual(messageSeqs(aliceAgain), [1]);
@@ -285,7 +357,16 @@ describe("chat core replay", () => {
 
     const bob = fakeSocket();
     chat.sockets.push(bob);
-    await woken.accept(bob, { userId: "user-b", chatId: CHAT_ID, exp: chat.clock() + 60_000 }, 1);
+    await woken.accept(
+      bob,
+      {
+        userId: "user-b",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 60_000,
+        sessionExp: chat.clock() + 3_600_000,
+      },
+      1,
+    );
     assert.deepEqual(messageSeqs(bob), [2]);
 
     assert.strictEqual(chat.storage.get("last_seq"), 2);
@@ -330,6 +411,7 @@ describe("chat core ticket", () => {
       userId: "user-a",
       chatId: CHAT_ID,
       exp: chat.clock() + 60_000,
+      sessionExp: chat.clock() + 3_600_000,
     });
 
     const decision = await authorise(chat, ticket);
@@ -345,10 +427,16 @@ describe("chat core ticket", () => {
       userId: "user-a",
       chatId: CHAT_ID,
       exp: chat.clock() + 60_000,
+      sessionExp: chat.clock() + 3_600_000,
     });
     const [payload, signature] = valid.split(".");
     const forgedPayload = Buffer.from(
-      JSON.stringify({ u: "user-b", c: CHAT_ID, e: chat.clock() + 60_000 }),
+      JSON.stringify({
+        u: "user-b",
+        c: CHAT_ID,
+        e: chat.clock() + 60_000,
+        s: chat.clock() + 3_600_000,
+      }),
     ).toString("base64url");
     const forged = `${forgedPayload}.${signature}`;
     const tamperedSignature = `${payload}.${signature?.slice(0, -2)}xx`;
@@ -356,11 +444,13 @@ describe("chat core ticket", () => {
       userId: "user-a",
       chatId: CHAT_ID,
       exp: chat.clock() - 1,
+      sessionExp: chat.clock() + 3_600_000,
     });
     const signedWithAnotherSecret = await signChatTicket("another-secret-another-secret", {
       userId: "user-a",
       chatId: CHAT_ID,
       exp: chat.clock() + 60_000,
+      sessionExp: chat.clock() + 3_600_000,
     });
 
     for (const ticket of [undefined, forged, tamperedSignature, expired, signedWithAnotherSecret]) {
@@ -377,6 +467,7 @@ describe("chat core ticket", () => {
       userId: "user-a",
       chatId: CHAT_ID + 1,
       exp: chat.clock() + 60_000,
+      sessionExp: chat.clock() + 3_600_000,
     });
 
     const decision = await authorise(chat, ticket);
@@ -392,16 +483,49 @@ describe("chat core socket lifetime", () => {
     const socket = fakeSocket();
     chat.sockets.push(socket);
 
-    await chat.core.receive(socket, JSON.stringify({ type: "ping" }));
+    await send(chat.core, socket, "no identity", "a-1");
 
     assert.deepEqual(socket.closed, [{ code: CHAT_POLICY_CLOSE_CODE, reason: "identity_missing" }]);
   });
 
-  it("closes a socket whose ticket has aged out instead of accepting its message", async () => {
+  it("keeps a socket open after its handshake ticket expires", async () => {
     const chat = makeChat();
     const socket = fakeSocket();
     chat.sockets.push(socket);
-    await chat.core.accept(socket, { userId: "user-a", chatId: CHAT_ID, exp: chat.clock() - 1 }, 0);
+    await chat.core.accept(
+      socket,
+      {
+        userId: "user-a",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 1_000,
+        sessionExp: chat.clock() + 3_600_000,
+      },
+      0,
+    );
+
+    chat.advance(2_000);
+    await send(chat.core, socket, "still here", "a-1");
+    await chat.core.alarm();
+
+    assert.strictEqual(chat.store.rows.length, 1);
+    assert.deepEqual(socket.closed, []);
+    assert.strictEqual(chat.alarms.at(-1), chat.clock() + 3_598_000);
+  });
+
+  it("closes a socket whose session has aged out instead of accepting its message", async () => {
+    const chat = makeChat();
+    const socket = fakeSocket();
+    chat.sockets.push(socket);
+    await chat.core.accept(
+      socket,
+      {
+        userId: "user-a",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 60_000,
+        sessionExp: chat.clock() - 1,
+      },
+      0,
+    );
 
     await send(chat.core, socket, "too late", "a-1");
 
@@ -417,12 +541,22 @@ describe("chat core socket lifetime", () => {
 
     await chat.core.accept(
       early,
-      { userId: "user-a", chatId: CHAT_ID, exp: chat.clock() + 1_000 },
+      {
+        userId: "user-a",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 60_000,
+        sessionExp: chat.clock() + 1_000,
+      },
       0,
     );
     await chat.core.accept(
       late,
-      { userId: "user-b", chatId: CHAT_ID, exp: chat.clock() + 5_000 },
+      {
+        userId: "user-b",
+        chatId: CHAT_ID,
+        exp: chat.clock() + 60_000,
+        sessionExp: chat.clock() + 5_000,
+      },
       0,
     );
     assert.strictEqual(chat.alarms.at(-1), chat.clock() + 1_000);
