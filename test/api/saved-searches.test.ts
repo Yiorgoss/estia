@@ -576,6 +576,26 @@ describe("the listing profile's saved-search section", () => {
     }),
   );
 
+  it.effect("keeps the section when a listing form is rejected before it is saved", () =>
+    Effect.gen(function* () {
+      const session = yield* listingSession("profile-rejected-save");
+      const cookie = `access_token=${session.access}`;
+      yield* browserSave(cookie, { name: "Still here after a bad form" });
+
+      const rejected = yield* call(
+        "/profile",
+        form(
+          { method: "POST", headers: browser(cookie) },
+          { name: "x".repeat(121), ownership: "owner" },
+        ),
+      );
+
+      assert.strictEqual(rejected.status, 400, rejected.body);
+      assert.include(rejected.body, "Keep the display name to 120 characters or fewer.");
+      assert.include(rejected.body, "Still here after a bad form");
+    }),
+  );
+
   it.effect("re-runs a saved search from the profile onto the same results", () =>
     Effect.gen(function* () {
       const session = yield* listingSession("profile-rerun");

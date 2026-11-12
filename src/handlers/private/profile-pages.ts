@@ -191,24 +191,24 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
 
     const params = yield* readForm(request);
     const values = profileFormValues(params);
+    // A rejected submit is answered with the whole page, so the listing profile
+    // keeps the saved-search section it was showing.
+    const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
     const decoded =
       role === "seeker" ? decodeSeekerProfileForm(params) : decodeListerProfileForm(params);
     if (!decoded.ok) {
-      return respond(profilePage({ role, values, error: decoded.message }), 400);
+      return respond(profilePage({ role, values, error: decoded.message, ...savedSearches }), 400);
     }
 
     const userService = yield* UserService;
     return yield* userService.saveProfile(user, decoded.input).pipe(
       Effect.map(() => seeOther("/profile?saved=1")),
-      Effect.catch((error: ProfilePageError) =>
-        Effect.gen(function* () {
-          const { message, status } = describeError(error);
-          // A rejected submit is answered with the whole page, so the listing
-          // profile keeps the saved-search section it was showing.
-          const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
-          return respond(profilePage({ role, values, error: message, ...savedSearches }), status);
-        }),
-      ),
+      Effect.catch((error: ProfilePageError) => {
+        const { message, status } = describeError(error);
+        return Effect.succeed(
+          respond(profilePage({ role, values, error: message, ...savedSearches }), status),
+        );
+      }),
     );
   }).pipe(Effect.catch((error: ProfilePageError) => Effect.succeed(errorResponse(error)))),
 );

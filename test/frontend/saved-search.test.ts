@@ -37,6 +37,8 @@ const savedSearch = (overrides: Record<string, unknown> = {}) =>
 
 const emptyPage: typeof ListingPage.Type = { items: [], nextCursor: null };
 
+const occurrences = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+
 describe("searchPage", () => {
   it("renders no saved-search UI for a visitor", () => {
     const html = searchPage();
@@ -122,7 +124,7 @@ describe("savedSearchesPanel", () => {
     assert.include(html, "Room in Attica");
     assert.include(html, "€400-€1,200.50/mo");
     assert.include(html, "Furnished, No ensuite");
-    assert.include(html, ">\n        Run\n      </a>");
+    assert.match(html, /href="\/search\?saved=7"[^>]*>\s*Run\s*<\/a>/);
     assert.include(html, "Delete");
   });
 
@@ -146,8 +148,8 @@ describe("savedSearchesPanel", () => {
       }),
     ]);
 
-    assert.include(html, "Listings No pets");
-    assert.notInclude(html, "text-xs text-gray-600");
+    assert.strictEqual(occurrences(html, "Listings No pets"), 1);
+    assert.include(html, 'href="/search?saved=7"');
   });
 
   // The panel is rendered on the listing profile too, which has no filters of

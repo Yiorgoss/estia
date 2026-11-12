@@ -1,4 +1,4 @@
-import type { SavedSearch, SavedSearchCriteria } from "@/db/schema/SavedSearch";
+import type { SavedSearch } from "@/db/schema/SavedSearch";
 import { summarizeSavedSearch } from "@/services/saved-search.service";
 import { escapeHtml } from "@/utils";
 
@@ -115,22 +115,6 @@ export interface SavedSearchesPanelOptions {
   readonly place?: SavedSearchesPlace | undefined;
 }
 
-// The stored criteria as the summarizer wants them: a null column is the stored
-// "any", which the summary reads as a criterion the search did not narrow on.
-const criteriaFromSavedSearch = (saved: SavedSearch): SavedSearchCriteria => ({
-  kind: saved.kind ?? undefined,
-  regionCode: saved.regionCode ?? undefined,
-  minPriceMinor: saved.minPriceMinor ?? undefined,
-  maxPriceMinor: saved.maxPriceMinor ?? undefined,
-  minSizeSqm: saved.minSizeSqm ?? undefined,
-  maxSizeSqm: saved.maxSizeSqm ?? undefined,
-  furnished: saved.furnished ?? undefined,
-  ensuite: saved.ensuite ?? undefined,
-  smoking: saved.smoking ?? undefined,
-  pets: saved.pets ?? undefined,
-  availableFrom: saved.availableFrom ?? undefined,
-});
-
 const runLinkClass =
   "rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1";
 
@@ -145,7 +129,7 @@ const savedSearchRow = (
   appliedId: number | undefined,
   place: SavedSearchesPlace,
 ) => {
-  const summary = summarizeSavedSearch(criteriaFromSavedSearch(saved));
+  const summary = summarizeSavedSearch(saved);
   return `
   <li class="flex flex-wrap items-start justify-between gap-2 py-2">
     <div class="min-w-0">
