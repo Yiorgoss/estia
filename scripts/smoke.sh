@@ -1524,6 +1524,17 @@ grep -qi '^cache-control: public, max-age=0, must-revalidate' "$WORK/photo.h" \
 cmp -s "$WORK/photo" "$WORK/photo-one.jpg" || fail "the served bytes do not match the uploaded bytes"
 pass "the photo is served by id with the validated type and the exact bytes"
 
+# A cache that revalidates with the version it holds is answered without the
+# bytes, so the revalidating policy costs no transfer on a repeat view.
+PHOTO_ETAG="$(header_value "$WORK/photo.h" etag)"
+[ -n "$PHOTO_ETAG" ] || fail "the photo response carries no etag"
+CODE=$(curl -s -o "$WORK/photo-304" -w '%{http_code}' \
+  -H "If-None-Match: ${PHOTO_ETAG}" \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}")
+assert_status "$CODE" 304 "a revalidation of an unchanged photo"
+[ ! -s "$WORK/photo-304" ] || fail "a 304 carried a body"
+pass "a revalidated photo answers 304 without the bytes"
+
 # The truncated fixture cannot be decoded, so the upload records no downscaled
 # card image and the card URL serves the original instead of failing.
 PHOTO_ONE_THUMB="$(db_scalar "SELECT COALESCE(thumbnail_key,'') AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"

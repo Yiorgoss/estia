@@ -143,9 +143,7 @@ export const ListingPhotoService = Context.Service<ListingPhotoService>("Listing
 
 const normalizeContentType = (declared: string): PhotoContentType | undefined => {
   const mediaType = declared.toLowerCase().split(";")[0]?.trim() ?? "";
-  return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp"
-    ? mediaType
-    : undefined;
+  return Schema.is(PhotoContentType)(mediaType) ? mediaType : undefined;
 };
 
 const startsWithBytes = (bytes: Uint8Array, prefix: ReadonlyArray<number>): boolean =>

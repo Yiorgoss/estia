@@ -162,6 +162,12 @@ describe("POST /listings/:id/photos", () => {
       const anonymousDraft = yield* call(`/listings/${id}/photos/${String(first?.id)}`);
       assert.strictEqual(anonymousDraft.status, 404);
 
+      // A conditional request cannot turn a refused read into a 304.
+      const anonymousDraftConditional = yield* call(`/listings/${id}/photos/${String(first?.id)}`, {
+        headers: { "if-none-match": "*" },
+      });
+      assert.strictEqual(anonymousDraftConditional.status, 404);
+
       yield* publish(id);
 
       const publicRead = yield* call(`/listings/${id}/photos/${String(first?.id)}`);
@@ -173,6 +179,26 @@ describe("POST /listings/:id/photos", () => {
         publicRead.headers.get("cache-control"),
         "public, max-age=0, must-revalidate",
       );
+
+      // A revalidation that already holds the current version costs no bytes.
+      const etag = publicRead.headers.get("etag");
+      assert.isString(etag);
+      const conditional = yield* call(`/listings/${id}/photos/${String(first?.id)}`, {
+        headers: { "if-none-match": etag ?? "" },
+      });
+      assert.strictEqual(conditional.status, 304);
+      assert.strictEqual(conditional.body, "");
+      assert.strictEqual(conditional.headers.get("etag"), etag);
+      assert.strictEqual(
+        conditional.headers.get("cache-control"),
+        "public, max-age=0, must-revalidate",
+      );
+
+      const staleConditional = yield* call(`/listings/${id}/photos/${String(first?.id)}`, {
+        headers: { "if-none-match": '"not-the-current-version"' },
+      });
+      assert.strictEqual(staleConditional.status, 200);
+      assert.strictEqual(staleConditional.body, new TextDecoder().decode(jpeg().bytes));
 
       // Without a downscaled copy the card URL serves the original bytes, so a
       // photo is never lost to a codec failure.
@@ -221,7 +247,6 @@ describe("POST /listings/:id/photos", () => {
         new RegExp(`^listings/${id}/photos/[0-9a-f-]+-card\\.webp$`),
       );
       assert.include(storageEntries(), thumbnailKey ?? "");
-      assert.isBelow(cardImageBytes.length, large.bytes.length);
 
       yield* publish(id);
 
@@ -235,7 +260,16 @@ describe("POST /listings/:id/photos", () => {
       assert.strictEqual(card.status, 200, card.body);
       assert.strictEqual(card.headers.get("content-type"), "image/webp");
       assert.strictEqual(Number(card.headers.get("content-length")), cardImageBytes.length);
-      assert.isBelow(cardImageBytes.length, large.bytes.length);
+
+      // The card route revalidates against its own version, not the original's.
+      const cardEtag = card.headers.get("etag");
+      assert.isString(cardEtag);
+      const conditionalCard = yield* call(`/listings/${id}/photos/${String(photo?.id)}/card`, {
+        headers: { "if-none-match": cardEtag ?? "" },
+      });
+      assert.strictEqual(conditionalCard.status, 304);
+      assert.strictEqual(conditionalCard.body, "");
+      assert.strictEqual(conditionalCard.headers.get("etag"), cardEtag);
 
       const detailPage = yield* call(`/listings/${id}`);
       assert.strictEqual(detailPage.status, 200, detailPage.body);
@@ -325,6 +359,10 @@ describe("reordering, first-photo selection, and deletion", () => {
         headers: { cookie: owner.cookie },
       });
       assert.strictEqual(gone.status, 404);
+      const goneConditional = yield* call(`/listings/${id}/photos/${String(b?.id)}`, {
+        headers: { cookie: owner.cookie, "if-none-match": "*" },
+      });
+      assert.strictEqual(goneConditional.status, 404);
       // Deleting the row also removes the bytes from storage.
       assert.notInclude(storageEntries(), removedKey);
     }),

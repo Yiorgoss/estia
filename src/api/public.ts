@@ -424,8 +424,19 @@ const photoNotFound = (): HttpServerResponse.HttpServerResponse =>
  * the same URL into a 404. A shared cache may store the bytes, but it has to
  * revalidate before reusing them, so the revocation the origin applies is not
  * hidden behind an `immutable` lifetime. The version is the object's etag, which
- * changes whenever the bytes do.
+ * changes whenever the bytes do, and a revalidation that already holds it is
+ * answered with a body-less 304 instead of the same bytes again.
  */
+const matchesIfNoneMatch = (header: string | undefined, etag: string): boolean => {
+  if (header === undefined) return false;
+  const current = etag.replace(/^W\//, "");
+  return header
+    .split(",")
+    .some(
+      (candidate) => candidate.trim() === "*" || candidate.trim().replace(/^W\//, "") === current,
+    );
+};
+
 const photoResponse = (
   found: {
     readonly object: R2ObjectBody;
@@ -434,21 +445,35 @@ const photoResponse = (
     readonly private: boolean;
   },
   session: OptionalCallerSession,
+  ifNoneMatch: string | undefined,
 ): HttpServerResponse.HttpServerResponse => {
+  const cacheControl = `${found.private ? "private" : "public"}, max-age=0, must-revalidate`;
+  const carrySession = (response: HttpServerResponse.HttpServerResponse) =>
+    session._tag === "caller"
+      ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
+      : response;
+
+  if (matchesIfNoneMatch(ifNoneMatch, found.object.httpEtag)) {
+    return carrySession(
+      HttpServerResponse.empty({
+        status: 304,
+        headers: { etag: found.object.httpEtag, "cache-control": cacheControl },
+      }),
+    );
+  }
+
   const headers = new Headers({
     "content-type": found.contentType,
     "content-length": String(found.byteSize),
     "x-content-type-options": "nosniff",
     "content-disposition": "inline",
     etag: found.object.httpEtag,
-    "cache-control": `${found.private ? "private" : "public"}, max-age=0, must-revalidate`,
+    "cache-control": cacheControl,
   });
   const response = HttpServerResponse.fromWeb(
     new Response(found.object.body, { status: 200, headers }),
   );
-  return session._tag === "caller"
-    ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
-    : response;
+  return carrySession(response);
 };
 
 const listingPhotoHandler = (variant: PhotoVariant, request: HttpServerRequest.HttpServerRequest) =>
@@ -471,7 +496,7 @@ const listingPhotoHandler = (variant: PhotoVariant, request: HttpServerRequest.H
     const found = yield* photoService.read(listingId, photoId, viewerId, variant);
     if (Option.isNone(found)) return photoNotFound();
 
-    return photoResponse(found.value, session);
+    return photoResponse(found.value, session, request.headers["if-none-match"]);
   }).pipe(
     Effect.catchTag("InternalError", (error) =>
       Effect.logError("Photo read failed", { error }).pipe(
