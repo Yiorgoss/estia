@@ -47,5 +47,12 @@ export const ChatHandler = HttpApiBuilder.group(PrivateApi, "chat-group", (handl
         const chats = yield* ChatService;
         return yield* chats.sendMessage(userId, params.id, payload);
       }),
+    )
+    .handle("read", ({ params, payload }) =>
+      Effect.gen(function* () {
+        const userId = yield* callerId;
+        const chats = yield* ChatService;
+        return yield* chats.markRead(userId, params.id, payload.seq);
+      }),
     ),
 );

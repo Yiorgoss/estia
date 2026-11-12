@@ -281,8 +281,14 @@ export const createChatCore = (
   };
 
   const replay = async (socket: ChatSocket, after: number): Promise<void> => {
-    const rows = await store.listAfter(options.chatId, after, CHAT_REPLAY_LIMIT);
-    for (const message of rows) sendFrame(socket, { type: "message", message });
+    let cursor = after;
+    for (;;) {
+      const rows = await store.listAfter(options.chatId, cursor, CHAT_REPLAY_LIMIT);
+      for (const message of rows) sendFrame(socket, { type: "message", message });
+      const last = rows.at(-1);
+      if (rows.length < CHAT_REPLAY_LIMIT || last === undefined) return;
+      cursor = last.seq;
+    }
   };
 
   const replayInto = async (
