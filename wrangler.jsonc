@@ -28,6 +28,12 @@
       // "remote": true,
     },
   ],
+  // The Images binding is the codec that turns a validated upload into the
+  // downscaled card image. Local development serves it from the same workerd
+  // runtime the app already uses.
+  "images": {
+    "binding": "IMAGES",
+  },
   "env": {
     "prod": {
       "vars": {
@@ -41,6 +47,18 @@
           "migrations_dir": "src/db/migrations",
         },
       ],
+      // Bindings are not inherited by a named environment, so the prod
+      // environment repeats the bucket the map archive and listing photos use.
+      // The bucket must exist in the deploying account before `wrangler deploy`.
+      "r2_buckets": [
+        {
+          "binding": "STORAGE",
+          "bucket_name": "estia",
+        },
+      ],
+      "images": {
+        "binding": "IMAGES",
+      },
     },
   },
 }

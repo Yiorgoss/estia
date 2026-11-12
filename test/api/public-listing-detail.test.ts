@@ -1,4 +1,5 @@
-import { asObject, call, register, send } from "../support/api";
+import { asObject, call, multipart, query, register, send } from "../support/api";
+import type { UploadFile } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
@@ -19,6 +20,7 @@ const publicKeys = [
   "id",
   "kind",
   "pets",
+  "photos",
   "priceMinor",
   "publishedAt",
   "regionCode",
@@ -71,6 +73,19 @@ const transition = (action: "publish" | "unlist", id: unknown) =>
 const getListing = (id: unknown) => call(`/api/listings/${String(id)}`);
 const getListingPage = (id: unknown) => call(`/listings/${String(id)}`);
 
+const jpeg = (name: string): UploadFile => {
+  const bytes = new Uint8Array(32);
+  bytes.set([0xff, 0xd8, 0xff, 0xe0]);
+  for (let index = 4; index < bytes.length; index += 1) bytes[index] = index % 251;
+  return { name, contentType: "image/jpeg", bytes };
+};
+
+const uploadPhotos = (id: unknown, files: ReadonlyArray<UploadFile>) =>
+  call(
+    `/listings/${String(id)}/photos`,
+    multipart({ method: "POST", headers: { cookie: owner.cookie } }, files),
+  );
+
 describe("GET /api/listings/:id", () => {
   it.effect("serves a published listing with only the public fields", () =>
     Effect.gen(function* () {
@@ -107,13 +122,68 @@ describe("GET /api/listings/:id", () => {
       assert.strictEqual(body.pets, 1);
 
       // The detail route is a second segment, so the bare search route still
-      // answers the feed, and a listing reads exactly the same on both.
+      // answers the feed. The feed item carries the card image under its own
+      // name and never the gallery, which belongs to the detail read only.
       const feed = yield* call(`/api/listings?minPriceMinor=${String(body.priceMinor)}`);
       assert.strictEqual(feed.status, 200, feed.body);
       const items = (feed.json as { items: ReadonlyArray<Record<string, unknown>> }).items ?? [];
       const feedItem = items.find((item) => item.id === id);
-      assert.deepStrictEqual(feedItem, body);
+      assert.isDefined(feedItem);
+      assert.isNull(feedItem?.primaryPhotoUrl);
+      assert.isFalse("photos" in (feedItem ?? {}));
+      assert.deepStrictEqual(body.photos, []);
+      assert.isFalse("primaryPhotoUrl" in body);
     }),
+  );
+
+  it.effect(
+    "returns the full ordered gallery on detail and only the first photo's url in the feed",
+    () =>
+      Effect.gen(function* () {
+        const created = yield* createListing({ title: "Three photo flat" });
+        const id = created.id;
+        const uploaded = yield* uploadPhotos(id, [jpeg("a.jpg"), jpeg("b.jpg"), jpeg("c.jpg")]);
+        assert.strictEqual(uploaded.status, 303, uploaded.body);
+        yield* transition("publish", id);
+
+        const detail = yield* getListing(id);
+        assert.strictEqual(detail.status, 200, detail.body);
+        const body = asObject(detail.json);
+        const photos = body.photos as ReadonlyArray<{ id: number; url: string }>;
+        assert.lengthOf(photos, 3);
+
+        // The order is the gallery order the uploads created, not just the
+        // order this response happens to hold.
+        const gallery = yield* query<{ id: number; position: number }>(
+          "SELECT id, position FROM listing_photos WHERE listing_id = ? ORDER BY position ASC, id ASC",
+          [id],
+        );
+        assert.deepStrictEqual(
+          gallery.map((row) => row.position),
+          [0, 1, 2],
+        );
+        assert.deepStrictEqual(
+          photos.map((photo) => photo.id),
+          gallery.map((row) => row.id),
+        );
+        assert.deepStrictEqual(
+          photos.map((photo) => photo.url),
+          gallery.map((row) => `/listings/${String(id)}/photos/${String(row.id)}`),
+        );
+
+        const feed = yield* call(`/api/listings?minPriceMinor=${String(body.priceMinor)}`);
+        assert.strictEqual(feed.status, 200, feed.body);
+        const items = (feed.json as { items: ReadonlyArray<Record<string, unknown>> }).items ?? [];
+        const feedItem = items.find((item) => item.id === id);
+        assert.isDefined(feedItem);
+        // The feed's card image is the first photo's card variant; the detail
+        // read keeps the original.
+        assert.strictEqual(
+          feedItem?.primaryPhotoUrl,
+          `/listings/${String(id)}/photos/${String(photos[0]?.id ?? 0)}/card`,
+        );
+        assert.isFalse("photos" in (feedItem ?? {}));
+      }),
   );
 
   it.effect("answers 404 for a draft, an unlisted listing, and an unknown id", () =>

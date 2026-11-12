@@ -1453,14 +1453,267 @@ SECOND_LIVE="$(db_scalar "SELECT COUNT(*) AS value FROM refresh_tokens WHERE use
 [ "$SECOND_LIVE" = "0" ] || fail "the form action left ${SECOND_LIVE} live token(s) for its account"
 pass "the profile page control redirects to sign-in, clears cookies, and ends every session"
 
-# 7. multipart upload
-printf 'hello estia multipart smoke test\n' > "$WORK/smoke.txt"
-CODE=$(curl -s -o "$WORK/multipart" -w '%{http_code}' \
+# 7. the listing photo gallery
+#
+# The only way bytes enter storage is an authenticated, owner-scoped upload. The
+# anonymous upload endpoint this checklist used to exercise is gone, so the
+# first check is that it really is gone; the rest drives the real multipart
+# route against the real local R2 binding.
+printf 'not an image at all\n' > "$WORK/not-an-image.txt"
+
+CODE=$(curl -s -o "$WORK/no-anonymous-upload" -w '%{http_code}' \
   -X POST "${BASE_URL}/api/auth/test-post" \
-  -F "file=@$WORK/smoke.txt;type=text/plain")
-assert_status "$CODE" 200 "multipart upload"
-grep -q 'Successful' "$WORK/multipart" || fail "multipart upload response body"
-pass "multipart upload response body"
+  -F "file=@$WORK/not-an-image.txt;type=text/plain")
+assert_status "$CODE" 404 "the anonymous multipart endpoint is gone"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/test")
+assert_status "$CODE" 404 "the anonymous upload test page is gone"
+
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0xff,0xd8,0xff,0xe0,1,2,3,4]))' \
+  "$WORK/photo-one.jpg"
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,1,2,3,4]))' \
+  "$WORK/photo-two.png"
+node -e '
+  const bytes = Buffer.alloc(1024 * 1024 + 1, 1);
+  Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(bytes);
+  require("fs").writeFileSync(process.argv[1], bytes);
+' "$WORK/photo-too-big.png"
+
+# An anonymous upload is refused before any row or object is written.
+BEFORE_PHOTOS="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+CODE=$(curl -s -o "$WORK/anon-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 401 "an anonymous gallery upload is refused"
+AFTER_PHOTOS="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+[ "$BEFORE_PHOTOS" = "$AFTER_PHOTOS" ] || fail "an anonymous upload wrote a photo row"
+pass "an anonymous upload wrote nothing"
+
+# A file that claims to be a JPEG but is not one is refused on the server.
+CODE=$(curl -s -o "$WORK/wrong-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/not-an-image.txt;type=image/jpeg")
+assert_status "$CODE" 400 "a file whose bytes are not the declared image type is refused"
+
+# The per-photo cap is one megabyte, checked on the server while streaming.
+CODE=$(curl -s -o "$WORK/photo-too-big" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-too-big.png;type=image/png")
+assert_status "$CODE" 400 "a photo just over the 1 MB limit is refused"
+grep -q "1 MB" "$WORK/photo-too-big" || fail "the size refusal did not state the limit"
+
+# The owner's upload succeeds and redirects back to the edit page.
+CODE=$(curl -s -D "$WORK/photo-upload.h" -o "$WORK/photo-upload" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 303 "an owner's photo upload"
+[ "$(header_value "$WORK/photo-upload.h" location)" = "/listings/${CRETE_ID}/edit" ] \
+  || fail "the photo upload did not redirect to the edit page"
+PHOTO_ONE_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+PHOTO_ONE_KEY="$(db_scalar "SELECT storage_key AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+PHOTO_ONE_TYPE="$(db_scalar "SELECT content_type AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+[ "$PHOTO_ONE_TYPE" = "image/jpeg" ] || fail "the stored content type is not the sniffed one"
+case "$PHOTO_ONE_KEY" in
+  listings/"${CRETE_ID}"/photos/*.jpg) ;;
+  *) fail "the storage key is not server-generated under the listing: ${PHOTO_ONE_KEY}" ;;
+esac
+pass "an owner's upload stores a sniffed jpeg under a server-generated key"
+
+# The bytes are reachable through the listing and photo ids, not through a key.
+CODE=$(curl -s -D "$WORK/photo.h" -o "$WORK/photo" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}")
+assert_status "$CODE" 200 "a published listing's photo"
+grep -qi '^content-type: image/jpeg' "$WORK/photo.h" || fail "the photo response lost its content type"
+grep -qi '^x-content-type-options: nosniff' "$WORK/photo.h" || fail "the photo response is not nosniff"
+# Unpublishing or deleting the photo revokes this URL, so the bytes must be
+# revalidated rather than cached for a year.
+grep -qi '^cache-control: public, max-age=0, must-revalidate' "$WORK/photo.h" \
+  || fail "the photo response told caches to keep revocable bytes"
+cmp -s "$WORK/photo" "$WORK/photo-one.jpg" || fail "the served bytes do not match the uploaded bytes"
+pass "the photo is served by id with the validated type and the exact bytes"
+
+# A cache that revalidates with the version it holds is answered without the
+# bytes, so the revalidating policy costs no transfer on a repeat view.
+PHOTO_ETAG="$(header_value "$WORK/photo.h" etag)"
+[ -n "$PHOTO_ETAG" ] || fail "the photo response carries no etag"
+CODE=$(curl -s -o "$WORK/photo-304" -w '%{http_code}' \
+  -H "If-None-Match: ${PHOTO_ETAG}" \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}")
+assert_status "$CODE" 304 "a revalidation of an unchanged photo"
+[ ! -s "$WORK/photo-304" ] || fail "a 304 carried a body"
+pass "a revalidated photo answers 304 without the bytes"
+
+# The truncated fixture cannot be decoded, so the upload records no downscaled
+# card image and the card URL serves the original instead of failing.
+PHOTO_ONE_THUMB="$(db_scalar "SELECT COALESCE(thumbnail_key,'') AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+[ -z "$PHOTO_ONE_THUMB" ] || fail "a truncated image recorded a card image"
+CODE=$(curl -s -D "$WORK/photo-fallback.h" -o "$WORK/photo-fallback" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/card")
+assert_status "$CODE" 200 "the card image of a photo with no downscaled copy"
+cmp -s "$WORK/photo-fallback" "$WORK/photo-one.jpg" \
+  || fail "the card fallback did not serve the original bytes"
+pass "a photo without a downscaled copy falls back to the original on cards"
+
+# The detail page and the search card both use the gallery.
+CODE=$(curl -s -o "$WORK/photo-detail" -w '%{http_code}' "${BASE_URL}/listings/${CRETE_ID}")
+assert_status "$CODE" 200 "the photo listing's detail page"
+grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}\"" "$WORK/photo-detail" \
+  || fail "the detail page did not render the gallery"
+CODE=$(curl -s -o "$WORK/photo-card" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}&regionCode=crete")
+assert_status "$CODE" 200 "the search fragment with a photo"
+grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/card\"" "$WORK/photo-card" \
+  || fail "the search card did not use the first photo's card image"
+pass "the detail gallery uses the original and the search card uses the card image"
+
+# A second photo appends, moves, becomes first, and can be deleted.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-two.png;type=image/png")
+assert_status "$CODE" 303 "a second photo upload"
+PHOTO_TWO_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position DESC, id DESC LIMIT 1;")"
+[ "$PHOTO_TWO_ID" != "$PHOTO_ONE_ID" ] || fail "the second upload did not create a second row"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}/move" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -d "direction=up")
+assert_status "$CODE" 303 "moving a photo up"
+FIRST_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+[ "$FIRST_ID" = "$PHOTO_TWO_ID" ] || fail "moving the second photo up did not make it first"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/first" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 303 "picking a first photo"
+FIRST_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position ASC, id ASC LIMIT 1;")"
+[ "$FIRST_ID" = "$PHOTO_ONE_ID" ] || fail "the first-photo action did not promote the chosen photo"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}/delete" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 303 "deleting a photo"
+GALLERY_COUNT="$(db_scalar "SELECT COUNT(*) AS value FROM listing_photos WHERE listing_id=${CRETE_ID};")"
+[ "$GALLERY_COUNT" = "1" ] || fail "deleting a photo left ${GALLERY_COUNT} rows"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}")
+assert_status "$CODE" 404 "a deleted photo"
+pass "append, reorder, first-photo selection, and delete keep the gallery contiguous"
+
+# A complete image gets a downscaled card image: the card URL serves a WebP
+# smaller than the upload, while the bare URL still serves the original bytes.
+node - "$WORK/photo-large.png" <<'PNG'
+const fs = require("node:fs");
+const zlib = require("node:zlib");
+
+// A palette image keeps the upload below the 1 MB cap while still having a
+// long edge of 1000px, so the card image is a real downscale of the original.
+const width = 1000;
+const height = 750;
+const raw = Buffer.alloc(height * (1 + width));
+let seed = 0x2545f491;
+const next = () => {
+  seed ^= seed << 13;
+  seed ^= seed >>> 17;
+  seed ^= seed << 5;
+  return (seed >>> 0) & 0xff;
+};
+for (let y = 0; y < height; y += 1) {
+  const row = y * (1 + width);
+  raw[row] = 0;
+  for (let x = 0; x < width; x += 1) raw[row + 1 + x] = next();
+}
+const palette = Buffer.alloc(256 * 3);
+for (let index = 0; index < 256; index += 1) {
+  palette[index * 3] = (index * 37) & 0xff;
+  palette[index * 3 + 1] = (index * 91) & 0xff;
+  palette[index * 3 + 2] = (index * 151) & 0xff;
+}
+
+const table = new Int32Array(256).map((_, index) => {
+  let value = index;
+  for (let step = 0; step < 8; step += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value;
+});
+const crc32 = (buffer) => {
+  let crc = -1;
+  for (const byte of buffer) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ -1) >>> 0;
+};
+const chunk = (type, data) => {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body), 0);
+  return Buffer.concat([length, body, crc]);
+};
+const ihdr = Buffer.alloc(13);
+ihdr.writeUInt32BE(width, 0);
+ihdr.writeUInt32BE(height, 4);
+ihdr[8] = 8;
+ihdr[9] = 3;
+fs.writeFileSync(
+  process.argv[2],
+  Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("PLTE", palette),
+    chunk("IDAT", zlib.deflateSync(raw, { level: 6 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]),
+);
+PNG
+
+LARGE_BYTES="$(wc -c < "$WORK/photo-large.png" | tr -d ' ')"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-large.png;type=image/png")
+assert_status "$CODE" 303 "a complete image upload"
+LARGE_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position DESC, id DESC LIMIT 1;")"
+LARGE_THUMB="$(db_scalar "SELECT COALESCE(thumbnail_key,'') AS value FROM listing_photos WHERE id=${LARGE_ID};")"
+[ -n "$LARGE_THUMB" ] || fail "a complete upload did not record a card image"
+case "$LARGE_THUMB" in
+  listings/"${CRETE_ID}"/photos/*-card.webp) ;;
+  *) fail "the card image key is not in the photo's key family: ${LARGE_THUMB}" ;;
+esac
+CODE=$(curl -s -o "$WORK/photo-large-original" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${LARGE_ID}")
+assert_status "$CODE" 200 "the uploaded original"
+cmp -s "$WORK/photo-large-original" "$WORK/photo-large.png" \
+  || fail "the bare photo URL did not serve the original bytes"
+CODE=$(curl -s -D "$WORK/photo-large-card.h" -o "$WORK/photo-large-card" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${LARGE_ID}/card")
+assert_status "$CODE" 200 "the downscaled card image"
+grep -qi '^content-type: image/webp' "$WORK/photo-large-card.h" \
+  || fail "the card image is not a WebP"
+CARD_BYTES="$(wc -c < "$WORK/photo-large-card" | tr -d ' ')"
+[ "$CARD_BYTES" -lt "$LARGE_BYTES" ] \
+  || fail "the card image (${CARD_BYTES} bytes) is not smaller than the original (${LARGE_BYTES} bytes)"
+pass "a complete upload stores a smaller WebP card image next to the original"
+
+# Another account's listing is refused, not merely hidden.
+CODE=$(curl -s -o "$WORK/foreign-photo" -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}" \
+  -F "photos=@$WORK/photo-one.jpg;type=image/jpeg")
+assert_status "$CODE" 403 "another account's gallery upload"
+grep -q "belongs to another account" "$WORK/foreign-photo" || fail "the refusal did not name ownership"
+pass "another account cannot add a photo to someone else's listing"
 
 # 8. the payload-less role switch on the JSON API
 #

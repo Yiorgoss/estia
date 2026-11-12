@@ -1,7 +1,8 @@
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
 import { StorageRepository } from "@/repos/storage.repo";
+import { PhotoThumbnailer } from "@/services/photo-thumbnail.service";
 import { assert } from "@effect/vitest";
-import { ConfigProvider, Context, Effect, FileSystem, Layer, Path } from "effect";
+import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { SqlClient } from "effect/sql";
 import { TestSqlLive } from "./sql";
@@ -30,12 +31,91 @@ const DOMAIN = "http://listings.test";
 const JWT_SECRET = "listings-test-secret-listings-test-secret";
 const TEST_ORIGIN = "http://localhost";
 
-// The multipart upload endpoint on the public router is the only consumer of R2;
-// these tests never touch it, but the router's request services still name it.
+/*
+ * An in-memory R2, so an upload test can prove the bytes went somewhere and a
+ * reader can fetch them back exactly as a browser would. Keys are the real
+ * server-generated keys; the test never supplies one.
+ */
+const storedObjects = new Map<string, Uint8Array>();
+const encoder = new TextEncoder();
+
+const bytesOf = async (
+  value: ReadableStream | ArrayBuffer | ArrayBufferView | string,
+): Promise<Uint8Array> => {
+  if (typeof value === "string") return encoder.encode(value);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return new Uint8Array(await new Response(value).arrayBuffer());
+};
+
+const fakeObject = (key: string, bytes: Uint8Array): R2Object =>
+  ({
+    key,
+    size: bytes.length,
+    etag: `etag-${key}`,
+    httpEtag: `"etag-${key}"`,
+    uploaded: new Date(0),
+    storageClass: "Standard",
+    version: "v1",
+    checksums: {},
+    customMetadata: {},
+    range: undefined,
+  }) as unknown as R2Object;
+
+const fakeBody = (key: string, bytes: Uint8Array): R2ObjectBody =>
+  ({
+    ...fakeObject(key, bytes),
+    body: new Response(bytes).body ?? new ReadableStream(),
+    bodyUsed: false,
+    arrayBuffer: async () => bytes.slice().buffer,
+    text: async () => new TextDecoder().decode(bytes),
+    json: async () => JSON.parse(new TextDecoder().decode(bytes)),
+    blob: async () => new Blob([bytes]),
+    range: undefined,
+  }) as unknown as R2ObjectBody;
+
 const StorageRepositoryStub = Layer.succeed(StorageRepository, {
-  put: () => Effect.die("storage is not used by the listing tests"),
-  get: () => Effect.die("storage is not used by the listing tests"),
-  newMultipart: () => Effect.die("storage is not used by the listing tests"),
+  put: (key, value) =>
+    Effect.promise(async () => {
+      const bytes = await bytesOf(value);
+      storedObjects.set(key, bytes);
+      return fakeObject(key, bytes);
+    }),
+  get: (key) =>
+    Effect.sync(() => {
+      const bytes = storedObjects.get(key);
+      return Option.fromNullishOr(bytes === undefined ? undefined : fakeBody(key, bytes));
+    }),
+  delete: (key) =>
+    Effect.sync(() => {
+      storedObjects.delete(key);
+    }),
+});
+
+// Tests that have to prove what storage holds can ask by exact key; production
+// code never can.
+export const storageEntries = () => Array.from(storedObjects.keys());
+
+/*
+ * The Images binding is a Worker-only binding, so the card-image codec is
+ * replaced here by one with the same contract: a truncated file - the small
+ * fixtures below are only headers and filler - cannot be decoded and yields no
+ * card image, while a complete upload yields this fixed WebP card image. The
+ * real codec is exercised end to end by `scripts/smoke.sh`.
+ */
+export const cardImageBytes = (() => {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8);
+  for (let index = 12; index < bytes.length; index += 1) bytes[index] = index % 251;
+  return bytes;
+})();
+
+const PhotoThumbnailerStub = Layer.succeed(PhotoThumbnailer, {
+  makeCard: (bytes) =>
+    Effect.succeed(bytes.length > 64 ? Option.some(cardImageBytes.slice()) : Option.none()),
 });
 
 const makeApp = (config: Readonly<Record<string, string>> = {}) => {
@@ -49,9 +129,9 @@ const makeApp = (config: Readonly<Record<string, string>> = {}) => {
     Layer.provide(Path.layer),
     Layer.provide(FileSystem.layerNoop({})),
     Layer.provide(AppServicesLive),
-    Layer.provide(StorageRepositoryStub),
     HttpRouter.provideRequest(AppServicesLive),
-    HttpRouter.provideRequest(StorageRepositoryStub),
+    Layer.provideMerge(StorageRepositoryStub),
+    Layer.provideMerge(PhotoThumbnailerStub),
     Layer.provide(TestSqlLive),
     Layer.provide(ConfigLive),
   );
@@ -153,6 +233,9 @@ export const testOrigin = TEST_ORIGIN;
 export interface TestUser {
   readonly id: string;
   readonly cookie: string;
+  // The live refresh token the registration issued, for tests that drive a
+  // session rotation from a browser that still holds it.
+  readonly refreshToken: string;
 }
 
 // A browser always sends a user agent, and the refresh-token record stores it,
@@ -176,6 +259,29 @@ export const form = (init: RequestInit, fields: Readonly<Record<string, string>>
   },
   body: new URLSearchParams(fields).toString(),
 });
+
+export interface UploadFile {
+  readonly name: string;
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+}
+
+/*
+ * What a browser sends when it submits the gallery's upload form: one multipart
+ * body with a repeated `photos` field. The boundary is generated by `FormData`,
+ * so the request exercises the same parser a real upload does.
+ */
+export const multipart = (init: RequestInit, files: ReadonlyArray<UploadFile>): RequestInit => {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("photos", new Blob([file.bytes], { type: file.contentType }), file.name);
+  }
+  return {
+    ...init,
+    headers: { "user-agent": "estia-tests", ...init.headers },
+    body: formData,
+  };
+};
 
 export const send = (
   method: string,
@@ -201,9 +307,15 @@ export const register = (label: string): Effect.Effect<TestUser> =>
     });
     assert.strictEqual(response.status, 200, `register ${label}: ${response.body}`);
     const accessToken = response.cookies["access_token"];
+    const refreshToken = response.cookies["refresh_token"];
     assert.isString(accessToken);
+    assert.isString(refreshToken);
     const claims = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
-    return { id: String(claims.id), cookie: `access_token=${accessToken}` };
+    return {
+      id: String(claims.id),
+      cookie: `access_token=${accessToken}`,
+      refreshToken,
+    };
   });
 
 export const asObject = (value: unknown): Record<string, unknown> => {

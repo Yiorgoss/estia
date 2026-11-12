@@ -1,42 +1,14 @@
 import { PublicApi } from "@/api/public";
-import { StorageRepository } from "@/repos/storage.repo";
 import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { InternalError, UserService } from "@/services/user.service";
 import { HttpApiBuilder } from "effect/http-api";
 import { HttpServerResponse } from "effect/http";
-import { Effect, Stream } from "effect";
+import { Effect } from "effect";
 
 export const PublicApiLive = HttpApiBuilder.group(PublicApi, "auth", (handlers) =>
   handlers
-    .handle("test-post", ({ request }) =>
-      Effect.gen(function* () {
-        console.log("=========================================================================");
-
-        const r2 = yield* StorageRepository;
-        yield* request.multipartStream.pipe(
-          Stream.runForEach((part) =>
-            Effect.gen(function* () {
-              const { _tag, key } = part;
-
-              console.log({ _tag, key });
-              if (_tag == "File") {
-                const r2Obj = yield* r2.newMultipart(`map/${key}`, part.content);
-                console.log({ r2Obj });
-              }
-            }),
-          ),
-        );
-        // yield* Effect.logInfo(formData['greece.pmtiles'])
-
-        const response = HttpServerResponse.html(
-          `<div id='result' style="background:tomato">Successful</div>`,
-        );
-
-        return response;
-      }).pipe(Effect.catch((e) => Effect.die(e))),
-    )
     .handle("login", (req) =>
       Effect.gen(function* () {
         //validate user

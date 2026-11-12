@@ -1,4 +1,4 @@
-import { ListingId } from "@/db/schema/brands";
+import { ListingId, ListingPhotoId } from "@/db/schema/brands";
 import {
   listingDetailPage,
   listingNotFoundPage,
@@ -24,6 +24,7 @@ const listing = (overrides: Partial<PublicListing> = {}): PublicListing => ({
   pets: true,
   availableFrom: new Date("2026-03-01T00:00:00.000Z"),
   publishedAt: new Date("2026-01-03T00:00:00.000Z"),
+  photos: [],
   ...overrides,
 });
 
@@ -90,6 +91,32 @@ describe("listingDetailPage", () => {
     assert.notInclude(html, "<script>");
     assert.include(html, "&lt;img src=x onerror=alert(1)&gt;");
     assert.include(html, "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
+  });
+
+  it("renders the gallery with the first photo and the rest below it", () => {
+    const html = listingDetailPage(
+      listing({
+        photos: [
+          { id: Schema.decodeSync(ListingPhotoId)(1), url: "/listings/7/photos/1" },
+          { id: Schema.decodeSync(ListingPhotoId)(2), url: "/listings/7/photos/2" },
+        ],
+      }),
+    );
+
+    assert.include(html, "Photos");
+    assert.include(html, 'src="/listings/7/photos/1"');
+    assert.include(html, 'src="/listings/7/photos/2"');
+    assert.include(html, 'alt="Sunny studio in Athens - photo 1"');
+    assert.include(html, 'alt="Sunny studio in Athens - photo 2"');
+  });
+
+  it("renders a listing with no photos without an empty gallery", () => {
+    const html = listingDetailPage(listing());
+
+    assert.notInclude(html, "Photos");
+    assert.notInclude(html, "<img");
+    assert.include(html, "Sunny studio in Athens");
+    assert.include(html, "Bright, near the metro");
   });
 
   it("falls back for a missing size, availability, and publish date", () => {

@@ -1,6 +1,6 @@
-import { assert, it } from "@effect/vitest";
-import { Effect, Stream } from "effect";
 import { StorageRepository, StorageRepositoryLive } from "@/repos/storage.repo";
+import { assert, it } from "@effect/vitest";
+import { Effect, Option } from "effect";
 
 const fakeObject = (key: string, size = 0): R2Object =>
   ({
@@ -15,30 +15,19 @@ const fakeObject = (key: string, size = 0): R2Object =>
     writeHttpMetadata: () => {},
   }) as unknown as R2Object;
 
-const byteLengthOf = (value: ArrayBuffer | ArrayBufferView | string | Blob): number => {
-  if (typeof value === "string") return new TextEncoder().encode(value).byteLength;
-  if (value instanceof ArrayBuffer) return value.byteLength;
-  if (ArrayBuffer.isView(value)) return value.byteLength;
-  return 0;
-};
-
-const PART_SIZE = 10_000_000;
-
-interface RecordedUpload {
+interface RecordedDelete {
   readonly key: string;
-  readonly parts: Array<{ readonly partNumber: number; readonly byteLength: number }>;
-  completed: boolean;
 }
 
 const makeBucket = (
   options: {
     readonly put?: (key: string, value: unknown) => Promise<R2Object | null>;
-    readonly failCreateKey?: string;
-    readonly failPartNumber?: number;
+    readonly get?: (key: string) => Promise<R2ObjectBody | null>;
+    readonly delete?: (key: string) => Promise<void>;
   } = {},
 ) => {
   const putCalls: Array<{ readonly key: string; readonly value: unknown }> = [];
-  const uploads: Array<RecordedUpload> = [];
+  const deleted: Array<RecordedDelete> = [];
 
   const bucket = {
     put: async (key: string, value: unknown) => {
@@ -46,34 +35,15 @@ const makeBucket = (
       if (options.put) return options.put(key, value);
       return fakeObject(key);
     },
-    createMultipartUpload: async (key: string) => {
-      if (options.failCreateKey === key) throw new Error("multipart key rejected");
-      const upload: RecordedUpload = { key, parts: [], completed: false };
-      uploads.push(upload);
-      return {
-        key,
-        uploadId: `upload-${key}`,
-        uploadPart: async (
-          partNumber: number,
-          value: ArrayBuffer | ArrayBufferView | string | Blob,
-        ) => {
-          if (options.failPartNumber === partNumber) throw new Error(`part ${partNumber} rejected`);
-          upload.parts.push({ partNumber, byteLength: byteLengthOf(value) });
-          return { partNumber, etag: `etag-${partNumber}` };
-        },
-        abort: async () => {},
-        complete: async () => {
-          upload.completed = true;
-          return fakeObject(
-            key,
-            upload.parts.reduce((total, part) => total + part.byteLength, 0),
-          );
-        },
-      };
+    get: async (key: string) => (options.get ? options.get(key) : null),
+    delete: async (key: string) => {
+      deleted.push({ key });
+      if (options.delete) return options.delete(key);
+      return undefined;
     },
   } as unknown as R2Bucket;
 
-  return { bucket, putCalls, uploads };
+  return { bucket, putCalls, deleted };
 };
 
 const withStorage = <A, E>(bucket: R2Bucket, effect: Effect.Effect<A, E, StorageRepository>) =>
@@ -120,51 +90,65 @@ it.effect("put fails with R2UploadError when the bucket returns null", () => {
   );
 });
 
-it.effect("newMultipart uploads buffered parts in order and completes", () => {
-  const { bucket, uploads } = makeBucket();
+it.effect("get returns the object, and a missing key is None rather than an error", () => {
+  const body = { ...fakeObject("photos/one.png", 3) } as unknown as R2ObjectBody;
+  const { bucket } = makeBucket({
+    get: async (key) => (key === "photos/one.png" ? body : null),
+  });
   return withStorage(
     bucket,
     Effect.gen(function* () {
       const storage = yield* StorageRepository;
-      const stream = Stream.make(new Uint8Array(PART_SIZE), new Uint8Array(5));
-      const result = yield* storage.newMultipart("videos/tour.mp4", stream);
+      const found = yield* storage.get("photos/one.png", undefined);
+      assert.isTrue(Option.isSome(found));
+      assert.strictEqual(Option.getOrThrow(found).key, "photos/one.png");
 
-      assert.strictEqual(result.key, "videos/tour.mp4");
-      assert.strictEqual(uploads.length, 1);
-      assert.isTrue(uploads[0].completed);
-      assert.deepStrictEqual(uploads[0].parts, [
-        { partNumber: 1, byteLength: PART_SIZE },
-        { partNumber: 2, byteLength: 5 },
-      ]);
-      assert.strictEqual(result.size, PART_SIZE + 5);
+      const missing = yield* storage.get("photos/missing.png", undefined);
+      assert.isTrue(Option.isNone(missing));
     }),
   );
 });
 
-it.effect("newMultipart fails with R2MultipartKeyError when the upload cannot be created", () => {
-  const { bucket } = makeBucket({ failCreateKey: "videos/denied.mp4" });
+it.effect("get fails with R2ReadError when the bucket rejects", () => {
+  const { bucket } = makeBucket({
+    get: async () => {
+      throw new Error("bucket down");
+    },
+  });
   return withStorage(
     bucket,
     Effect.gen(function* () {
       const storage = yield* StorageRepository;
-      const error = yield* Effect.flip(
-        storage.newMultipart("videos/denied.mp4", Stream.make(new Uint8Array(4))),
-      );
-      assert.strictEqual(error._tag, "R2MultipartKeyError");
+      const error = yield* Effect.flip(storage.get("photos/fail.png", undefined));
+      assert.strictEqual(error._tag, "R2ReadError");
     }),
   );
 });
 
-it.effect("newMultipart fails with R2MultipartUploadError when a part fails", () => {
-  const { bucket } = makeBucket({ failPartNumber: 1 });
+it.effect("delete removes the key and fails with R2DeleteError when the bucket rejects", () => {
+  const { bucket, deleted } = makeBucket();
   return withStorage(
     bucket,
     Effect.gen(function* () {
       const storage = yield* StorageRepository;
-      const error = yield* Effect.flip(
-        storage.newMultipart("videos/broken.mp4", Stream.make(new Uint8Array(PART_SIZE + 1))),
-      );
-      assert.strictEqual(error._tag, "R2MultipartUploadError");
+      yield* storage.delete("photos/gone.png");
+      assert.deepStrictEqual(deleted, [{ key: "photos/gone.png" }]);
+    }),
+  );
+});
+
+it.effect("delete fails with R2DeleteError when the bucket rejects", () => {
+  const { bucket } = makeBucket({
+    delete: async () => {
+      throw new Error("bucket down");
+    },
+  });
+  return withStorage(
+    bucket,
+    Effect.gen(function* () {
+      const storage = yield* StorageRepository;
+      const error = yield* Effect.flip(storage.delete("photos/fail.png"));
+      assert.strictEqual(error._tag, "R2DeleteError");
     }),
   );
 });

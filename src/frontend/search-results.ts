@@ -5,10 +5,29 @@ import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 type SearchListing = (typeof ListingPage.Type)["items"][number];
 
 /*
+ * The card's image. A listing with photos uses its first photo; one without
+ * keeps the neutral placeholder every card had before the gallery existed, so a
+ * photo-less listing still reads as a complete card.
+ */
+const thumbnail = (listing: SearchListing, url: string | undefined) =>
+  url === undefined
+    ? `<div
+        class="flex aspect-[4/3] w-full items-center justify-center rounded-md bg-gray-100 text-xs font-medium text-gray-400"
+        role="img"
+        aria-label="No photo for ${escapeHtml(listing.title)}"
+      >No photo</div>`
+    : `<img
+        src="${escapeHtml(url)}"
+        alt="${escapeHtml(listing.title)}"
+        loading="lazy"
+        class="aspect-[4/3] w-full rounded-md bg-gray-100 object-cover"
+      />`;
+
+/*
  * The whole card is the link to the listing's public page: a visitor reads a
  * result and opens it, and nothing inside a card is a separate action.
  */
-const listingCard = (listing: SearchListing) => {
+const listingCard = (listing: SearchListing, thumbnailUrl: string | undefined) => {
   const flags = listingFlags(listing);
   const available = formatDate(listing.availableFrom);
 
@@ -17,6 +36,7 @@ const listingCard = (listing: SearchListing) => {
       href="/listings/${listing.id}"
       class="group flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition-colors hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
     >
+      ${thumbnail(listing, thumbnailUrl)}
       <header class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h2 class="break-words text-base font-semibold text-gray-900 group-hover:text-blue-700">${escapeHtml(listing.title)}</h2>
@@ -82,7 +102,10 @@ const countLabel = (count: number) =>
      Showing ${count} ${count === 1 ? "listing" : "listings"}, newest first
    </p>`;
 
-export const searchResults = (page: typeof ListingPage.Type) => `
+export const searchResults = (
+  page: typeof ListingPage.Type,
+  thumbnails: ReadonlyMap<number, string> = new Map(),
+) => `
   <div class="space-y-4" aria-live="polite">
     ${
       page.items.length === 0
@@ -90,7 +113,9 @@ export const searchResults = (page: typeof ListingPage.Type) => `
              No listings match these filters.
            </p>`
         : `${countLabel(page.items.length)}
-           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">${page.items.map(listingCard).join("")}</div>
+           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">${page.items
+             .map((listing) => listingCard(listing, thumbnails.get(Number(listing.id))))
+             .join("")}</div>
            ${nextPageControl(page)}`
     }
   </div>`;

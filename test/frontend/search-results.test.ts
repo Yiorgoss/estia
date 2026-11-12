@@ -83,6 +83,21 @@ describe("searchResults", () => {
     assert.include(html, "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
   });
 
+  it("uses a listing's first photo as its card thumbnail", () => {
+    const html = searchResults(page([listing()]), new Map([[1, "/listings/1/photos/9"]]));
+
+    assert.include(html, 'src="/listings/1/photos/9"');
+    assert.include(html, 'alt="Sunny studio in Athens"');
+    assert.notInclude(html, "No photo");
+  });
+
+  it("keeps the placeholder for a listing with no photo", () => {
+    const html = searchResults(page([listing()]));
+
+    assert.include(html, "No photo");
+    assert.notInclude(html, "<img");
+  });
+
   it("falls back for a missing size and availability", () => {
     const html = searchResults(page([listing({ sizeSqm: null, availableFrom: null })]));
 

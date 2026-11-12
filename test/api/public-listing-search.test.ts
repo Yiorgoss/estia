@@ -2,6 +2,7 @@ import { ListingsGroup } from "@/api/public";
 import { ListingId, UserId } from "@/db/schema/brands";
 import { ListingCursor, ListingPage } from "@/db/schema/Listing";
 import { ListingHandler } from "@/handlers/public/listing.handler";
+import { ListingPhotoService } from "@/services/listing-photo.service";
 import { ListingService } from "@/services/listing.service";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Schema } from "effect";
@@ -22,6 +23,7 @@ const publicKeys = [
   "kind",
   "pets",
   "priceMinor",
+  "primaryPhotoUrl",
   "publishedAt",
   "regionCode",
   "sizeSqm",
@@ -69,6 +71,17 @@ const service = (result: typeof ListingPage.Type): ListingService => ({
   mapPins: () => Effect.die("not used"),
 });
 
+const photoService: ListingPhotoService = {
+  listOwned: () => Effect.die("not used"),
+  listPublic: () => Effect.die("not used"),
+  firstPhotos: () => Effect.succeed(new Map()),
+  add: () => Effect.die("not used"),
+  move: () => Effect.die("not used"),
+  makeFirst: () => Effect.die("not used"),
+  remove: () => Effect.die("not used"),
+  read: () => Effect.die("not used"),
+};
+
 type PublicBody = {
   items: ReadonlyArray<Record<string, unknown>>;
   nextCursor: string | null;
@@ -81,6 +94,7 @@ const search = (result: typeof ListingPage.Type) =>
         HttpApiBuilder.layer(TestApi).pipe(
           Layer.provide(ListingHandler),
           HttpRouter.provideRequest(Layer.succeed(ListingService, service(result))),
+          HttpRouter.provideRequest(Layer.succeed(ListingPhotoService, photoService)),
           Layer.provide(Etag.layer),
           Layer.provide(HttpPlatform.layer),
           Layer.provide(Path.layer),
@@ -91,7 +105,9 @@ const search = (result: typeof ListingPage.Type) =>
     ),
     ({ handler }) =>
       Effect.promise(async () => {
-        const response = await handler(new Request("http://localhost/api/listings/"));
+        const response = await (handler as unknown as (request: Request) => Promise<Response>)(
+          new Request("http://localhost/api/listings/"),
+        );
         return { status: response.status, body: (await response.json()) as PublicBody };
       }),
     ({ dispose }) => Effect.promise(dispose),
@@ -107,6 +123,7 @@ describe("GET /api/listings", () => {
       assert.deepStrictEqual(Object.keys(body.items[0]).sort(), publicKeys);
       assert.strictEqual(body.items[0].id, publishedListing.id);
       assert.strictEqual(body.items[0].title, publishedListing.title);
+      assert.isNull(body.items[0].primaryPhotoUrl);
       assert.isString(body.nextCursor);
       assert.notInclude(body.nextCursor, ":");
     }),
