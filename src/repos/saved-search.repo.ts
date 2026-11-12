@@ -1,6 +1,6 @@
 import { SavedSearchId, UserId } from "@/db/schema/brands";
 import {
-  NewSavedSearch,
+  type NewSavedSearch,
   SavedSearchRowSchema,
   type SavedSearch,
 } from "@/db/schema/SavedSearch";
@@ -19,7 +19,7 @@ import type { SqlError } from "effect/sql/SqlError";
 export interface SavedSearchRepository {
   readonly create: (
     userId: typeof UserId.Type,
-    values: typeof NewSavedSearch.Type,
+    values: NewSavedSearch,
   ) => Effect.Effect<SavedSearch, SqlError>;
 
   readonly listByUser: (

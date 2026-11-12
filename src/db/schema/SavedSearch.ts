@@ -22,45 +22,40 @@ export const SavedSearchName = Schema.String.pipe(
   ),
 );
 
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
 /*
- * The criteria one saved search stores. It mirrors `ListingSearchFilters`, but
- * as a request payload: the flags are booleans on the wire and the repository
- * turns them into the bits the table keeps. The ranges are checked by the same
- * rule the search query uses, so a stored range can always be re-run.
+ * The criteria one saved search stores: the shape the listing search filters on,
+ * with the flags as booleans. The save route decodes and checks the criteria
+ * through the search query codec, so this is the decoded shape, not a second
+ * schema whose checks would never run.
  */
-export const SavedSearchCriteria = Schema.Struct({
-  kind: Schema.optional(ListingKind),
-  regionCode: Schema.optional(GreekRegion),
-  minPriceMinor: Schema.optional(NonNegativeInt),
-  maxPriceMinor: Schema.optional(NonNegativeInt),
-  minSizeSqm: Schema.optional(NonNegativeInt),
-  maxSizeSqm: Schema.optional(NonNegativeInt),
-  furnished: Schema.optional(Schema.Boolean),
-  ensuite: Schema.optional(Schema.Boolean),
-  smoking: Schema.optional(Schema.Boolean),
-  pets: Schema.optional(Schema.Boolean),
-  availableFrom: Schema.optional(Schema.DateFromMillis),
-});
-export type SavedSearchCriteria = typeof SavedSearchCriteria.Type;
+export interface SavedSearchCriteria {
+  readonly kind?: typeof ListingKind.Type | undefined;
+  readonly regionCode?: typeof GreekRegion.Type | undefined;
+  readonly minPriceMinor?: number | undefined;
+  readonly maxPriceMinor?: number | undefined;
+  readonly minSizeSqm?: number | undefined;
+  readonly maxSizeSqm?: number | undefined;
+  readonly furnished?: boolean | undefined;
+  readonly ensuite?: boolean | undefined;
+  readonly smoking?: boolean | undefined;
+  readonly pets?: boolean | undefined;
+  readonly availableFrom?: Date | undefined;
+}
 
 /*
  * The values a caller saves: the criteria plus an optional name. The route
  * decodes both before this point, and the service fills in a name when it is
  * absent, so the browser form can leave its name box blank.
  */
-export type SavedSearchInput = typeof SavedSearchCriteria.Type & {
+export type SavedSearchInput = SavedSearchCriteria & {
   readonly name?: typeof SavedSearchName.Type | undefined;
 };
 
 // The values the repository insert takes: a name the service has already
 // defaulted, plus the decoded criteria.
-export const NewSavedSearch = Schema.Struct({
-  name: SavedSearchName,
-  ...SavedSearchCriteria.fields,
-});
-export type NewSavedSearch = typeof NewSavedSearch.Type;
+export type NewSavedSearch = SavedSearchCriteria & {
+  readonly name: typeof SavedSearchName.Type;
+};
 
 /*
  * The wire shape of a saved search. The flags stay booleans here and the dates

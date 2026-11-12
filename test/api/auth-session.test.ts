@@ -92,7 +92,10 @@ const request = (path: string, cookie?: string) =>
 
 const privateApp = (calls: Ref.Ref<number>, options: StubOptions) =>
   HttpRouter.toWebHandler(
-    HttpRouter.add("GET", "/private-page", HttpServerResponse.text("page")).pipe(
+    Layer.mergeAll(
+      HttpRouter.add("GET", "/private-page", HttpServerResponse.text("page")),
+      HttpRouter.add("POST", "/private-page", HttpServerResponse.text("posted")),
+    ).pipe(
       Layer.provide(AuthMiddleware),
       Layer.provide(stubs(calls, options)),
       Layer.provide(Etag.layer),
@@ -106,9 +109,10 @@ const privateApp = (calls: Ref.Ref<number>, options: StubOptions) =>
 const send = (
   app: ReturnType<typeof privateApp>,
   headers: Readonly<Record<string, string>>,
+  method = "GET",
 ) =>
   Effect.promise(() =>
-    app.handler(new Request("http://listings.test/private-page", { headers })),
+    app.handler(new Request("http://listings.test/private-page", { method, headers })),
   );
 
 describe("resolving a request's session", () => {
@@ -219,7 +223,7 @@ describe("a private route reached by a request that lost the rotation race", () 
     }),
   );
 
-  it.effect("redirects a navigation back to the same page", () =>
+  it.effect("redirects a GET navigation back to the same page", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0);
       const response = yield* send(privateApp(calls, { failure: "rotated" }), {
@@ -229,6 +233,23 @@ describe("a private route reached by a request that lost the rotation race", () 
 
       assert.strictEqual(response.status, 303);
       assert.strictEqual(response.headers.get("location"), "/private-page");
+    }),
+  );
+
+  it.effect("sends a state-changing retry to a page that exists", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0);
+      const response = yield* send(
+        privateApp(calls, { failure: "rotated" }),
+        {
+          cookie: "refresh_token=presented",
+          "user-agent": "estia-tests",
+        },
+        "POST",
+      );
+
+      assert.strictEqual(response.status, 303);
+      assert.strictEqual(response.headers.get("location"), "/search");
     }),
   );
 

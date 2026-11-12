@@ -99,10 +99,12 @@ export const optionalCaller = (
 
 /*
  * The answer to a request that lost the rotation race: htmx reloads the page and
- * a browser navigation is redirected back to it, both with the winner's pair
- * once its response lands. The JSON API has no page to reload, so it keeps the
- * 401 its callers already handle. The race is detected at the rotation itself,
- * so a retry with the spent pair is answered as anonymous instead of looping.
+ * a browser navigation lands on a page that exists, both with the winner's pair
+ * once its response lands. Only a GET can replay its own URL; a state-changing
+ * POST has no GET route of its own, so it is sent to the search page instead of
+ * the router's 404. The JSON API has no page to reload, so it keeps the 401 its
+ * callers already handle. The race is detected at the rotation itself, so a
+ * retry with the spent pair is answered as anonymous instead of looping.
  */
 export const retrySessionResponse = (
   request: HttpServerRequest.HttpServerRequest,
@@ -114,5 +116,9 @@ export const retrySessionResponse = (
   if (url.pathname.startsWith("/api/")) {
     return HttpServerResponse.text("UnauthorizedError", { status: 401 });
   }
-  return HttpServerResponse.redirect(`${url.pathname}${url.search}`, { status: 303 });
+  const target =
+    request.method === "GET" || request.method === "HEAD"
+      ? `${url.pathname}${url.search}`
+      : "/search";
+  return HttpServerResponse.redirect(target, { status: 303 });
 };
