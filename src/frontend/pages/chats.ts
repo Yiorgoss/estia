@@ -17,10 +17,8 @@ import { escapeHtml, formatDateTime } from "@/utils";
 
 export const NEW_MESSAGES_THRESHOLD_PX = 80;
 
-export const shouldFollowNewMessage = (
-  distanceFromBottom: number,
-  threshold: number,
-): boolean => distanceFromBottom <= threshold;
+export const shouldFollowNewMessage = (distanceFromBottom: number, threshold: number): boolean =>
+  distanceFromBottom <= threshold;
 
 export const nextAcknowledgedSeq = (
   newestSeq: number,

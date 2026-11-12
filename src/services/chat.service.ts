@@ -258,9 +258,7 @@ export const ChatServiceLive = Layer.effect(
           const items = yield* fromSql(repo.listMessages(chatId, page.after ?? 0, limit));
           const first = items[0];
           const older =
-            first === undefined
-              ? []
-              : yield* fromSql(repo.listBefore(chatId, first.seq, 1));
+            first === undefined ? [] : yield* fromSql(repo.listBefore(chatId, first.seq, 1));
           return {
             items,
             lastSeq: access.lastSeq,

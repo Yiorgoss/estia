@@ -116,11 +116,7 @@ const describeError = (
   }
 };
 
-const threadMessages = (
-  chats: ChatService,
-  userId: typeof UserId.Type,
-  detail: ChatDetail,
-) =>
+const threadMessages = (chats: ChatService, userId: typeof UserId.Type, detail: ChatDetail) =>
   chats.listMessages(userId, detail.id, {
     before: detail.lastSeq + 1,
     limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,

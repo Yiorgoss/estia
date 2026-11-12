@@ -3,11 +3,11 @@
  *
  * The object is only reachable through the Worker, but it must not take a
  * caller's word for who that caller is: whoever names the sender names the
- * reader, and fan-out is addressed by connection tag. So the Worker - which is
- * the only place the session cookie is verified and chat membership is checked
- * against D1 - signs a short-lived ticket with the secret the app already uses
- * for its access tokens, and the object accepts an identity only from a ticket
- * whose signature it can verify.
+ * reader, and every accepted socket carries that identity as its tag. So the
+ * Worker - which is the only place the session cookie is verified and chat
+ * membership is checked against D1 - signs a short-lived ticket with the secret
+ * the app already uses for its access tokens, and the object accepts an identity
+ * only from a ticket whose signature it can verify.
  *
  * The payload carries an id, a chat id, a ticket expiry, and the session expiry,
  * and nothing else: the object needs no name, no role and no message. A ticket is
