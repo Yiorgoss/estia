@@ -150,6 +150,7 @@ export const insertListingPhoto = (
     readonly storageKey?: string;
     readonly contentType?: "image/jpeg" | "image/png" | "image/webp";
     readonly byteSize?: number;
+    readonly thumbnailKey?: string | null;
     readonly position?: number;
     readonly createdAt?: number;
   } = {},
@@ -157,14 +158,15 @@ export const insertListingPhoto = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql.unsafe(
-      `INSERT INTO listing_photos (id, listing_id, storage_key, content_type, byte_size, position, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO listing_photos (id, listing_id, storage_key, content_type, byte_size, thumbnail_key, position, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         listingId,
         options.storageKey ?? `listings/${listingId}/photos/${id}.jpg`,
         options.contentType ?? "image/jpeg",
         options.byteSize ?? 3,
+        options.thumbnailKey ?? null,
         options.position ?? 0,
         options.createdAt ?? 1_700_000_000_000,
       ],

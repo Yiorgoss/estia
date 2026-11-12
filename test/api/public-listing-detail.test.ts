@@ -1,4 +1,4 @@
-import { asObject, call, multipart, register, send } from "../support/api";
+import { asObject, call, multipart, query, register, send } from "../support/api";
 import type { UploadFile } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
@@ -151,9 +151,24 @@ describe("GET /api/listings/:id", () => {
         const body = asObject(detail.json);
         const photos = body.photos as ReadonlyArray<{ id: number; url: string }>;
         assert.lengthOf(photos, 3);
+
+        // The order is the gallery order the uploads created, not just the
+        // order this response happens to hold.
+        const gallery = yield* query<{ id: number; position: number }>(
+          "SELECT id, position FROM listing_photos WHERE listing_id = ? ORDER BY position ASC, id ASC",
+          [id],
+        );
+        assert.deepStrictEqual(
+          gallery.map((row) => row.position),
+          [0, 1, 2],
+        );
+        assert.deepStrictEqual(
+          photos.map((photo) => photo.id),
+          gallery.map((row) => row.id),
+        );
         assert.deepStrictEqual(
           photos.map((photo) => photo.url),
-          photos.map((photo) => `/listings/${String(id)}/photos/${String(photo.id)}`),
+          gallery.map((row) => `/listings/${String(id)}/photos/${String(row.id)}`),
         );
 
         const feed = yield* call(`/api/listings?minPriceMinor=${String(body.priceMinor)}`);
@@ -161,7 +176,12 @@ describe("GET /api/listings/:id", () => {
         const items = (feed.json as { items: ReadonlyArray<Record<string, unknown>> }).items ?? [];
         const feedItem = items.find((item) => item.id === id);
         assert.isDefined(feedItem);
-        assert.strictEqual(feedItem?.primaryPhotoUrl, photos[0]?.url);
+        // The feed's card image is the first photo's card variant; the detail
+        // read keeps the original.
+        assert.strictEqual(
+          feedItem?.primaryPhotoUrl,
+          `/listings/${String(id)}/photos/${String(photos[0]?.id ?? 0)}/card`,
+        );
         assert.isFalse("photos" in (feedItem ?? {}));
       }),
   );

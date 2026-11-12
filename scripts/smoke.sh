@@ -1517,8 +1517,23 @@ CODE=$(curl -s -D "$WORK/photo.h" -o "$WORK/photo" -w '%{http_code}' \
 assert_status "$CODE" 200 "a published listing's photo"
 grep -qi '^content-type: image/jpeg' "$WORK/photo.h" || fail "the photo response lost its content type"
 grep -qi '^x-content-type-options: nosniff' "$WORK/photo.h" || fail "the photo response is not nosniff"
+# Unpublishing or deleting the photo revokes this URL, so the bytes must be
+# revalidated rather than cached for a year.
+grep -qi '^cache-control: public, max-age=0, must-revalidate' "$WORK/photo.h" \
+  || fail "the photo response told caches to keep revocable bytes"
 cmp -s "$WORK/photo" "$WORK/photo-one.jpg" || fail "the served bytes do not match the uploaded bytes"
 pass "the photo is served by id with the validated type and the exact bytes"
+
+# The truncated fixture cannot be decoded, so the upload records no downscaled
+# card image and the card URL serves the original instead of failing.
+PHOTO_ONE_THUMB="$(db_scalar "SELECT COALESCE(thumbnail_key,'') AS value FROM listing_photos WHERE id=${PHOTO_ONE_ID};")"
+[ -z "$PHOTO_ONE_THUMB" ] || fail "a truncated image recorded a card image"
+CODE=$(curl -s -D "$WORK/photo-fallback.h" -o "$WORK/photo-fallback" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/card")
+assert_status "$CODE" 200 "the card image of a photo with no downscaled copy"
+cmp -s "$WORK/photo-fallback" "$WORK/photo-one.jpg" \
+  || fail "the card fallback did not serve the original bytes"
+pass "a photo without a downscaled copy falls back to the original on cards"
 
 # The detail page and the search card both use the gallery.
 CODE=$(curl -s -o "$WORK/photo-detail" -w '%{http_code}' "${BASE_URL}/listings/${CRETE_ID}")
@@ -1528,9 +1543,9 @@ grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}\"" "$WORK/photo-deta
 CODE=$(curl -s -o "$WORK/photo-card" -w '%{http_code}' \
   "${BASE_URL}/search/results?${FRAGMENT_QUERY}&regionCode=crete")
 assert_status "$CODE" 200 "the search fragment with a photo"
-grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}\"" "$WORK/photo-card" \
-  || fail "the search card did not use the first photo as its thumbnail"
-pass "the detail gallery and the search thumbnail use the first photo"
+grep -q "src=\"/listings/${CRETE_ID}/photos/${PHOTO_ONE_ID}/card\"" "$WORK/photo-card" \
+  || fail "the search card did not use the first photo's card image"
+pass "the detail gallery uses the original and the search card uses the card image"
 
 # A second photo appends, moves, becomes first, and can be deleted.
 CODE=$(curl -s -o /dev/null -w '%{http_code}' \
@@ -1570,6 +1585,96 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   "${BASE_URL}/listings/${CRETE_ID}/photos/${PHOTO_TWO_ID}")
 assert_status "$CODE" 404 "a deleted photo"
 pass "append, reorder, first-photo selection, and delete keep the gallery contiguous"
+
+# A complete image gets a downscaled card image: the card URL serves a WebP
+# smaller than the upload, while the bare URL still serves the original bytes.
+node - "$WORK/photo-large.png" <<'PNG'
+const fs = require("node:fs");
+const zlib = require("node:zlib");
+
+const width = 1200;
+const height = 900;
+const raw = Buffer.alloc(height * (1 + width * 3));
+let seed = 0x2545f491;
+const next = () => {
+  seed ^= seed << 13;
+  seed ^= seed >>> 17;
+  seed ^= seed << 5;
+  return (seed >>> 0) & 0xff;
+};
+for (let y = 0; y < height; y += 1) {
+  const row = y * (1 + width * 3);
+  raw[row] = 0;
+  for (let x = 0; x < width; x += 1) {
+    const offset = row + 1 + x * 3;
+    raw[offset] = next();
+    raw[offset + 1] = next();
+    raw[offset + 2] = next();
+  }
+}
+
+const table = new Int32Array(256).map((_, index) => {
+  let value = index;
+  for (let step = 0; step < 8; step += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value;
+});
+const crc32 = (buffer) => {
+  let crc = -1;
+  for (const byte of buffer) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ -1) >>> 0;
+};
+const chunk = (type, data) => {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body), 0);
+  return Buffer.concat([length, body, crc]);
+};
+const ihdr = Buffer.alloc(13);
+ihdr.writeUInt32BE(width, 0);
+ihdr.writeUInt32BE(height, 4);
+ihdr[8] = 8;
+ihdr[9] = 2;
+fs.writeFileSync(
+  process.argv[2],
+  Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw, { level: 6 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]),
+);
+PNG
+
+LARGE_BYTES="$(wc -c < "$WORK/photo-large.png" | tr -d ' ')"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${BASE_URL}/listings/${CRETE_ID}/photos" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  -F "photos=@$WORK/photo-large.png;type=image/png")
+assert_status "$CODE" 303 "a complete image upload"
+LARGE_ID="$(db_scalar "SELECT id AS value FROM listing_photos WHERE listing_id=${CRETE_ID} ORDER BY position DESC, id DESC LIMIT 1;")"
+LARGE_THUMB="$(db_scalar "SELECT COALESCE(thumbnail_key,'') AS value FROM listing_photos WHERE id=${LARGE_ID};")"
+[ -n "$LARGE_THUMB" ] || fail "a complete upload did not record a card image"
+case "$LARGE_THUMB" in
+  listings/"${CRETE_ID}"/photos/*-card.webp) ;;
+  *) fail "the card image key is not in the photo's key family: ${LARGE_THUMB}" ;;
+esac
+CODE=$(curl -s -o "$WORK/photo-large-original" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${LARGE_ID}")
+assert_status "$CODE" 200 "the uploaded original"
+cmp -s "$WORK/photo-large-original" "$WORK/photo-large.png" \
+  || fail "the bare photo URL did not serve the original bytes"
+CODE=$(curl -s -D "$WORK/photo-large-card.h" -o "$WORK/photo-large-card" -w '%{http_code}' \
+  "${BASE_URL}/listings/${CRETE_ID}/photos/${LARGE_ID}/card")
+assert_status "$CODE" 200 "the downscaled card image"
+grep -qi '^content-type: image/webp' "$WORK/photo-large-card.h" \
+  || fail "the card image is not a WebP"
+CARD_BYTES="$(wc -c < "$WORK/photo-large-card" | tr -d ' ')"
+[ "$CARD_BYTES" -lt "$LARGE_BYTES" ] \
+  || fail "the card image (${CARD_BYTES} bytes) is not smaller than the original (${LARGE_BYTES} bytes)"
+pass "a complete upload stores a smaller WebP card image next to the original"
 
 # Another account's listing is refused, not merely hidden.
 CODE=$(curl -s -o "$WORK/foreign-photo" -w '%{http_code}' \

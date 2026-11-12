@@ -2,6 +2,7 @@ import { ListingId, ListingPhotoId, UserId } from "@/db/schema/brands";
 import {
   LISTING_PHOTO_MAX_BYTES,
   LISTING_PHOTO_MAX_PER_LISTING,
+  LISTING_PHOTO_THUMBNAIL_CONTENT_TYPE,
   ListingPhotoSchema,
   PhotoContentType,
   photoExtension,
@@ -11,6 +12,7 @@ import { ListingRepository } from "@/repos/listing.repo";
 import { R2DeleteError, R2UploadError, StorageRepository } from "@/repos/storage.repo";
 import { ListingService } from "@/services/listing.service";
 import type { ListingNotFoundError, ListingNotOwnedError } from "@/services/listing.service";
+import { PhotoThumbnailer } from "@/services/photo-thumbnail.service";
 import { InternalError } from "@/services/user.service";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
@@ -51,6 +53,12 @@ export interface PhotoUpload {
 }
 
 export type PhotoMove = "up" | "down";
+
+/*
+ * Which bytes a read asks for. `detail` is the uploaded original; `card` is the
+ * downscaled copy when the row records one, and the original when it does not.
+ */
+export type PhotoVariant = "detail" | "card";
 
 // The listing-level failures every gallery operation can raise. They belong to
 // `ListingService`; the gallery reuses them so a caller sees one shape.
@@ -109,18 +117,22 @@ export interface ListingPhotoService {
   ) => Effect.Effect<void, ListingPhotoListingError | ListingPhotoNotFoundError | InternalError>;
 
   /*
-   * Reads the bytes for one photo. A published listing's photos are public; a
-   * draft or unlisted listing's photos are readable only by its owner. Anything
-   * else is `None`, which every caller answers as the same 404.
+   * Reads the bytes for one photo, in the requested variant. A published
+   * listing's photos are public; a draft or unlisted listing's photos are
+   * readable only by its owner. Anything else is `None`, which every caller
+   * answers as the same 404. The returned content type and byte size always
+   * describe the bytes in `object`, not the original row.
    */
   readonly read: (
     listingId: typeof ListingId.Type,
     photoId: typeof ListingPhotoId.Type,
     viewerId: typeof UserId.Type | undefined,
+    variant: PhotoVariant,
   ) => Effect.Effect<
     Option.Option<{
-      readonly photo: typeof ListingPhotoSchema.Type;
       readonly object: R2ObjectBody;
+      readonly contentType: PhotoContentType;
+      readonly byteSize: number;
       readonly private: boolean;
     }>,
     InternalError
@@ -191,12 +203,19 @@ export const ListingPhotoServiceLive = Layer.effect(
     const listingRepo = yield* ListingRepository;
     const photoRepo = yield* ListingPhotoRepository;
     const storage = yield* StorageRepository;
+    const thumbnails = yield* PhotoThumbnailer;
 
     const loadOwned = (ownerId: typeof UserId.Type, listingId: typeof ListingId.Type) =>
       listingService.getOwn(ownerId, listingId);
 
     const ordered = (listingId: typeof ListingId.Type) =>
       fromSql(photoRepo.listByListing(listingId));
+
+    // Best-effort removal of objects an upload wrote but a row never named.
+    const discardObjects = (keys: ReadonlyArray<string | null>) =>
+      Effect.forEach(keys, (storedKey) =>
+        storedKey === null ? Effect.void : storage.delete(storedKey).pipe(Effect.ignore),
+      );
 
     const requirePhoto = (listingId: typeof ListingId.Type, photoId: typeof ListingPhotoId.Type) =>
       Effect.gen(function* () {
@@ -271,6 +290,22 @@ export const ListingPhotoServiceLive = Layer.effect(
           const key = `listings/${listingId}/photos/${crypto.randomUUID()}.${photoExtension(sniffed)}`;
           yield* fromStorage(storage.put(key, upload.bytes));
 
+          // The card image is best-effort: a codec or storage failure keeps the
+          // original and records a null thumbnail key, which the card read
+          // answers with the original bytes.
+          const thumbnailKey = `${key.slice(0, key.lastIndexOf("."))}-card.${photoExtension(LISTING_PHOTO_THUMBNAIL_CONTENT_TYPE)}`;
+          const card = yield* thumbnails.makeCard(upload.bytes);
+          const storedThumbnailKey = Option.isSome(card)
+            ? yield* storage.put(thumbnailKey, card.value).pipe(
+                Effect.as(thumbnailKey),
+                Effect.catchTag("R2UploadError", (error) =>
+                  Effect.logError("Photo card image could not be stored", { error }).pipe(
+                    Effect.andThen(Effect.succeed(null)),
+                  ),
+                ),
+              )
+            : null;
+
           // The cap and the new position are decided by the insert itself, so
           // two uploads racing cannot both pass a count check and claim the
           // same position.
@@ -281,17 +316,18 @@ export const ListingPhotoServiceLive = Layer.effect(
                 storageKey: key,
                 contentType: sniffed,
                 byteSize: upload.bytes.length,
+                thumbnailKey: storedThumbnailKey,
               },
               LISTING_PHOTO_MAX_PER_LISTING,
             ),
           ).pipe(
-            // The row is what makes the object reachable, so a failed insert
-            // removes the orphan rather than leaving bytes no row can name.
-            Effect.tapError(() => storage.delete(key).pipe(Effect.ignore)),
+            // The row is what makes the objects reachable, so a failed insert
+            // removes the orphans rather than leaving bytes no row can name.
+            Effect.tapError(() => discardObjects([key, storedThumbnailKey])),
           );
 
           if (Option.isNone(inserted)) {
-            yield* storage.delete(key).pipe(Effect.ignore);
+            yield* discardObjects([key, storedThumbnailKey]);
             return yield* Effect.fail(
               new ListingPhotoLimitError({ limit: LISTING_PHOTO_MAX_PER_LISTING }),
             );
@@ -337,15 +373,21 @@ export const ListingPhotoServiceLive = Layer.effect(
           // The row is gone, so no route can name these bytes any more. A
           // failed delete leaves an unreachable orphan, which is logged rather
           // than turned into a failed request the owner cannot act on.
-          yield* storage
-            .delete(deleted.value.storageKey)
-            .pipe(
-              Effect.catchTag("R2DeleteError", (error) =>
-                Effect.logError("Deleted photo left an unreachable object", { error }),
-              ),
-            );
+          yield* Effect.forEach(
+            [deleted.value.storageKey, deleted.value.thumbnailKey],
+            (storedKey) =>
+              storedKey === null
+                ? Effect.void
+                : storage
+                    .delete(storedKey)
+                    .pipe(
+                      Effect.catchTag("R2DeleteError", (error) =>
+                        Effect.logError("Deleted photo left an unreachable object", { error }),
+                      ),
+                    ),
+          );
         }),
-      read: (listingId, photoId, viewerId) =>
+      read: (listingId, photoId, viewerId, variant) =>
         Effect.gen(function* () {
           const foundListing = yield* fromSql(listingRepo.findById(listingId));
           if (Option.isNone(foundListing)) return Option.none();
@@ -358,8 +400,15 @@ export const ListingPhotoServiceLive = Layer.effect(
           if (Option.isNone(foundPhoto)) return Option.none();
           const photo = foundPhoto.value;
 
+          // The card variant is the downscaled copy the row records, and the
+          // original when it records none.
+          const thumbnailKey = variant === "card" ? photo.thumbnailKey : null;
+          const storedKey = thumbnailKey ?? photo.storageKey;
+          const contentType =
+            thumbnailKey === null ? photo.contentType : LISTING_PHOTO_THUMBNAIL_CONTENT_TYPE;
+
           const object = yield* storage
-            .get(photo.storageKey, undefined)
+            .get(storedKey, undefined)
             .pipe(
               Effect.catchTag("R2ReadError", (error) =>
                 Effect.logError("Photo read failed", { error }).pipe(
@@ -368,8 +417,9 @@ export const ListingPhotoServiceLive = Layer.effect(
               ),
             );
           return Option.map(object, (body) => ({
-            photo,
             object: body,
+            contentType,
+            byteSize: body.size,
             private: listing.status !== "published",
           }));
         }),

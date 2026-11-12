@@ -27,12 +27,22 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
 
       const first = yield* repo.append(
         listingId(701),
-        { storageKey: "listings/701/photos/a.jpg", contentType: "image/jpeg", byteSize: 10 },
+        {
+          storageKey: "listings/701/photos/a.jpg",
+          contentType: "image/jpeg",
+          byteSize: 10,
+          thumbnailKey: "listings/701/photos/a-card.webp",
+        },
         2,
       );
       const second = yield* repo.append(
         listingId(701),
-        { storageKey: "listings/701/photos/b.png", contentType: "image/png", byteSize: 20 },
+        {
+          storageKey: "listings/701/photos/b.png",
+          contentType: "image/png",
+          byteSize: 20,
+          thumbnailKey: null,
+        },
         2,
       );
 
@@ -46,7 +56,12 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
 
       const full = yield* repo.append(
         listingId(701),
-        { storageKey: "listings/701/photos/c.jpg", contentType: "image/jpeg", byteSize: 30 },
+        {
+          storageKey: "listings/701/photos/c.jpg",
+          contentType: "image/jpeg",
+          byteSize: 30,
+          thumbnailKey: null,
+        },
         2,
       );
       assert.isTrue(Option.isNone(full));
@@ -60,6 +75,13 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
       const found = yield* repo.findById(listingId(701), secondPhoto.id);
       assert.isTrue(Option.isSome(found));
       assert.strictEqual(Option.getOrThrow(found).storageKey, "listings/701/photos/b.png");
+      // The thumbnail key is the row's record that a downscaled card image
+      // exists; null means the card falls back to the original.
+      assert.strictEqual(
+        Option.getOrThrow(yield* repo.findById(listingId(701), firstPhoto.id)).thumbnailKey,
+        "listings/701/photos/a-card.webp",
+      );
+      assert.isNull(Option.getOrThrow(found).thumbnailKey);
     }),
   );
 

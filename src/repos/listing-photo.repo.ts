@@ -31,6 +31,7 @@ export interface ListingPhotoRepository {
       readonly storageKey: string;
       readonly contentType: PhotoContentType;
       readonly byteSize: number;
+      readonly thumbnailKey: string | null;
     },
     limit: number,
   ) => Effect.Effect<Option.Option<typeof ListingPhotoSchema.Type>, SqlError>;
@@ -104,8 +105,8 @@ export const ListingPhotoRepositoryLive = Layer.effect(
         ),
       append: (listingId, values, limit) =>
         sql<Record<string, unknown>>`
-              INSERT INTO listing_photos (listing_id, storage_key, content_type, byte_size, position)
-              SELECT ${listingId}, ${values.storageKey}, ${values.contentType}, ${values.byteSize},
+              INSERT INTO listing_photos (listing_id, storage_key, content_type, byte_size, thumbnail_key, position)
+              SELECT ${listingId}, ${values.storageKey}, ${values.contentType}, ${values.byteSize}, ${values.thumbnailKey},
                      (SELECT COUNT(*) FROM listing_photos WHERE listing_id = ${listingId})
                WHERE (SELECT COUNT(*) FROM listing_photos WHERE listing_id = ${listingId}) < ${limit}
               RETURNING *;

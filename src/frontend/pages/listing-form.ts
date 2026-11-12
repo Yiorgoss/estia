@@ -2,7 +2,7 @@ import { GreekRegionCodes, ListingKind, ListingSchema } from "@/db/schema/Listin
 import {
   LISTING_PHOTO_MAX_BYTES,
   LISTING_PHOTO_MAX_PER_LISTING,
-  listingPhotoUrl,
+  listingPhotoCardUrl,
 } from "@/db/schema/ListingPhoto";
 import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import {
@@ -285,11 +285,18 @@ const photoCard = (
 ) => `
   <li class="overflow-hidden rounded-md border border-gray-200 bg-white">
     <img
-      src="${escapeHtml(listingPhotoUrl(listingId, photo.id))}"
+      src="${escapeHtml(listingPhotoCardUrl(listingId, photo.id))}"
       alt="Photo ${index + 1}"
       loading="lazy"
       class="aspect-[4/3] w-full bg-gray-100 object-cover"
     />
+    ${
+      photo.thumbnailKey === null
+        ? `<p class="border-t border-amber-100 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+             No downscaled copy; the original is used on cards.
+           </p>`
+        : ""
+    }
     <div class="flex flex-wrap items-center gap-2 border-t border-gray-100 p-2">
       ${
         index === 0

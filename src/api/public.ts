@@ -15,6 +15,7 @@ import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
 import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
 import { optionalCaller, retrySessionResponse } from "@/handlers/optional-caller";
+import type { OptionalCallerSession } from "@/handlers/optional-caller";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, ListingPhotoId, RefreshTokenValue } from "@/db/schema/brands";
 import {
@@ -29,9 +30,14 @@ import {
 } from "@/db/schema/Listing";
 import { approximateLocation, ListingPinPage } from "@/db/schema/ListingPin";
 import { ListingNotFoundError, ListingService } from "@/services/listing.service";
-import { listingPhotoUrl, decodeListingPhotoId } from "@/db/schema/ListingPhoto";
+import {
+  listingPhotoCardUrl,
+  listingPhotoUrl,
+  decodeListingPhotoId,
+} from "@/db/schema/ListingPhoto";
 import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import { ListingPhotoService } from "@/services/listing-photo.service";
+import type { PhotoVariant } from "@/services/listing-photo.service";
 import {
   listingDetailPage,
   listingNotFoundPage,
@@ -74,8 +80,9 @@ const AuthGroup = HttpApiGroup.make("auth")
  * mutations, and every public surface maps through this module.
  *
  * Each photo field means one thing on one read. `primaryPhotoUrl` is the
- * search card's image and travels on the feed only; `photos` is the complete
- * ordered gallery and travels on the detail read only.
+ * search card's image, so it names the photo's card variant, and travels on the
+ * feed only; `photos` is the complete ordered gallery of originals and travels
+ * on the detail read only.
  *
  * `publishedAt` is the timestamp a visitor reads as recency; the newest-first
  * sort key is `createdAt`, which only travels inside the encoded `nextCursor`.
@@ -156,7 +163,8 @@ export const toPublicListingFeedItem = (
   primaryPhoto: ListingPhoto | undefined,
 ): PublicListingFeedItem => ({
   ...toPublicListingFields(listing),
-  primaryPhotoUrl: primaryPhoto === undefined ? null : listingPhotoUrl(listing.id, primaryPhoto.id),
+  primaryPhotoUrl:
+    primaryPhoto === undefined ? null : listingPhotoCardUrl(listing.id, primaryPhoto.id),
 });
 
 export const PublicListingPageResponse = Schema.Struct({
@@ -278,7 +286,7 @@ const searchResultsRoute = HttpRouter.route("GET", "/search/results", () =>
         new Map(
           Array.from(firstPhotos, ([listingId, photo]) => [
             listingId,
-            listingPhotoUrl(photo.listingId, photo.id),
+            listingPhotoCardUrl(photo.listingId, photo.id),
           ]),
         ),
       ),
@@ -399,6 +407,11 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
  * unlisted listing's photos are served only to its signed-in owner (the edit
  * page preview), and anyone else gets the same 404 as a missing photo.
  *
+ * The same route answers two variants with one meaning each: the bare URL is the
+ * uploaded original (the detail page), and `/card` is the downscaled card image
+ * (search cards and preview grids), falling back to the original when the row
+ * has no downscaled copy.
+ *
  * Nothing here can list the bucket, and no request can name a key. The content
  * type comes from the validated row, not from the request or the upload's
  * filename.
@@ -406,7 +419,39 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
 const photoNotFound = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text("Not found", { status: 404 });
 
-const listingPhotoRoute = HttpRouter.route("GET", "/listings/:id/photos/:photoId", (request) =>
+/*
+ * Photo bytes are revocable: unpublishing a listing or deleting a photo turns
+ * the same URL into a 404. A shared cache may store the bytes, but it has to
+ * revalidate before reusing them, so the revocation the origin applies is not
+ * hidden behind an `immutable` lifetime. The version is the object's etag, which
+ * changes whenever the bytes do.
+ */
+const photoResponse = (
+  found: {
+    readonly object: R2ObjectBody;
+    readonly contentType: string;
+    readonly byteSize: number;
+    readonly private: boolean;
+  },
+  session: OptionalCallerSession,
+): HttpServerResponse.HttpServerResponse => {
+  const headers = new Headers({
+    "content-type": found.contentType,
+    "content-length": String(found.byteSize),
+    "x-content-type-options": "nosniff",
+    "content-disposition": "inline",
+    etag: found.object.httpEtag,
+    "cache-control": `${found.private ? "private" : "public"}, max-age=0, must-revalidate`,
+  });
+  const response = HttpServerResponse.fromWeb(
+    new Response(found.object.body, { status: 200, headers }),
+  );
+  return session._tag === "caller"
+    ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
+    : response;
+};
+
+const listingPhotoHandler = (variant: PhotoVariant, request: HttpServerRequest.HttpServerRequest) =>
   Effect.gen(function* () {
     const params = yield* HttpRouter.params;
     const listingId = decodeListingId(params["id"]);
@@ -423,26 +468,10 @@ const listingPhotoRoute = HttpRouter.route("GET", "/listings/:id/photos/:photoId
     const viewerId = session._tag === "caller" ? session.caller : undefined;
 
     const photoService = yield* ListingPhotoService;
-    const found = yield* photoService.read(listingId, photoId, viewerId);
+    const found = yield* photoService.read(listingId, photoId, viewerId, variant);
     if (Option.isNone(found)) return photoNotFound();
 
-    const { photo, object, private: isPrivate } = found.value;
-    const headers = new Headers({
-      "content-type": photo.contentType,
-      "content-length": String(photo.byteSize),
-      "x-content-type-options": "nosniff",
-      "content-disposition": "inline",
-      etag: object.httpEtag,
-      "cache-control": isPrivate
-        ? "private, max-age=0, must-revalidate"
-        : "public, max-age=31536000, immutable",
-    });
-    const response = HttpServerResponse.fromWeb(
-      new Response(object.body, { status: 200, headers }),
-    );
-    return session._tag === "caller"
-      ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
-      : response;
+    return photoResponse(found.value, session);
   }).pipe(
     Effect.catchTag("InternalError", (error) =>
       Effect.logError("Photo read failed", { error }).pipe(
@@ -451,7 +480,18 @@ const listingPhotoRoute = HttpRouter.route("GET", "/listings/:id/photos/:photoId
         ),
       ),
     ),
-  ),
+  );
+
+const listingPhotoOriginalRoute = HttpRouter.route(
+  "GET",
+  "/listings/:id/photos/:photoId",
+  (request) => listingPhotoHandler("detail", request),
+);
+
+const listingPhotoCardRoute = HttpRouter.route(
+  "GET",
+  "/listings/:id/photos/:photoId/card",
+  (request) => listingPhotoHandler("card", request),
 );
 
 /*
@@ -491,7 +531,8 @@ const mapRoute = HttpRouter.route("GET", "/map", () =>
 
 export const PublicRoutes = HttpRouter.addAll([
   searchResultsRoute,
-  listingPhotoRoute,
+  listingPhotoOriginalRoute,
+  listingPhotoCardRoute,
   listingDetailRoute,
   mapRoute,
   MapTilesRoute,

@@ -1,4 +1,13 @@
-import { asObject, call, multipart, query, register, send, storageEntries } from "../support/api";
+import {
+  asObject,
+  call,
+  cardImageBytes,
+  multipart,
+  query,
+  register,
+  send,
+  storageEntries,
+} from "../support/api";
 import type { TestUser, UploadFile } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
@@ -76,12 +85,13 @@ interface PhotoRow {
   readonly storageKey: string;
   readonly contentType: string;
   readonly byteSize: number;
+  readonly thumbnailKey: string | null;
   readonly position: number;
 }
 
 const photosOf = (id: number) =>
   query<PhotoRow>(
-    "SELECT id, listing_id AS listingId, storage_key AS storageKey, content_type AS contentType, byte_size AS byteSize, position FROM listing_photos WHERE listing_id = ? ORDER BY position ASC, id ASC",
+    "SELECT id, listing_id AS listingId, storage_key AS storageKey, content_type AS contentType, byte_size AS byteSize, thumbnail_key AS thumbnailKey, position FROM listing_photos WHERE listing_id = ? ORDER BY position ASC, id ASC",
     [id],
   );
 
@@ -127,19 +137,28 @@ describe("POST /listings/:id/photos", () => {
         new RegExp(`^listings/${id}/photos/[0-9a-f-]+\\.png$`),
       );
       assert.strictEqual(first?.byteSize, jpeg().bytes.length);
+      // The fixtures are truncated files, so no card image could be made and
+      // the row records the fallback instead of inventing one.
+      assert.isNull(first?.thumbnailKey);
+      assert.isNull(second?.thumbnailKey);
 
-      // The owner's edit page previews a draft's photos.
+      // The owner's edit page previews a draft's photos from their card URL.
       const edit = yield* call(`/listings/${id}/edit`, { headers: { cookie: owner.cookie } });
       assert.strictEqual(edit.status, 200, edit.body);
       assert.include(edit.body, "Photos");
-      assert.include(edit.body, `src="/listings/${id}/photos/${String(first?.id)}"`);
-      assert.include(edit.body, `src="/listings/${id}/photos/${String(second?.id)}"`);
+      assert.include(edit.body, `src="/listings/${id}/photos/${String(first?.id)}/card"`);
+      assert.include(edit.body, `src="/listings/${id}/photos/${String(second?.id)}/card"`);
+      assert.include(edit.body, "No downscaled copy; the original is used on cards.");
 
       // A draft's photo is private: the owner can read it, anyone else 404s.
       const ownerRead = yield* call(`/listings/${id}/photos/${String(first?.id)}`, {
         headers: { cookie: owner.cookie },
       });
       assert.strictEqual(ownerRead.status, 200, ownerRead.body);
+      assert.strictEqual(
+        ownerRead.headers.get("cache-control"),
+        "private, max-age=0, must-revalidate",
+      );
       const anonymousDraft = yield* call(`/listings/${id}/photos/${String(first?.id)}`);
       assert.strictEqual(anonymousDraft.status, 404);
 
@@ -148,6 +167,19 @@ describe("POST /listings/:id/photos", () => {
       const publicRead = yield* call(`/listings/${id}/photos/${String(first?.id)}`);
       assert.strictEqual(publicRead.status, 200, publicRead.body);
       assert.strictEqual(publicRead.body, new TextDecoder().decode(jpeg().bytes));
+      // Unpublishing or deleting a photo revokes this URL, so a cache has to
+      // revalidate instead of keeping the bytes for a year.
+      assert.strictEqual(
+        publicRead.headers.get("cache-control"),
+        "public, max-age=0, must-revalidate",
+      );
+
+      // Without a downscaled copy the card URL serves the original bytes, so a
+      // photo is never lost to a codec failure.
+      const fallbackCard = yield* call(`/listings/${id}/photos/${String(first?.id)}/card`);
+      assert.strictEqual(fallbackCard.status, 200, fallbackCard.body);
+      assert.strictEqual(fallbackCard.headers.get("content-type"), "image/jpeg");
+      assert.strictEqual(fallbackCard.body, new TextDecoder().decode(jpeg().bytes));
 
       const detail = yield* call(`/api/listings/${id}`);
       assert.strictEqual(detail.status, 200, detail.body);
@@ -169,8 +201,60 @@ describe("POST /listings/:id/photos", () => {
         (entry) => entry.id === id,
       );
       assert.isDefined(item);
-      assert.strictEqual(item?.primaryPhotoUrl, `/listings/${id}/photos/${String(first?.id)}`);
+      assert.strictEqual(item?.primaryPhotoUrl, `/listings/${id}/photos/${String(first?.id)}/card`);
       assert.isFalse("photos" in (item ?? {}));
+    }),
+  );
+
+  it.effect("stores a downscaled card image next to the original", () =>
+    Effect.gen(function* () {
+      const id = yield* createListing();
+      const large = jpeg("large.jpg", 4096);
+      const uploaded = yield* upload(id, [large]);
+      assert.strictEqual(uploaded.status, 303, uploaded.body);
+
+      const [photo] = yield* photosOf(id);
+      assert.isDefined(photo);
+      const thumbnailKey = photo?.thumbnailKey;
+      assert.match(
+        thumbnailKey ?? "",
+        new RegExp(`^listings/${id}/photos/[0-9a-f-]+-card\\.webp$`),
+      );
+      assert.include(storageEntries(), thumbnailKey ?? "");
+      assert.isBelow(cardImageBytes.length, large.bytes.length);
+
+      yield* publish(id);
+
+      // The detail page reads the original; the card reads the downscaled copy.
+      const original = yield* call(`/listings/${id}/photos/${String(photo?.id)}`);
+      assert.strictEqual(original.status, 200, original.body);
+      assert.strictEqual(original.body, new TextDecoder().decode(large.bytes));
+      assert.strictEqual(original.headers.get("content-type"), "image/jpeg");
+
+      const card = yield* call(`/listings/${id}/photos/${String(photo?.id)}/card`);
+      assert.strictEqual(card.status, 200, card.body);
+      assert.strictEqual(card.headers.get("content-type"), "image/webp");
+      assert.strictEqual(Number(card.headers.get("content-length")), cardImageBytes.length);
+      assert.isBelow(cardImageBytes.length, large.bytes.length);
+
+      const detailPage = yield* call(`/listings/${id}`);
+      assert.strictEqual(detailPage.status, 200, detailPage.body);
+      assert.include(detailPage.body, `src="/listings/${id}/photos/${String(photo?.id)}"`);
+      assert.notInclude(detailPage.body, `/photos/${String(photo?.id)}/card"`);
+
+      const edit = yield* call(`/listings/${id}/edit`, { headers: { cookie: owner.cookie } });
+      assert.strictEqual(edit.status, 200, edit.body);
+      assert.include(edit.body, `src="/listings/${id}/photos/${String(photo?.id)}/card"`);
+      assert.notInclude(edit.body, "No downscaled copy");
+
+      const deleted = yield* postForm(
+        `/listings/${id}/photos/${String(photo?.id)}/delete`,
+        {},
+        owner,
+      );
+      assert.strictEqual(deleted.status, 303, deleted.body);
+      assert.notInclude(storageEntries(), photo?.storageKey ?? "");
+      assert.notInclude(storageEntries(), thumbnailKey ?? "");
     }),
   );
 

@@ -1,5 +1,6 @@
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
 import { StorageRepository } from "@/repos/storage.repo";
+import { PhotoThumbnailer } from "@/services/photo-thumbnail.service";
 import { assert } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
@@ -97,6 +98,26 @@ const StorageRepositoryStub = Layer.succeed(StorageRepository, {
 // code never can.
 export const storageEntries = () => Array.from(storedObjects.keys());
 
+/*
+ * The Images binding is a Worker-only binding, so the card-image codec is
+ * replaced here by one with the same contract: a truncated file - the small
+ * fixtures below are only headers and filler - cannot be decoded and yields no
+ * card image, while a complete upload yields this fixed WebP card image. The
+ * real codec is exercised end to end by `scripts/smoke.sh`.
+ */
+export const cardImageBytes = (() => {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8);
+  for (let index = 12; index < bytes.length; index += 1) bytes[index] = index % 251;
+  return bytes;
+})();
+
+const PhotoThumbnailerStub = Layer.succeed(PhotoThumbnailer, {
+  makeCard: (bytes) =>
+    Effect.succeed(bytes.length > 64 ? Option.some(cardImageBytes.slice()) : Option.none()),
+});
+
 const makeApp = (config: Readonly<Record<string, string>> = {}) => {
   const ConfigLive = ConfigProvider.layer(
     ConfigProvider.fromUnknown({ DOMAIN, JWT_SECRET, ENVIRONMENT: "local", ...config }),
@@ -110,6 +131,7 @@ const makeApp = (config: Readonly<Record<string, string>> = {}) => {
     Layer.provide(AppServicesLive),
     HttpRouter.provideRequest(AppServicesLive),
     Layer.provideMerge(StorageRepositoryStub),
+    Layer.provideMerge(PhotoThumbnailerStub),
     Layer.provide(TestSqlLive),
     Layer.provide(ConfigLive),
   );

@@ -28,6 +28,12 @@
       // "remote": true,
     },
   ],
+  // The Images binding is the codec that turns a validated upload into the
+  // downscaled card image. Local development serves it from the same workerd
+  // runtime the app already uses.
+  "images": {
+    "binding": "IMAGES",
+  },
   "env": {
     "prod": {
       "vars": {
@@ -50,6 +56,9 @@
           "bucket_name": "estia",
         },
       ],
+      "images": {
+        "binding": "IMAGES",
+      },
     },
   },
 }

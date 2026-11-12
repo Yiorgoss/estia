@@ -15,6 +15,7 @@ import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HealthRouter } from "./api/health";
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "./api";
 import { StorageRepositoryLive } from "./repos/storage.repo";
+import { PhotoThumbnailerLive } from "./services/photo-thumbnail.service";
 
 export class EnvVars extends Context.Service<
   EnvVars,
@@ -65,6 +66,8 @@ const WorkerApp = Layer.mergeAll(HealthRouter, PublicRouterLive, PrivateRouterLi
 type WorkerBindings = {
   readonly DB: D1Database;
   readonly STORAGE: R2Bucket;
+  // The codec behind the downscaled card image of a gallery photo.
+  readonly IMAGES: ImagesBinding;
   readonly ENVIRONMENT: "local" | "production";
 } & {
   readonly [key: string]: string;
@@ -127,6 +130,7 @@ const makeOrGetRuntime = (bindings: WorkerBindings) => {
       // also visible to the services that capture it (the photo service), not
       // only to route effects that read it per request.
       Layer.provideMerge(StorageRepositoryLive(bindings.STORAGE)),
+      Layer.provideMerge(PhotoThumbnailerLive(bindings.IMAGES)),
       Layer.provide(configProviderLayer),
       Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
     ),

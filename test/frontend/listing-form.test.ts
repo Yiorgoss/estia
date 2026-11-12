@@ -140,12 +140,13 @@ describe("decodeUpdateListingForm", () => {
   });
 });
 
-const photo = (id: number, position: number): ListingPhoto => ({
+const photo = (id: number, position: number, thumbnailKey: string | null = null): ListingPhoto => ({
   id: Schema.decodeSync(ListingPhotoId)(id),
   listingId: Schema.decodeSync(ListingId)(12),
   storageKey: `listings/12/photos/${id}.jpg`,
   contentType: "image/jpeg",
   byteSize: 3,
+  thumbnailKey,
   position,
   createdAt: new Date("2026-01-01T00:00:00.000Z"),
 });
@@ -263,7 +264,21 @@ describe("listing pages", () => {
     assert.include(page, "/listings/12/photos/102/first");
     assert.include(page, "/listings/12/photos/101/move");
     assert.include(page, "/listings/12/photos/102/delete");
-    assert.include(page, 'src="/listings/12/photos/101"');
+    // The preview grid reads the card image, not the full upload.
+    assert.include(page, 'src="/listings/12/photos/101/card"');
+  });
+
+  it("shows which photos have no downscaled card image", () => {
+    const missing = editListingPage(listing({}), listingFormValuesFor(listing({})), undefined, [
+      photo(101, 0),
+    ]);
+    assert.include(missing, "No downscaled copy; the original is used on cards.");
+
+    const present = editListingPage(listing({}), listingFormValuesFor(listing({})), undefined, [
+      photo(102, 0, "listings/12/photos/102-card.webp"),
+    ]);
+    assert.notInclude(present, "No downscaled copy");
+    assert.include(present, 'src="/listings/12/photos/102/card"');
   });
 
   it("explains an empty gallery and hides the upload form at the limit", () => {
