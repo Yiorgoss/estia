@@ -437,7 +437,9 @@ const listingPhotoRoute = HttpRouter.route("GET", "/listings/:id/photos/:photoId
         ? "private, max-age=0, must-revalidate"
         : "public, max-age=31536000, immutable",
     });
-    const response = HttpServerResponse.fromWeb(new Response(object.body, { status: 200, headers }));
+    const response = HttpServerResponse.fromWeb(
+      new Response(object.body, { status: 200, headers }),
+    );
     return session._tag === "caller"
       ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
       : response;

@@ -218,18 +218,17 @@ const readPartBytes = (
  * restating it in every route.
  */
 const ownedAction = <R>(
-  request: HttpServerRequest.HttpServerRequest,
   listingId: typeof ListingId.Type,
   action: (
     ownerId: typeof UserId.Type,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, PhotoPageError, R>,
 ) =>
   Effect.gen(function* () {
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     return yield* action(ownerId).pipe(
       Effect.catch((error: PhotoPageError) => renderEditError(ownerId, listingId, error)),
     );
-  }).pipe(Effect.catchTag("UnauthorizedError", (error) => Effect.succeed(errorResponse(error))));
+  });
 
 const uploadPhotos = HttpRouter.route("POST", "/listings/:id/photos", (request) =>
   Effect.gen(function* () {
@@ -238,7 +237,7 @@ const uploadPhotos = HttpRouter.route("POST", "/listings/:id/photos", (request) 
     const listingId = yield* listingIdOf();
     if (listingId === undefined) return missingListingResponse();
 
-    return yield* ownedAction(request, listingId, (ownerId) =>
+    return yield* ownedAction(listingId, (ownerId) =>
       Effect.gen(function* () {
         const photoService = yield* ListingPhotoService;
 
@@ -277,7 +276,7 @@ const movePhoto = HttpRouter.route("POST", "/listings/:id/photos/:photoId/move",
     const photoId = yield* photoIdOf();
     if (listingId === undefined || photoId === undefined) return missingListingResponse();
 
-    return yield* ownedAction(request, listingId, (ownerId) =>
+    return yield* ownedAction(listingId, (ownerId) =>
       Effect.gen(function* () {
         const params = yield* readForm(request);
         const raw = params["direction"];
@@ -307,7 +306,7 @@ const makePhotoFirst = HttpRouter.route("POST", "/listings/:id/photos/:photoId/f
     const photoId = yield* photoIdOf();
     if (listingId === undefined || photoId === undefined) return missingListingResponse();
 
-    return yield* ownedAction(request, listingId, (ownerId) =>
+    return yield* ownedAction(listingId, (ownerId) =>
       Effect.gen(function* () {
         const photoService = yield* ListingPhotoService;
         yield* photoService.makeFirst(ownerId, listingId, photoId);
@@ -325,7 +324,7 @@ const deletePhoto = HttpRouter.route("POST", "/listings/:id/photos/:photoId/dele
     const photoId = yield* photoIdOf();
     if (listingId === undefined || photoId === undefined) return missingListingResponse();
 
-    return yield* ownedAction(request, listingId, (ownerId) =>
+    return yield* ownedAction(listingId, (ownerId) =>
       Effect.gen(function* () {
         const photoService = yield* ListingPhotoService;
         yield* photoService.remove(ownerId, listingId, photoId);
