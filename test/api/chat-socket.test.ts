@@ -8,7 +8,7 @@ import { AuthServiceLive } from "@/services/auth.service";
 import { ChatTicketServiceLive } from "@/services/chat-ticket.service";
 import { HasherServiceLive } from "@/services/hasher.service";
 import { JWTServiceLive } from "@/services/jwt.service";
-import { RefreshTokenServiceLive } from "@/services/refresh-token.service";
+import { RefreshTokenService, RefreshTokenServiceLive } from "@/services/refresh-token.service";
 import { assert, describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { SignJWT } from "jose";
@@ -24,6 +24,11 @@ import { TestSqlLive } from "../support/sql";
  * is the boundary: the session, the D1 membership check, the signed ticket, and
  * the identity headers that must not reach the object.
  */
+
+const uint8ArrayPrototype = Uint8Array.prototype as unknown as { toHex?: () => string };
+uint8ArrayPrototype.toHex ??= function (this: Uint8Array) {
+  return Array.from(this, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 const DOMAIN = "http://listings.test";
 const JWT_SECRET = TEST_JWT_SECRET;
@@ -86,6 +91,14 @@ const chatId = await runtime.runPromise(
     return chat.id;
   }),
 );
+
+const issueRefreshToken = (userId: string) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const service = yield* RefreshTokenService;
+      return yield* service.issueToken(Schema.decodeSync(UserId)(userId), "estia-tests");
+    }),
+  );
 
 const accessToken = async (userId: string, expiresAt?: number) => {
   const token = new SignJWT({ id: userId, role: "seeker" })
@@ -269,5 +282,24 @@ describe("handleChatSocketUpgrade", () => {
         assert.isAbove(ticket?.sessionExp ?? 0, (ticket?.exp ?? 0) + 60_000);
         assert.isBelow(Math.abs((ticket?.sessionExp ?? 0) - expiresAt * 1000), 5_000);
       }),
+  );
+
+  it.effect("carries a rotated session pair when the object does not upgrade", () =>
+    Effect.gen(function* () {
+      const refresh = yield* Effect.promise(() => issueRefreshToken(SEEKER));
+      const expired = yield* Effect.promise(() =>
+        accessToken(SEEKER, Math.floor(Date.now() / 1000) - 60),
+      );
+      const refused = yield* upgrade({
+        cookie: `access_token=${expired}; refresh_token=${refresh}`,
+      });
+
+      assert.strictEqual(refused.response.status, 200);
+      const setCookies = refused.response.headers.getSetCookie();
+      assert.isTrue(setCookies.some((header) => header.startsWith("access_token=")));
+      const rotatedRefresh = setCookies.find((header) => header.startsWith("refresh_token="));
+      assert.isDefined(rotatedRefresh);
+      assert.notInclude(rotatedRefresh ?? "", refresh);
+    }),
   );
 });

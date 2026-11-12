@@ -12,6 +12,7 @@ import {
   chatErrorPage,
   chatInboxPage,
   chatThreadPage,
+  nextAcknowledgedSeq,
   shouldFollowNewMessage,
 } from "@/frontend/pages/chats";
 import { assert, describe, it } from "@effect/vitest";
@@ -171,6 +172,24 @@ describe("chatThreadPage", () => {
     assert.notInclude(earliest, 'id="chat-load-earlier"');
   });
 
+  it("renders a full page of history with the newest message last", () => {
+    const items = Array.from({ length: 150 }, (_, index) =>
+      message({
+        id: Schema.decodeSync(ChatMessageId)(index + 1),
+        seq: index + 1,
+        body: `message ${index + 1}`,
+      }),
+    );
+    const html = chatThreadPage(detail({ lastSeq: 150 }), thread(items, 150, true), {
+      userId: user("user-owner"),
+    });
+
+    assert.include(html, 'data-last-seq="150"');
+    assert.include(html, 'data-seq="150"');
+    assert.isBelow(html.indexOf('data-seq="149"'), html.indexOf('data-seq="150"'));
+    assert.include(html, 'id="chat-load-earlier"');
+  });
+
   it("carries the submitted client message id into an error re-render", () => {
     const html = chatThreadPage(detail(), thread([message()]), {
       userId: user("user-seeker"),
@@ -233,6 +252,15 @@ describe("shouldFollowNewMessage", () => {
       shouldFollowNewMessage(NEW_MESSAGES_THRESHOLD_PX + 1, NEW_MESSAGES_THRESHOLD_PX),
     );
     assert.isFalse(shouldFollowNewMessage(800, NEW_MESSAGES_THRESHOLD_PX));
+  });
+});
+
+describe("nextAcknowledgedSeq", () => {
+  it("advances only when the newest message is at the bottom and newer than the mark", () => {
+    assert.strictEqual(nextAcknowledgedSeq(10, 5, true), 10);
+    assert.isUndefined(nextAcknowledgedSeq(10, 5, false));
+    assert.isUndefined(nextAcknowledgedSeq(5, 5, true));
+    assert.isUndefined(nextAcknowledgedSeq(4, 5, true));
   });
 });
 

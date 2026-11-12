@@ -48,6 +48,25 @@ const json = (body: unknown, status: number): Response =>
 const refusal = (code: string, message: string, status: number): Response =>
   json({ error: code, message }, status);
 
+const withSessionCookies = (
+  response: Response,
+  cookies: ReadonlyArray<readonly [string, string, Cookies.Cookie["options"]?]>,
+): Response => {
+  if (cookies.length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value, cookieOptions] of cookies) {
+    headers.append(
+      "set-cookie",
+      Cookies.serializeCookie(Cookies.makeCookieUnsafe(name, value, cookieOptions)),
+    );
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
 /*
  * A browser labels its own WebSocket handshake with the page's origin, so a page
  * on another site is refused even though the session cookie is `SameSite=Lax` and
@@ -142,9 +161,10 @@ export const handleChatSocketUpgrade = async (
   const stub = options.chats.get(options.chats.idFromName(String(chatId)));
   const response = await stub.fetch(forward);
 
-  // A refusal from the object is already a plain response; there is no socket to
-  // carry a rotated cookie on.
-  if (response.status !== 101 || response.webSocket === null) return response;
+  if (response.status !== 101) {
+    return withSessionCookies(response, authorisation.cookies);
+  }
+  if (response.webSocket === null) return response;
   if (authorisation.cookies.length === 0) return response;
 
   /*
