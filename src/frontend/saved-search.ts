@@ -57,10 +57,11 @@ const notice = (message: string, tone: "saved" | "error") => `
   </p>`;
 
 /*
- * The control on the results page. It lives in the results fragment, so it is
- * re-rendered with every search, and it pulls the current criteria from the form
- * with `hx-include`. Saving targets the saved-search list rather than the results,
- * because the results did not change - only the list did.
+ * The control next to the saved-search list. It lives on the search page itself,
+ * outside the results fragment a search refresh swaps, so a typed name survives
+ * that refresh. The current criteria come from the form with `hx-include`.
+ * Saving targets the saved-search list rather than the results, because the
+ * results did not change - only the list did.
  *
  * The name box is optional: the service names an unnamed search after its own
  * criteria. It is identified by id so a successful save can clear it with an
@@ -72,7 +73,7 @@ export const saveSearchForm = () => `
     hx-target="#saved-searches"
     hx-swap="outerHTML"
     hx-include="#search-form"
-    class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+    class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
   >
     <div class="flex flex-wrap items-end gap-3">
       <div class="min-w-0 flex-1">
@@ -159,7 +160,7 @@ export const savedSearchesPanel = (
            </ul>`
         : options.error === undefined
           ? `<p class="mt-3 text-sm text-gray-600">
-             No saved searches yet. Search the listings, then save the criteria from the results.
+             No saved searches yet. Set the filters above, then save them.
            </p>`
           : ""
     }

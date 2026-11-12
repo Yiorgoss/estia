@@ -44,13 +44,17 @@ describe("searchPage", () => {
     assert.include(html, 'hx-get="/search/results"');
   });
 
-  it("renders the saved-search list for a signed-in caller", () => {
+  it("renders the saved-search list and the save control for a signed-in caller", () => {
     const html = searchPage({ savedSearches: [savedSearch()] });
 
     assert.include(html, 'id="saved-searches"');
     assert.include(html, "Balcony rooms in Attica");
     assert.include(html, 'href="/search?saved=7"');
     assert.include(html, 'action="/search/saved/7/delete"');
+    assert.include(html, 'id="saved-search-name"');
+    assert.include(html, 'hx-post="/search/saved"');
+    assert.include(html, 'hx-include="#search-form"');
+    assert.include(html, 'hx-target="#saved-searches"');
   });
 
   it("pre-fills the form and the results request from an applied saved search", () => {
@@ -86,10 +90,9 @@ describe("searchPage", () => {
 });
 
 describe("searchResults", () => {
-  it("shows the save control only when the caller can save", () => {
+  it("leaves the save control to the page that a search refresh does not swap", () => {
     assert.notInclude(searchResults(emptyPage), 'hx-post="/search/saved"');
-    assert.include(searchResults(emptyPage, { canSave: true }), 'hx-post="/search/saved"');
-    assert.include(searchResults(emptyPage, { canSave: true }), 'hx-include="#search-form"');
+    assert.notInclude(searchResults(emptyPage), 'id="saved-search-name"');
   });
 });
 

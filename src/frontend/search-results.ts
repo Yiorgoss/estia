@@ -1,6 +1,5 @@
 import { encodeListingCursor, ListingPage } from "@/db/schema/Listing";
 import { kindLabels, listingFlags, regionLabels } from "@/frontend/listing-labels";
-import { saveSearchForm } from "@/frontend/saved-search";
 import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 
 type SearchListing = (typeof ListingPage.Type)["items"][number];
@@ -83,12 +82,8 @@ const countLabel = (count: number) =>
      Showing ${count} ${count === 1 ? "listing" : "listings"}, newest first
    </p>`;
 
-export const searchResults = (
-  page: typeof ListingPage.Type,
-  options: { readonly canSave?: boolean } = {},
-) => `
+export const searchResults = (page: typeof ListingPage.Type) => `
   <div class="space-y-4" aria-live="polite">
-    ${options.canSave === true ? saveSearchForm() : ""}
     ${
       page.items.length === 0
         ? `<p class="rounded-lg border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">

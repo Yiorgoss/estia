@@ -226,11 +226,7 @@ const searchResultsRoute = HttpRouter.route(
         const { limit, cursor, ...filters } = query;
         const page = yield* listingService.search(filters, { limit, cursor });
 
-        // Only a signed-in visitor can save a search, so only they see the save
-        // control; the results themselves are identical for everyone.
-        return HttpServerResponse.html(
-          searchResults(page, { canSave: session._tag === "caller" }),
-        );
+        return HttpServerResponse.html(searchResults(page));
       }).pipe(
         Effect.catchTags({
           // htmx only swaps 2xx responses by default, so a bad filter has to come

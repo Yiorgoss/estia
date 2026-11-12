@@ -197,6 +197,56 @@ describe("the browser's saved-search routes", () => {
     }),
   );
 
+  it.effect("keeps the save control outside the results a search refresh swaps", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("save-name-survives");
+      const cookie = `access_token=${session.access}`;
+
+      const page = yield* call("/search", { headers: browser(cookie) });
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-search-name"');
+      assert.include(page.body, 'hx-include="#search-form"');
+
+      // The debounced re-run swaps only #results, so it cannot re-create the name
+      // box and the name typed there survives.
+      const refreshed = yield* call("/search/results?pets=false", {
+        headers: { ...browser(cookie), "hx-request": "true" },
+      });
+      assert.strictEqual(refreshed.status, 200, refreshed.body);
+      assert.notInclude(refreshed.body, 'id="saved-search-name"');
+      assert.notInclude(refreshed.body, 'hx-post="/search/saved"');
+
+      const saved = yield* browserSave(cookie, { name: "Cheap Attica", pets: "false" });
+      assert.strictEqual(saved.status, 200, saved.body);
+      assert.include(saved.body, "Saved: Cheap Attica");
+
+      const [stored] = yield* storedSearches(session.id);
+      assert.isDefined(stored);
+      assert.strictEqual(stored.name, "Cheap Attica");
+    }),
+  );
+
+  it.effect("answers a failed save or delete without htmx as a navigation", () =>
+    Effect.gen(function* () {
+      const session = yield* signIn("non-htmx-failures");
+      const cookie = `access_token=${session.access}`;
+
+      const badFilter = yield* call(
+        "/search/saved",
+        form({ method: "POST", headers: { cookie } }, { minPrice: "not-a-number" }),
+      );
+      assert.strictEqual(badFilter.status, 303, badFilter.body);
+      assert.strictEqual(badFilter.location, "/search");
+
+      const missing = yield* call(
+        "/search/saved/not-an-id/delete",
+        form({ method: "POST", headers: { cookie } }, {}),
+      );
+      assert.strictEqual(missing.status, 303, missing.body);
+      assert.strictEqual(missing.location, "/search");
+    }),
+  );
+
   it.effect("renders a cross-site refusal in the panel for htmx", () =>
     Effect.gen(function* () {
       const created = yield* browserSave(users.owner.cookie, { name: "Cross-site target" });
@@ -362,7 +412,6 @@ describe("a stale access token on the public search routes", () => {
         headers: browser(`access_token=an.expired.token; refresh_token=${refresh}`),
       });
       assert.strictEqual(results.status, 200, results.body);
-      assert.include(results.body, 'hx-post="/search/saved"');
       assert.notStrictEqual(results.cookies["refresh_token"], refresh);
     }),
   );
@@ -460,7 +509,7 @@ describe("two overlapping requests that share one refresh token", () => {
     }),
   );
 
-  it.effect("lets exactly one results fragment carry the save control", () =>
+  it.effect("lets exactly one htmx request rotate and reload the other", () =>
     Effect.gen(function* () {
       const session = yield* signIn("rotation-race-htmx");
       const saved = yield* browserSave(`access_token=${session.access}`, { pets: "false" });
@@ -483,26 +532,21 @@ describe("two overlapping requests that share one refresh token", () => {
       assert.lengthOf(winners, 1);
       const [winner] = winners;
       assert.isDefined(winner);
-      assert.include(winner.body, 'hx-post="/search/saved"');
 
       const other = responses.find((response) => response !== winner);
       assert.isDefined(other);
       if (other.headers.get("HX-Refresh") === "true") {
         assert.strictEqual(other.body, "");
-      } else {
-        assert.notInclude(other.body, 'hx-post="/search/saved"');
       }
 
-      const retried = yield* call(fragment, {
-        headers: {
-          ...browser(
-            `access_token=${winner.cookies["access_token"]}; refresh_token=${winner.cookies["refresh_token"]}`,
-          ),
-          "hx-request": "true",
-        },
+      const page = yield* call("/search", {
+        headers: browser(
+          `access_token=${winner.cookies["access_token"]}; refresh_token=${winner.cookies["refresh_token"]}`,
+        ),
       });
-      assert.strictEqual(retried.status, 200, retried.body);
-      assert.include(retried.body, 'hx-post="/search/saved"');
+      assert.strictEqual(page.status, 200, page.body);
+      assert.include(page.body, 'id="saved-searches"');
+      assert.include(page.body, "Listings No pets");
     }),
   );
 

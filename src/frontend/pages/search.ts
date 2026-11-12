@@ -3,7 +3,7 @@ import type { SavedSearch } from "@/db/schema/SavedSearch";
 import { kindLabels, regionLabels } from "../listing-labels";
 import { head } from "../head";
 import { header } from "../header";
-import { savedSearchesPanel } from "../saved-search";
+import { savedSearchesPanel, saveSearchForm } from "../saved-search";
 import {
   emptySearchFormValues,
   type SearchFlagValue,
@@ -97,10 +97,11 @@ export const searchPage = (options: SearchPageOptions = {}) => {
   const saved =
     options.savedSearches === undefined
       ? ""
-      : savedSearchesPanel(options.savedSearches, {
-          error: options.savedError,
-          appliedId: options.appliedSavedSearchId,
-        });
+      : `${saveSearchForm()}
+         ${savedSearchesPanel(options.savedSearches, {
+           error: options.savedError,
+           appliedId: options.appliedSavedSearchId,
+         })}`;
 
   return `<!DOCTYPE html>
 <html lang="en">

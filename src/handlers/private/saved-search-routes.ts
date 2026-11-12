@@ -45,16 +45,20 @@ const readForm = (request: HttpServerRequest.HttpServerRequest) =>
 const panelError = "Your saved searches could not be loaded just now.";
 
 /*
- * The list as the page shows it, with an optional banner. A failed read is
- * rendered inside the same section rather than becoming an empty page, so the
+ * The list as the page shows it, with an optional banner. An htmx request gets
+ * the section it targets; a request without htmx is a navigation, and every
+ * answer to one - saved, refused, or failed - is the search page rather than a
+ * bare fragment. A failed read is rendered inside the section, so the
  * surrounding search page stays usable.
  */
 const panelFor = (
+  request: HttpServerRequest.HttpServerRequest,
   ownerId: typeof UserId.Type,
   options: SavedSearchesPanelOptions = {},
   extra = "",
 ) =>
   Effect.gen(function* () {
+    if (!isHtmx(request)) return seeOther("/search");
     const savedSearchService = yield* SavedSearchService;
     const listed = yield* Effect.result(savedSearchService.list(ownerId));
     if (Result.isFailure(listed)) {
@@ -76,7 +80,7 @@ const refuse = (
   message: string,
 ) =>
   isHtmx(request)
-    ? panelFor(ownerId, { error: message })
+    ? panelFor(request, ownerId, { error: message })
     : Effect.succeed(respond(message, 403));
 
 /*
@@ -103,7 +107,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
         ? Option.getOrUndefined(Schema.decodeUnknownOption(SavedSearchName)(nameCandidate))
         : undefined;
     if (typeof nameCandidate === "string" && name === undefined) {
-      return yield* panelFor(ownerId, {
+      return yield* panelFor(request, ownerId, {
         error: "That name could not be used. Use 120 characters or fewer.",
       });
     }
@@ -112,7 +116,7 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
       withMinorUnitPrices(rawCriteria),
     );
     if (Result.isFailure(decoded)) {
-      return yield* panelFor(ownerId, { error: "Those filters could not be read." });
+      return yield* panelFor(request, ownerId, { error: "Those filters could not be read." });
     }
 
     const { limit: _limit, cursor: _cursor, ...criteria } = decoded.success;
@@ -121,13 +125,13 @@ const createSavedSearch = HttpRouter.route("POST", "/search/saved", (request) =>
       savedSearchService.create(ownerId, { name, ...criteria }),
     );
     if (Result.isFailure(created)) {
-      return yield* panelFor(ownerId, {
+      return yield* panelFor(request, ownerId, {
         error: "This search could not be saved just now. Please try again.",
       });
     }
 
-    if (!isHtmx(request)) return seeOther("/search");
     return yield* panelFor(
+      request,
       ownerId,
       { notice: `Saved: ${created.success.name}` },
       clearedNameInput(),
@@ -146,7 +150,9 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
       decodeSavedSearchId(params["id"]),
     );
     if (id === undefined) {
-      return yield* panelFor(ownerId, { error: "That saved search no longer exists." });
+      return yield* panelFor(request, ownerId, {
+        error: "That saved search no longer exists.",
+      });
     }
 
     const savedSearchService = yield* SavedSearchService;
@@ -156,11 +162,10 @@ const deleteSavedSearch = HttpRouter.route("POST", "/search/saved/:id/delete", (
         outcome.failure._tag === "SavedSearchNotFoundError"
           ? "That saved search no longer exists."
           : "This saved search could not be deleted just now. Please try again.";
-      return yield* panelFor(ownerId, { error });
+      return yield* panelFor(request, ownerId, { error });
     }
 
-    if (!isHtmx(request)) return seeOther("/search");
-    return yield* panelFor(ownerId, { notice: "Saved search deleted." });
+    return yield* panelFor(request, ownerId, { notice: "Saved search deleted." });
   }),
 );
 
