@@ -1,12 +1,14 @@
 import type { ProfileFormValues } from "@/frontend/profile-form";
 import { isSeekerProfileComplete } from "@/frontend/profile-form";
 import type { EditableProfileRole } from "@/db/schema/Profile";
+import type { SavedSearch } from "@/db/schema/SavedSearch";
 import {
   errorBanner,
   pageShell,
   primaryButtonClass,
   secondaryButtonClass,
 } from "@/frontend/layout";
+import { savedSearchesPanel } from "@/frontend/saved-search";
 import { escapeHtml } from "@/utils";
 
 /*
@@ -249,7 +251,25 @@ export interface ProfilePageState {
   readonly error?: string | undefined;
   readonly saved?: boolean | undefined;
   readonly completed?: boolean | undefined;
+  // The listing profile also carries the account's saved searches. Both are
+  // absent on a page with no place for the list: the seeking profile, the choice
+  // page, and the pages that explain why there is no profile to show.
+  readonly savedSearches?: ReadonlyArray<SavedSearch> | undefined;
+  readonly savedSearchesError?: string | undefined;
 }
+
+/*
+ * The saved-search list on the listing profile. It is the search page's own
+ * section rendered in its profile place, so the two pages cannot drift, and a
+ * failed read is passed on as its reason so the section never reads as "none".
+ */
+const savedSearchesSection = (state: ProfilePageState) =>
+  state.savedSearches === undefined && state.savedSearchesError === undefined
+    ? ""
+    : savedSearchesPanel(state.savedSearches ?? [], {
+        place: "profile",
+        error: state.savedSearchesError,
+      });
 
 export const profilePage = (state: ProfilePageState) => {
   const incomplete = state.role === "seeker" && !isSeekerProfileComplete(state.values);
@@ -293,6 +313,8 @@ export const profilePage = (state: ProfilePageState) => {
         </div>
       </form>
     </section>
+
+    ${savedSearchesSection(state)}
 
     ${signOutEverywhereControl()}`,
   );

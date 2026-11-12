@@ -21,44 +21,53 @@ export class SavedSearchNotFoundError extends Schema.TaggedError<SavedSearchNotF
 ) {}
 
 const rangeSummary = (
-  min: number | undefined,
-  max: number | undefined,
+  min: number | null | undefined,
+  max: number | null | undefined,
   format: (value: number) => string,
   suffix: string,
 ): string | undefined => {
-  if (min !== undefined && max !== undefined) return `${format(min)}-${format(max)}${suffix}`;
-  if (max !== undefined) return `up to ${format(max)}${suffix}`;
-  if (min !== undefined) return `from ${format(min)}${suffix}`;
+  if (min != null && max != null) return `${format(min)}-${format(max)}${suffix}`;
+  if (max != null) return `up to ${format(max)}${suffix}`;
+  if (min != null) return `from ${format(min)}${suffix}`;
   return undefined;
 };
 
 /*
- * A readable name for a search saved without one. It reads in the same order
- * the form does - kind, region, price, size, flags, availability - and never
- * exceeds the name bound, so it can be stored as a name as-is.
+ * The criteria a summary reads: a caller's absent field and a stored null column
+ * both mean "any", so one type accepts the saved-search input and the row.
  */
-export const summarizeSavedSearch = (criteria: SavedSearchCriteria): string => {
+type SummarizableCriteria = {
+  readonly [K in keyof SavedSearchCriteria]?: SavedSearchCriteria[K] | null;
+};
+
+/*
+ * A readable summary of a search's criteria. It reads in the same order the form
+ * does - kind, region, price, size, flags, availability - and never exceeds the
+ * name bound, so it serves both as the name of a search saved without one and as
+ * the criteria line under a saved search's name in the list.
+ */
+export const summarizeSavedSearch = (criteria: SummarizableCriteria): string => {
   // A search that narrows on nothing reads as the whole feed, not as a list of
   // missing filters.
   if (
-    criteria.kind === undefined &&
-    criteria.regionCode === undefined &&
-    criteria.minPriceMinor === undefined &&
-    criteria.maxPriceMinor === undefined &&
-    criteria.minSizeSqm === undefined &&
-    criteria.maxSizeSqm === undefined &&
-    criteria.furnished === undefined &&
-    criteria.ensuite === undefined &&
-    criteria.smoking === undefined &&
-    criteria.pets === undefined &&
+    criteria.kind == null &&
+    criteria.regionCode == null &&
+    criteria.minPriceMinor == null &&
+    criteria.maxPriceMinor == null &&
+    criteria.minSizeSqm == null &&
+    criteria.maxSizeSqm == null &&
+    criteria.furnished == null &&
+    criteria.ensuite == null &&
+    criteria.smoking == null &&
+    criteria.pets == null &&
     criteria.availableFrom == null
   ) {
     return "All listings";
   }
 
   const head: Array<string> = [];
-  head.push(criteria.kind === undefined ? "Listings" : kindLabels[criteria.kind]);
-  if (criteria.regionCode !== undefined) head.push(`in ${regionLabels[criteria.regionCode]}`);
+  head.push(criteria.kind == null ? "Listings" : kindLabels[criteria.kind]);
+  if (criteria.regionCode != null) head.push(`in ${regionLabels[criteria.regionCode]}`);
 
   const price = rangeSummary(
     criteria.minPriceMinor,
@@ -84,7 +93,7 @@ export const summarizeSavedSearch = (criteria: SavedSearchCriteria): string => {
   if (flags.length > 0) head.push(flags.join(", "));
 
   const available = criteria.availableFrom;
-  if (available !== undefined && available !== null) {
+  if (available != null) {
     head.push(`available from ${formatDate(available) ?? ""}`);
   }
 

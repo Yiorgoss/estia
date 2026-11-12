@@ -1,16 +1,17 @@
 import type { SavedSearch } from "@/db/schema/SavedSearch";
+import { summarizeSavedSearch } from "@/services/saved-search.service";
 import { escapeHtml } from "@/utils";
 
 /*
- * The saved-search pieces around the results page. A saved search belongs to the
- * signed-in account, so none of this is rendered for a visitor: the page only
- * calls these when a session identified the caller.
+ * The saved-search pieces shared by the search page and the listing profile.
+ * A saved search belongs to the signed-in account, so none of this is rendered
+ * for a visitor: the page only calls these when a session identified the caller.
  */
 
 const inputClass =
   "w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
-// The apply link is a full navigation: the saved criteria become the form's
+// The row's Run link is a full navigation: the saved criteria become the form's
 // values and the results section's first request, so the page a person lands on
 // is the same page they would have reached by filling the form in by hand.
 export const savedSearchHref = (id: number): string => `/search?saved=${id}`;
@@ -99,37 +100,91 @@ export const saveSearchForm = () => `
 // next search without a script.
 export const clearedNameInput = () => nameInput("", true);
 
+/*
+ * Where the panel is rendered. The list and its controls are the same on both
+ * pages; what differs is the hint over an empty list and the page a form without
+ * htmx returns to, because a search is saved on the search page and read on the
+ * listing profile, which has no filters of its own.
+ */
+export type SavedSearchesPlace = "search" | "profile";
+
 export interface SavedSearchesPanelOptions {
   readonly notice?: string | undefined;
   readonly error?: string | undefined;
   readonly appliedId?: number | undefined;
+  readonly place?: SavedSearchesPlace | undefined;
 }
 
-const savedSearchRow = (saved: SavedSearch, appliedId: number | undefined) => `
-  <li class="flex flex-wrap items-center justify-between gap-2 py-2">
-    <a
-      href="${savedSearchHref(saved.id)}"
-      class="min-w-0 break-words text-sm font-medium text-blue-700 hover:text-blue-800"
-      ${saved.id === appliedId ? 'aria-current="page"' : ""}
-    >
-      ${escapeHtml(saved.name)}
-    </a>
-    <form
-      method="post"
-      action="/search/saved/${saved.id}/delete"
-      hx-post="/search/saved/${saved.id}/delete"
-      hx-target="#saved-searches"
-      hx-swap="outerHTML"
-      class="shrink-0"
-    >
-      <button
-        type="submit"
-        class="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+const runLinkClass =
+  "rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1";
+
+/*
+ * One saved search as a person reads it back: the name it was saved under and,
+ * when that name is not already the criteria summary, the criteria themselves.
+ * The service names an unnamed search after its criteria, so the summary line is
+ * left out there instead of saying the same thing twice.
+ */
+const savedSearchRow = (
+  saved: SavedSearch,
+  appliedId: number | undefined,
+  place: SavedSearchesPlace,
+) => {
+  const summary = summarizeSavedSearch(saved);
+  return `
+  <li class="flex flex-wrap items-start justify-between gap-2 py-2">
+    <div class="min-w-0">
+      <p class="break-words text-sm font-medium text-gray-900">${escapeHtml(saved.name)}</p>
+      ${
+        summary === saved.name
+          ? ""
+          : `<p class="mt-0.5 break-words text-xs text-gray-600">${escapeHtml(summary)}</p>`
+      }
+    </div>
+    <div class="flex shrink-0 items-center gap-2">
+      <a
+        href="${savedSearchHref(saved.id)}"
+        class="${runLinkClass}"
+        ${saved.id === appliedId ? 'aria-current="page"' : ""}
       >
-        Delete
-      </button>
-    </form>
+        Run
+      </a>
+      <form
+        method="post"
+        action="/search/saved/${saved.id}/delete"
+        hx-post="/search/saved/${saved.id}/delete"
+        hx-target="#saved-searches"
+        hx-swap="outerHTML"
+        class="shrink-0"
+      >
+        ${place === "profile" ? '<input type="hidden" name="place" value="profile" />' : ""}
+        <button
+          type="submit"
+          class="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+        >
+          Delete
+        </button>
+      </form>
+    </div>
   </li>`;
+};
+
+/*
+ * What the panel says around the list. The search page is where a search is
+ * saved and it has the filters above the list; the listing profile is where the
+ * list is read and has none, so its empty state says where a search comes from
+ * instead of pointing at a form that is not there.
+ */
+const panelCopy = (place: SavedSearchesPlace) =>
+  place === "profile"
+    ? {
+        hint: "Searches you saved from the listings page.",
+        empty:
+          "No saved searches yet. Save a search from the listings page and it will appear here.",
+      }
+    : {
+        hint: "Run one again from here.",
+        empty: "No saved searches yet. Set the filters above, then save them.",
+      };
 
 /*
  * The caller's saved searches, rendered as one section. The section carries the
@@ -139,7 +194,10 @@ const savedSearchRow = (saved: SavedSearch, appliedId: number | undefined) => `
 export const savedSearchesPanel = (
   items: ReadonlyArray<SavedSearch>,
   options: SavedSearchesPanelOptions = {},
-) => `
+) => {
+  const place = options.place ?? "search";
+  const copy = panelCopy(place);
+  return `
   <section
     id="saved-searches"
     aria-live="polite"
@@ -147,7 +205,7 @@ export const savedSearchesPanel = (
   >
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2 class="text-base font-semibold text-gray-900">Saved searches</h2>
-      <p class="text-xs text-gray-500">Run one again from here.</p>
+      <p class="text-xs text-gray-500">${copy.hint}</p>
     </div>
 
     ${options.notice === undefined ? "" : notice(options.notice, "saved")}
@@ -156,12 +214,13 @@ export const savedSearchesPanel = (
     ${
       items.length > 0
         ? `<ul class="mt-3 divide-y divide-gray-100">
-             ${items.map((item) => savedSearchRow(item, options.appliedId)).join("")}
+             ${items.map((item) => savedSearchRow(item, options.appliedId, place)).join("")}
            </ul>`
         : options.error === undefined
           ? `<p class="mt-3 text-sm text-gray-600">
-             No saved searches yet. Set the filters above, then save them.
+             ${copy.empty}
            </p>`
           : ""
     }
   </section>`;
+};

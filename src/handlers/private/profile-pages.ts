@@ -1,5 +1,7 @@
 import { editableProfileRole } from "@/db/schema/Profile";
 import type { EditableProfileRole } from "@/db/schema/Profile";
+import type { UserId } from "@/db/schema/brands";
+import type { SavedSearch } from "@/db/schema/SavedSearch";
 import { callerUser } from "@/handlers/private/caller";
 import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
 import {
@@ -10,6 +12,7 @@ import {
 } from "@/frontend/profile-form";
 import { profileChoicePage, profilePage, profileUnavailablePage } from "@/frontend/pages/profile";
 import { UnauthorizedError } from "@/services/auth.service";
+import { SavedSearchService } from "@/services/saved-search.service";
 import {
   AdminRoleSwitchError,
   InternalError,
@@ -20,7 +23,7 @@ import {
   noProfileMessage,
 } from "@/services/user.service";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
-import { Effect, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 
 /*
  * The profile page, on the private router so `AuthMiddleware` gates it: a
@@ -102,6 +105,34 @@ const crossSiteResponse = (): HttpServerResponse.HttpServerResponse =>
 const readForm = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord);
 
+interface SavedSearchesState {
+  readonly savedSearches?: ReadonlyArray<SavedSearch> | undefined;
+  readonly savedSearchesError?: string | undefined;
+}
+
+const savedSearchesLoadError = "Your saved searches could not be loaded just now.";
+
+/*
+ * The listing profile shows the account's saved searches. It reads them through
+ * the same service and repository as the search page, so the two pages list the
+ * same rows. A failed read is passed on as its reason rather than as an empty
+ * list, because an empty list would tell the account it has saved none.
+ */
+const savedSearchesFor = (
+  ownerId: typeof UserId.Type,
+): Effect.Effect<SavedSearchesState, never, SavedSearchService> =>
+  Effect.gen(function* () {
+    const savedSearchService = yield* SavedSearchService;
+    const listed = yield* Effect.result(savedSearchService.list(ownerId));
+    if (Result.isFailure(listed)) {
+      yield* Effect.logError("Saved searches could not be read for the profile page", {
+        error: listed.failure,
+      });
+      return { savedSearchesError: savedSearchesLoadError };
+    }
+    return { savedSearches: listed.success };
+  });
+
 const savedFlag = (params: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>) =>
   params["saved"] === "1";
 
@@ -129,6 +160,9 @@ const getProfilePage = HttpRouter.route("GET", "/profile", () =>
     const userService = yield* UserService;
     const profile = yield* userService.readProfile(user);
     const params = yield* HttpServerRequest.ParsedSearchParams;
+    // Only the listing profile carries the saved-search section; the seeking
+    // profile has no place for it and is unchanged.
+    const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
 
     return respond(
       profilePage({
@@ -136,6 +170,7 @@ const getProfilePage = HttpRouter.route("GET", "/profile", () =>
         values: profileFormValuesFrom(Option.getOrNull(profile)),
         saved: savedFlag(params),
         completed: completedFlag(params),
+        ...savedSearches,
       }),
       200,
     );
@@ -156,10 +191,13 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
 
     const params = yield* readForm(request);
     const values = profileFormValues(params);
+    // A rejected submit is answered with the whole page, so the listing profile
+    // keeps the saved-search section it was showing.
+    const savedSearches = role === "lister" ? yield* savedSearchesFor(user.id) : {};
     const decoded =
       role === "seeker" ? decodeSeekerProfileForm(params) : decodeListerProfileForm(params);
     if (!decoded.ok) {
-      return respond(profilePage({ role, values, error: decoded.message }), 400);
+      return respond(profilePage({ role, values, error: decoded.message, ...savedSearches }), 400);
     }
 
     const userService = yield* UserService;
@@ -167,7 +205,9 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
       Effect.map(() => seeOther("/profile?saved=1")),
       Effect.catch((error: ProfilePageError) => {
         const { message, status } = describeError(error);
-        return Effect.succeed(respond(profilePage({ role, values, error: message }), status));
+        return Effect.succeed(
+          respond(profilePage({ role, values, error: message, ...savedSearches }), status),
+        );
       }),
     );
   }).pipe(Effect.catch((error: ProfilePageError) => Effect.succeed(errorResponse(error)))),
