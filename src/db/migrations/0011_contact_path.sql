@@ -11,7 +11,7 @@ ALTER TABLE seekers ADD COLUMN contact TEXT CHECK (contact IS NULL OR length(con
 
 ALTER TABLE listers ADD COLUMN contact TEXT CHECK (contact IS NULL OR length(contact) <= 200);
 
--- One row per enquiry: a signed-in seeker's short message against one listing,
+-- One row per enquiry: a signed-in account's short message against one listing,
 -- with the sender's account as the identity. The sender is never request data;
 -- it is the account the session cookie proves. A listing that is deleted takes
 -- its enquiries with it, and so does a deleted account.
@@ -27,7 +27,7 @@ CREATE TABLE enquiries (
    created_at INTEGER NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER))
 );
 
--- The lister's list reads by listing owner (through listings), the seeker's list
+-- The lister's list reads by listing owner (through listings), the sender's list
 -- reads by sender, and the per-sender rate limit counts a sender's recent rows.
 CREATE INDEX idx_enquiries_listing ON enquiries(listing_id, created_at DESC, id DESC);
 CREATE INDEX idx_enquiries_sender ON enquiries(sender_id, created_at DESC, id DESC);
