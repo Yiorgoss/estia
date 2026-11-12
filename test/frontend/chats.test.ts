@@ -7,7 +7,13 @@ import {
   type ChatMessage,
   type ChatMessages,
 } from "@/db/schema/Chat";
-import { chatErrorPage, chatInboxPage, chatThreadPage } from "@/frontend/pages/chats";
+import {
+  NEW_MESSAGES_THRESHOLD_PX,
+  chatErrorPage,
+  chatInboxPage,
+  chatThreadPage,
+  shouldFollowNewMessage,
+} from "@/frontend/pages/chats";
 import { assert, describe, it } from "@effect/vitest";
 import { Schema } from "effect";
 
@@ -146,6 +152,8 @@ describe("chatThreadPage", () => {
     assert.include(html, "12 Nov, 10:20");
     // The socket client and the element it clones for a live message.
     assert.include(html, 'id="chat-message-template"');
+    assert.include(html, 'id="chat-new-messages"');
+    assert.include(html, "hidden>New messages</button>");
   });
 
   it("offers the earlier page only while older messages exist", () => {
@@ -214,6 +222,17 @@ describe("chatThreadPage", () => {
 
     assert.include(html, "&lt;script&gt;alert(&quot;draft&quot;)&lt;/script&gt;");
     assert.notInclude(html, draft);
+  });
+});
+
+describe("shouldFollowNewMessage", () => {
+  it("follows at or near the bottom and leaves a scrolled-up reader alone", () => {
+    assert.isTrue(shouldFollowNewMessage(0, NEW_MESSAGES_THRESHOLD_PX));
+    assert.isTrue(shouldFollowNewMessage(NEW_MESSAGES_THRESHOLD_PX, NEW_MESSAGES_THRESHOLD_PX));
+    assert.isFalse(
+      shouldFollowNewMessage(NEW_MESSAGES_THRESHOLD_PX + 1, NEW_MESSAGES_THRESHOLD_PX),
+    );
+    assert.isFalse(shouldFollowNewMessage(800, NEW_MESSAGES_THRESHOLD_PX));
   });
 });
 
