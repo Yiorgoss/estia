@@ -119,6 +119,7 @@ export const chatThreadPage = (
   options: {
     readonly userId: typeof UserId.Type;
     readonly error?: string;
+    readonly draft?: string;
   },
 ) => {
   const counterpart = counterpartOf(detail, options.userId);
@@ -162,7 +163,7 @@ export const chatThreadPage = (
         <form id="chat-form" method="post" action="/chats/${detail.id}/messages" class="border-t border-gray-100 p-5">
           <label for="chat-body" class="block text-sm font-medium text-gray-900">Message</label>
           <textarea id="chat-body" name="body" rows="3" required maxlength="4000"
-                    class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"></textarea>
+                    class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none">${options.draft === undefined ? "" : escapeHtml(options.draft)}</textarea>
           <input type="hidden" name="clientMessageId" value="${crypto.randomUUID()}" />
           <div class="mt-3 flex items-center gap-3">
             <button type="submit" class="${primaryButtonClass}">Send</button>
@@ -198,6 +199,7 @@ export const chatThreadPage = (
         let socket = null;
         let retry = 0;
         let leaving = false;
+        let pending = null;
 
         const setStatus = (text) => {
           if (status !== null) status.textContent = text;
@@ -237,7 +239,7 @@ export const chatThreadPage = (
           if (empty !== null) empty.remove();
           list.appendChild(fragment);
           item.scrollIntoView({ block: "end" });
-          setStatus("");
+          if (pending === null) setStatus("");
         };
 
         const connect = () => {
@@ -257,11 +259,28 @@ export const chatThreadPage = (
             } catch {
               return;
             }
-            if (frame.type === "message") append(frame.message);
-            else if (frame.type === "error") setStatus(frame.message || "That message was refused.");
+            if (frame.type === "message") {
+              append(frame.message);
+              if (pending !== null && frame.message.clientMessageId === pending.clientMessageId) {
+                const sent = pending.body;
+                pending = null;
+                if (input.value.trim() === sent) input.value = "";
+                setStatus("");
+              }
+            } else if (frame.type === "error") {
+              if (pending !== null) {
+                input.value = pending.body;
+                pending = null;
+              }
+              setStatus(frame.message || "That message was refused.");
+            }
           });
           socket.addEventListener("close", () => {
             socket = null;
+            if (pending !== null) {
+              input.value = pending.body;
+              pending = null;
+            }
             if (leaving) return;
             setStatus("Reconnecting...");
             const wait = Math.min(1000 * Math.pow(2, retry), 8000);
@@ -273,10 +292,17 @@ export const chatThreadPage = (
         form.addEventListener("submit", (event) => {
           if (socket === null || socket.readyState !== 1) return;
           event.preventDefault();
+          if (pending !== null) return;
           const body = input.value.trim();
           if (body === "") return;
-          socket.send(JSON.stringify({ type: "send", clientMessageId: newId(), body: body }));
-          input.value = "";
+          pending = { clientMessageId: newId(), body: body };
+          socket.send(
+            JSON.stringify({
+              type: "send",
+              clientMessageId: pending.clientMessageId,
+              body: pending.body,
+            }),
+          );
           setStatus("Sending...");
         });
 

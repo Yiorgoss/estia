@@ -17,8 +17,7 @@ const users = await Effect.runPromise(
     const owner = yield* register("chat-owner");
     const seeker = yield* register("chat-seeker");
     const other = yield* register("chat-other");
-    // A name on the owner's profile is what the other side's inbox shows; without
-    // one the row falls back to the account's email.
+    // A name on the owner's profile is what the other side's inbox shows.
     yield* send("PUT", "/api/users/profile", {
       cookie: owner.cookie,
       payload: { name: "Owner Name", dateOfBirth: 946684800000, gender: "NB" },
@@ -65,12 +64,21 @@ const createListing = (
     return { id, title: String(listing["title"]) };
   });
 
-const startChat = (seeker: TestUser, listingId: number, body: string) =>
+const startChat = (
+  seeker: TestUser,
+  listingId: number,
+  body: string,
+  clientMessageId?: string,
+) =>
   call(
     "/chats/start",
     form(
       { method: "POST", headers: { cookie: seeker.cookie, origin: testOrigin } },
-      { listingId: String(listingId), body },
+      {
+        listingId: String(listingId),
+        body,
+        ...(clientMessageId === undefined ? {} : { clientMessageId }),
+      },
     ),
   );
 
@@ -155,6 +163,24 @@ describe("starting a chat from a listing", () => {
       );
       const seekerInbox = yield* inbox(users.seeker);
       assert.strictEqual(seekerInbox.filter((item) => Number(item["id"]) === chatId).length, 1);
+    }),
+  );
+
+  it.effect("writes one message when the contact form is submitted twice with the same id", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const first = yield* startChat(users.seeker, listing.id, "Double click", "contact-1");
+      const second = yield* startChat(users.seeker, listing.id, "Double click", "contact-1");
+      assert.strictEqual(first.status, 303, first.body);
+      assert.strictEqual(second.status, 303, second.body);
+
+      const chatId = chatIdFrom(first.location);
+      assert.strictEqual(chatIdFrom(second.location), chatId);
+      const page = yield* messages(users.seeker, chatId);
+      assert.deepEqual(
+        page.items.map((item) => item["body"]),
+        ["Double click"],
+      );
     }),
   );
 
@@ -258,6 +284,36 @@ describe("the chat JSON API", () => {
 
       const page = yield* messages(users.seeker, chatId);
       assert.strictEqual(page.items.length, 2);
+    }),
+  );
+
+  it.effect("stores the same client id from each participant as its own message", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const started = yield* startChat(users.seeker, listing.id, "Contact");
+      const chatId = chatIdFrom(started.location);
+
+      const fromSeeker = yield* postMessage(users.seeker, chatId, {
+        body: "Seeker text",
+        clientMessageId: "shared-id",
+      });
+      const fromOwner = yield* postMessage(users.owner, chatId, {
+        body: "Owner text",
+        clientMessageId: "shared-id",
+      });
+      assert.strictEqual(fromSeeker.status, 200, fromSeeker.body);
+      assert.strictEqual(fromOwner.status, 200, fromOwner.body);
+      assert.notStrictEqual(asObject(fromSeeker.json)["seq"], asObject(fromOwner.json)["seq"]);
+
+      const page = yield* messages(users.seeker, chatId);
+      assert.deepEqual(
+        page.items.map((item) => [item["senderId"], item["body"]]),
+        [
+          [users.seeker.id, "Contact"],
+          [users.seeker.id, "Seeker text"],
+          [users.owner.id, "Owner text"],
+        ],
+      );
     }),
   );
 
@@ -412,6 +468,32 @@ describe("the chat pages", () => {
     }),
   );
 
+  it.effect("never shows either account's email as a chat label", () =>
+    Effect.gen(function* () {
+      const freshOwner = yield* register("chat-fresh-owner");
+      const freshSeeker = yield* register("chat-fresh-seeker");
+      const listing = yield* createListing(freshOwner);
+      const started = yield* startChat(freshSeeker, listing.id, "No names here");
+      const chatId = chatIdFrom(started.location);
+
+      const ownerInbox = yield* call("/chats", {
+        headers: { cookie: freshOwner.cookie, "user-agent": "estia-tests" },
+      });
+      assert.strictEqual(ownerInbox.status, 200, ownerInbox.body);
+      assert.include(ownerInbox.body, "Member");
+      assert.notInclude(ownerInbox.body, freshSeeker.email);
+      assert.notInclude(ownerInbox.body, freshOwner.email);
+
+      const thread = yield* call(`/chats/${chatId}`, {
+        headers: { cookie: freshOwner.cookie, "user-agent": "estia-tests" },
+      });
+      assert.strictEqual(thread.status, 200, thread.body);
+      assert.include(thread.body, "Member");
+      assert.notInclude(thread.body, freshSeeker.email);
+      assert.notInclude(thread.body, freshOwner.email);
+    }),
+  );
+
   it.effect("explains a rejected reply on the thread instead of dropping it", () =>
     Effect.gen(function* () {
       const listing = yield* createListing(users.owner);
@@ -427,6 +509,25 @@ describe("the chat pages", () => {
       );
       assert.strictEqual(refused.status, 400, refused.body);
       assert.include(refused.body, "1 to 4000 characters");
+    }),
+  );
+
+  it.effect("keeps the rejected text in the form when the reply is refused", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const started = yield* startChat(users.seeker, listing.id, "Hello");
+      const chatId = chatIdFrom(started.location);
+      const draft = `draft-${"x".repeat(4000)}`;
+
+      const refused = yield* call(
+        `/chats/${chatId}/messages`,
+        form(
+          { method: "POST", headers: { cookie: users.owner.cookie, origin: testOrigin } },
+          { body: draft, clientMessageId: "too-long" },
+        ),
+      );
+      assert.strictEqual(refused.status, 400, refused.body);
+      assert.include(refused.body, draft);
     }),
   );
 

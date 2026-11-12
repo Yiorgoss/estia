@@ -28,16 +28,14 @@ import type { SqlError } from "effect/sql/SqlError";
 /*
  * The name a person is shown under. A participant holds one profile kind and a
  * profile row can exist before a name is filled in, so the expression falls back
- * to the account's own email - the identity the two sides already exchanged when
- * the chat started - and only then to a stand-in. The expression is raw SQL, so
- * it is passed as a literal: a `sql` interpolation would send it as a bound value.
+ * to a neutral label rather than to any account detail. The expression is raw SQL,
+ * so it is passed as a literal: a `sql` interpolation would send it as a bound value.
  */
-const PARTICIPANT_NAME = "COALESCE(s.name, li.name, u.email, 'Member')";
+const PARTICIPANT_NAME = "COALESCE(s.name, li.name, 'Member')";
 
 const participantJoins = (userAlias: string) => `
   LEFT JOIN seekers AS s ON s.user_id = ${userAlias}.user_id
-  LEFT JOIN listers AS li ON li.user_id = ${userAlias}.user_id
-  LEFT JOIN users AS u ON u.id = ${userAlias}.user_id`;
+  LEFT JOIN listers AS li ON li.user_id = ${userAlias}.user_id`;
 
 export interface ChatRepository {
   /*

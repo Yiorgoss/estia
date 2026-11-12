@@ -1,4 +1,5 @@
 import { CHAT_MESSAGE_PAGE_MAX_LIMIT, decodeChatId, SendMessageInput } from "@/db/schema/Chat";
+import type { ChatId, UserId } from "@/db/schema/brands";
 import { decodeListingId } from "@/db/schema/Listing";
 import { chatErrorPage, chatInboxPage, chatThreadPage } from "@/frontend/pages/chats";
 import { crossSiteFormMessage, isSameOriginWrite } from "@/handlers/same-origin";
@@ -109,6 +110,39 @@ const describeError = (
   }
 };
 
+const threadErrorResponse = (
+  userId: typeof UserId.Type,
+  chatId: typeof ChatId.Type,
+  failure: { readonly title: string; readonly message: string; readonly status: number },
+  draft: string | undefined,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, ChatService> =>
+  Effect.gen(function* () {
+    const chats = yield* ChatService;
+    const detail = yield* chats.openChat(userId, chatId);
+    const messages = yield* chats.listMessages(userId, chatId, {
+      after: Math.max(0, detail.lastSeq - CHAT_MESSAGE_PAGE_MAX_LIMIT),
+      limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,
+    });
+    return respond(
+      chatThreadPage(detail, messages, {
+        userId,
+        error: failure.message,
+        ...(draft === undefined || draft === "" ? {} : { draft }),
+      }),
+      failure.status,
+    );
+  }).pipe(
+    Effect.orElseSucceed(() =>
+      respond(
+        chatErrorPage(failure.title, failure.message, {
+          backHref: `/chats/${chatId}`,
+          backLabel: "Back to the chat",
+        }),
+        failure.status,
+      ),
+    ),
+  );
+
 const chatInboxRoute = HttpRouter.route("GET", "/chats", () =>
   Effect.gen(function* () {
     const userId = yield* callerId;
@@ -213,9 +247,18 @@ const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (reques
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeChatId(params["id"]));
     if (id === undefined) return missingChatResponse();
 
-    const decoded = decodeMessageForm(yield* readForm(request));
+    const params = yield* readForm(request);
+    const rawBody = params["body"];
+    const draft = typeof rawBody === "string" ? rawBody : undefined;
+    const decoded = decodeMessageForm(params);
     if (!decoded.ok) {
-      return respond(chatErrorPage("That message could not be sent", decoded.message), 400);
+      const userId = yield* callerId;
+      return yield* threadErrorResponse(
+        userId,
+        id,
+        { title: "That message could not be sent", message: decoded.message, status: 400 },
+        draft,
+      );
     }
 
     const userId = yield* callerId;
@@ -223,29 +266,14 @@ const sendMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (reques
     return yield* chats.sendMessage(userId, id, decoded.input).pipe(
       Effect.map(() => seeOther(`/chats/${id}`)),
       Effect.catch((error: ChatPageError) => {
-        const { title, message, status } = describeError(error);
+        const failure = describeError(error);
         // An unknown or foreign chat has no thread to re-read.
         if (error._tag === "ChatNotFoundError") {
-          return Effect.succeed(respond(chatErrorPage(title, message), status));
+          return Effect.succeed(
+            respond(chatErrorPage(failure.title, failure.message), failure.status),
+          );
         }
-        return Effect.gen(function* () {
-          const detail = yield* chats.openChat(userId, id);
-          const messages = yield* chats.listMessages(userId, id, {
-            after: Math.max(0, detail.lastSeq - CHAT_MESSAGE_PAGE_MAX_LIMIT),
-            limit: CHAT_MESSAGE_PAGE_MAX_LIMIT,
-          });
-          return respond(chatThreadPage(detail, messages, { userId, error: message }), status);
-        }).pipe(
-          Effect.orElseSucceed(() =>
-            respond(
-              chatErrorPage(title, message, {
-                backHref: `/chats/${id}`,
-                backLabel: "Back to the chat",
-              }),
-              status,
-            ),
-          ),
-        );
+        return threadErrorResponse(userId, id, failure, decoded.input.body);
       }),
     );
   }),

@@ -132,7 +132,6 @@ describe("chatThreadPage", () => {
     assert.include(html, "12 Nov, 10:20");
     // The socket client and the element it clones for a live message.
     assert.include(html, 'id="chat-message-template"');
-    assert.include(html, '"/api/chats/" + chatId + "/socket?after="');
   });
 
   it("escapes a message body instead of executing it", () => {
@@ -164,6 +163,18 @@ describe("chatThreadPage", () => {
     });
 
     assert.include(html, "Wait a few seconds");
+  });
+
+  it("keeps the rejected draft in the form and escapes it", () => {
+    const draft = '<script>alert("draft")</script>';
+    const html = chatThreadPage(detail(), thread([message()]), {
+      userId: user("user-seeker"),
+      error: "That message could not be sent.",
+      draft,
+    });
+
+    assert.include(html, "&lt;script&gt;alert(&quot;draft&quot;)&lt;/script&gt;");
+    assert.notInclude(html, draft);
   });
 });
 

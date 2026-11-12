@@ -9,12 +9,12 @@
  * for its access tokens, and the object accepts an identity only from a ticket
  * whose signature it can verify.
  *
- * The payload carries an id, a chat id, and an expiry, and nothing else: the
- * object needs no name, no role and no message. A ticket is good for one
- * connection and one minute - long enough for the upgrade to arrive, short enough
- * that a leaked ticket is cold before it is worth stealing. The `exp` also
- * caps how long a live socket may stay authorised, which the object enforces
- * with an alarm.
+ * The payload carries an id, a chat id, a ticket expiry, and the session expiry,
+ * and nothing else: the object needs no name, no role and no message. A ticket is
+ * good for one connection and one minute - long enough for the upgrade to arrive,
+ * short enough that a leaked ticket is cold before it is worth stealing. The
+ * session expiry caps how long a live socket may stay authorised; the object
+ * enforces it with an alarm.
  */
 
 export const CHAT_TICKET_HEADER = "x-chat-ticket";
@@ -27,6 +27,7 @@ export interface ChatTicket {
   readonly userId: string;
   readonly chatId: number;
   readonly exp: number;
+  readonly sessionExp: number;
 }
 
 const encoder = new TextEncoder();
@@ -67,7 +68,14 @@ const hmacKey = (secret: string) =>
  */
 export const signChatTicket = async (secret: string, ticket: ChatTicket): Promise<string> => {
   const payload = base64Url(
-    encoder.encode(JSON.stringify({ u: ticket.userId, c: ticket.chatId, e: ticket.exp })),
+    encoder.encode(
+      JSON.stringify({
+        u: ticket.userId,
+        c: ticket.chatId,
+        e: ticket.exp,
+        s: ticket.sessionExp,
+      }),
+    ),
   );
   const signature = new Uint8Array(
     await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(payload)),
@@ -77,7 +85,7 @@ export const signChatTicket = async (secret: string, ticket: ChatTicket): Promis
 
 /*
  * A ticket is valid only when the signature verifies, the payload decodes to the
- * three expected fields, and its expiry has not passed. Verification is the
+ * expected fields, and its expiry has not passed. Verification is the
  * subtle-crypto comparison, so it is constant time; every failure answers
  * `undefined` rather than describing what was wrong, because the only caller is
  * the object and it answers the socket with the same refusal either way.
@@ -112,15 +120,17 @@ export const verifyChatTicket = async (
   }
   if (typeof decoded !== "object" || decoded === null) return undefined;
 
-  const { u, c, e } = decoded as {
+  const { u, c, e, s } = decoded as {
     readonly u?: unknown;
     readonly c?: unknown;
     readonly e?: unknown;
+    readonly s?: unknown;
   };
   if (typeof u !== "string" || u === "") return undefined;
   if (typeof c !== "number" || !Number.isSafeInteger(c) || c <= 0) return undefined;
   if (typeof e !== "number" || !Number.isFinite(e)) return undefined;
   if (e <= now) return undefined;
+  if (typeof s !== "number" || !Number.isFinite(s) || s <= now) return undefined;
 
-  return { userId: u, chatId: c, exp: e };
+  return { userId: u, chatId: c, exp: e, sessionExp: s };
 };

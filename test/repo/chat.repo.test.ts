@@ -154,9 +154,10 @@ layer(TestLive, { concurrent: false })("ChatRepository", (it) => {
     }),
   );
 
-  it.effect("falls back to the account email when no profile carries a name", () =>
+  it.effect("uses a neutral label when no profile carries a name", () =>
     Effect.gen(function* () {
-      // No profile rows at all: the inbox still has an identity to show.
+      // Registration creates the profile rows without a name; the chat must not
+      // fall back to either account's email.
       yield* insertUser("u-noname-owner", "noname-owner@chat-repo.test", "lister");
       yield* insertUser("u-noname-seeker", "noname-seeker@chat-repo.test", "seeker");
       yield* insertListing(9, "u-noname-owner", { status: "published" });
@@ -176,10 +177,16 @@ layer(TestLive, { concurrent: false })("ChatRepository", (it) => {
       });
 
       const ownerInbox = yield* repo.listInbox(userId("u-noname-owner"), 10);
-      assert.strictEqual(ownerInbox[0]?.counterpartName, "noname-seeker@chat-repo.test");
+      assert.strictEqual(ownerInbox[0]?.counterpartName, "Member");
 
       const seekerInbox = yield* repo.listInbox(userId("u-noname-seeker"), 10);
-      assert.strictEqual(seekerInbox[0]?.counterpartName, "noname-owner@chat-repo.test");
+      assert.strictEqual(seekerInbox[0]?.counterpartName, "Member");
+
+      const participants = yield* repo.listParticipants(chat.id);
+      assert.deepEqual(
+        participants.map((participant) => participant.name),
+        ["Member", "Member"],
+      );
     }),
   );
 

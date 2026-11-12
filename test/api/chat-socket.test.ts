@@ -228,7 +228,8 @@ describe("handleChatSocketUpgrade", () => {
     "forwards a participant's upgrade with a signed ticket and none of the client's identity",
     () =>
       Effect.gen(function* () {
-        const token = yield* Effect.promise(() => accessToken(SEEKER));
+        const expiresAt = Math.floor(Date.now() / 1000) + 1_800;
+        const token = yield* Effect.promise(() => accessToken(SEEKER, expiresAt));
         const allowed = yield* upgrade({
           cookie: `access_token=${token}`,
           after: 3,
@@ -265,6 +266,8 @@ describe("handleChatSocketUpgrade", () => {
         assert.isDefined(ticket, "the forwarded ticket verifies with the app's secret");
         assert.strictEqual(ticket?.userId, SEEKER);
         assert.strictEqual(ticket?.chatId, chatId);
+        assert.isAbove(ticket?.sessionExp ?? 0, (ticket?.exp ?? 0) + 60_000);
+        assert.isBelow(Math.abs((ticket?.sessionExp ?? 0) - expiresAt * 1000), 5_000);
       }),
   );
 });

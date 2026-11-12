@@ -28,6 +28,8 @@ const rotated = {
   refreshToken: Schema.decodeUnknownSync(RefreshTokenValue)("rotated-refresh"),
 };
 
+const accessExpiresAt = 1_700_000_000_000;
+
 const unused = () => Effect.die("the test stub does not implement this path");
 
 interface StubOptions {
@@ -40,17 +42,25 @@ type FlowFailure = RefreshTokenRotatedError | RefreshTokenNotFoundError;
 const AuthStub = (calls: Ref.Ref<number>, failure: StubOptions["failure"]) =>
   Layer.succeed(AuthService, {
     tokenAuthFlow: (): Effect.Effect<
-      { readonly user: typeof caller; readonly tokens: typeof rotated },
+      {
+        readonly user: typeof caller;
+        readonly tokens: typeof rotated;
+        readonly accessExpiresAt: number;
+      },
       FlowFailure
     > =>
       Effect.flatMap(
         Ref.update(calls, (count) => count + 1),
         (): Effect.Effect<
-          { readonly user: typeof caller; readonly tokens: typeof rotated },
+          {
+            readonly user: typeof caller;
+            readonly tokens: typeof rotated;
+            readonly accessExpiresAt: number;
+          },
           FlowFailure
         > =>
           failure === undefined
-            ? Effect.succeed({ user: caller, tokens: rotated })
+            ? Effect.succeed({ user: caller, tokens: rotated, accessExpiresAt })
             : Effect.fail<FlowFailure>(
                 failure === "rotated"
                   ? new RefreshTokenRotatedError()
@@ -137,6 +147,7 @@ describe("resolving a request's session", () => {
       assert.strictEqual(yield* Ref.get(calls), 1);
       if (session._tag !== "caller") return;
       assert.strictEqual(session.caller, caller.id);
+      assert.strictEqual(session.accessExpiresAt, accessExpiresAt);
       assert.deepStrictEqual(
         session.cookies.map(([name, value]) => [name, value]),
         [

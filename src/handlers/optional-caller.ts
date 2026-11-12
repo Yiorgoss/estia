@@ -26,6 +26,7 @@ export type OptionalCallerSession =
   | {
       readonly _tag: "caller";
       readonly caller: typeof UserId.Type;
+      readonly accessExpiresAt: number;
       readonly cookies: ReadonlyArray<
         readonly [name: string, value: string, options?: Cookies.Cookie["options"]]
       >;
@@ -72,7 +73,7 @@ export const sessionResolver: Effect.Effect<
       if (accessToken === null && refreshToken === null) return anonymous;
 
       return yield* auth.tokenAuthFlow({ accessToken, refreshToken }, request.userAgent).pipe(
-        Effect.flatMap(({ tokens, user }) =>
+        Effect.flatMap(({ tokens, user, accessExpiresAt }) =>
           Effect.gen(function* () {
             const cookies: Array<readonly [string, string, Cookies.Cookie["options"]?]> = [];
             if (tokens.accessToken != null) {
@@ -81,7 +82,12 @@ export const sessionResolver: Effect.Effect<
             if (tokens.refreshToken != null) {
               cookies.push(yield* refreshTokenService.asCookie(tokens.refreshToken));
             }
-            return { _tag: "caller", caller: user.id, cookies } as const;
+            return {
+              _tag: "caller",
+              caller: user.id,
+              accessExpiresAt,
+              cookies,
+            } as const;
           }),
         ),
         Effect.catchTags({

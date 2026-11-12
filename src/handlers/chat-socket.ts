@@ -104,7 +104,11 @@ export const handleChatSocketUpgrade = async (
       if (!member) return { _tag: "forbidden" } as const;
 
       const tickets = yield* ChatTicketService;
-      const ticket = yield* tickets.sign({ userId: session.caller, chatId });
+      const ticket = yield* tickets.sign({
+        userId: session.caller,
+        chatId,
+        sessionExpiresAt: session.accessExpiresAt,
+      });
       return { _tag: "authorised", ticket, cookies: session.cookies } as const;
     }).pipe(
       Effect.catchTags({

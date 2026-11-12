@@ -18,10 +18,10 @@ export class ChatTicketSigningError extends Schema.TaggedError<ChatTicketSigning
 ) {}
 
 export interface ChatTicketService {
-  readonly ttlMs: number;
   readonly sign: (values: {
     readonly userId: string;
     readonly chatId: number;
+    readonly sessionExpiresAt?: number;
   }) => Effect.Effect<string, ChatTicketSigningError>;
 }
 
@@ -33,14 +33,18 @@ export const ChatTicketServiceLive = Layer.effect(
     const secret = yield* Config.String("JWT_SECRET");
 
     return {
-      ttlMs: CHAT_TICKET_TTL_MS,
       sign: (values) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           const exp = now + CHAT_TICKET_TTL_MS;
           return yield* Effect.tryPromise({
             try: () =>
-              signChatTicket(secret, { userId: values.userId, chatId: values.chatId, exp }),
+              signChatTicket(secret, {
+                userId: values.userId,
+                chatId: values.chatId,
+                exp,
+                sessionExp: values.sessionExpiresAt ?? exp,
+              }),
             catch: (cause) => new ChatTicketSigningError({ cause }),
           });
         }),
