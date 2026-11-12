@@ -173,6 +173,22 @@ const contactSection = (listing: PublicListing, contact: ListingContact): string
                   class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"></textarea>
         <button type="submit" class="mt-3 ${primaryButtonClass}">Send message</button>
       </form>
+      <script>
+        (() => {
+          const form = document.querySelector('form[action="/chats/start"]');
+          if (form === null) return;
+          const input = form.querySelector('textarea[name="body"]');
+          const clientMessageId = form.querySelector('input[name="clientMessageId"]');
+          if (input === null || clientMessageId === null) return;
+          const newId = () =>
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : String(Date.now()) + Math.random().toString(16).slice(2);
+          input.addEventListener("input", () => {
+            clientMessageId.value = newId();
+          });
+        })();
+      </script>
     </section>`;
 };
 

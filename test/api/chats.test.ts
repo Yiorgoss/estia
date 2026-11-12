@@ -1,4 +1,4 @@
-import { CHAT_MESSAGE_MAX_LENGTH } from "@/db/schema/Chat";
+import { CHAT_MESSAGE_MAX_LENGTH, CHAT_MESSAGE_PAGE_MAX_LIMIT } from "@/db/schema/Chat";
 import { asObject, call, form, register, send, testOrigin } from "../support/api";
 import type { TestUser } from "../support/api";
 import { assert, describe, it } from "@effect/vitest";
@@ -106,6 +106,7 @@ const messages = (user: TestUser, chatId: number, query = "") =>
     const body = asObject(response.json);
     return {
       lastSeq: Number(body["lastSeq"]),
+      hasEarlier: body["hasEarlier"] === true,
       items: body["items"] as ReadonlyArray<Record<string, unknown>>,
     };
   });
@@ -313,6 +314,69 @@ describe("the chat JSON API", () => {
         missed.items.map((item) => item["seq"]),
         [2, 3],
       );
+    }),
+  );
+
+  it.effect("pages older history back to the first message without gaps or repeats", () =>
+    Effect.gen(function* () {
+      const listing = yield* createListing(users.owner);
+      const started = yield* startChat(users.seeker, listing.id, "History 0");
+      const chatId = chatIdFrom(started.location);
+      const total = CHAT_MESSAGE_PAGE_MAX_LIMIT + 5;
+
+      for (let index = 1; index < total; index += 1) {
+        const sent = yield* postMessage(users.seeker, chatId, {
+          body: `History ${index}`,
+          clientMessageId: `history-${index}`,
+        });
+        assert.strictEqual(sent.status, 200, sent.body);
+      }
+
+      let page = yield* messages(
+        users.seeker,
+        chatId,
+        `?before=${total + 1}&limit=${CHAT_MESSAGE_PAGE_MAX_LIMIT}`,
+      );
+      assert.strictEqual(page.lastSeq, total);
+      assert.isTrue(page.hasEarlier);
+      assert.strictEqual(page.items.length, CHAT_MESSAGE_PAGE_MAX_LIMIT);
+
+      const collected = page.items.map((item) => Number(item["seq"]));
+      let firstSeq = collected[0] ?? 0;
+      while (page.hasEarlier) {
+        page = yield* messages(
+          users.seeker,
+          chatId,
+          `?before=${firstSeq}&limit=${CHAT_MESSAGE_PAGE_MAX_LIMIT}`,
+        );
+        const seqs = page.items.map((item) => Number(item["seq"]));
+        collected.unshift(...seqs);
+        if (seqs.length === 0) break;
+        firstSeq = seqs[0] ?? 0;
+      }
+
+      assert.deepEqual(
+        collected,
+        Array.from({ length: total }, (_, index) => index + 1),
+      );
+
+      const both = yield* call(
+        `/api/chats/${chatId}/messages?after=1&before=2`,
+        { headers: { cookie: users.seeker.cookie } },
+      );
+      assert.strictEqual(both.status, 400, both.body);
+
+      const refused = yield* call(
+        `/chats/${chatId}/messages`,
+        form(
+          { method: "POST", headers: { cookie: users.seeker.cookie, origin: testOrigin } },
+          { body: "   ", clientMessageId: "submitted-id" },
+        ),
+      );
+      assert.strictEqual(refused.status, 400, refused.body);
+      assert.include(refused.body, 'id="chat-load-earlier"');
+      assert.include(refused.body, 'name="clientMessageId" value="submitted-id"');
+      assert.include(refused.body, `data-seq="${total}"`);
     }),
   );
 

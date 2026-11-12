@@ -1,5 +1,6 @@
 import {
   CHAT_MESSAGE_MAX_LENGTH,
+  CHAT_MESSAGE_PAGE_MAX_LIMIT,
   type ChatDetail,
   type ChatInbox,
   type ChatMessage,
@@ -20,10 +21,11 @@ import { escapeHtml, formatDateTime } from "@/utils";
  * Both are server-rendered. The thread page carries one small inline script that
  * upgrades it to live delivery: it opens the socket after the newest sequence
  * number it rendered, appends what arrives, acknowledges what the visible thread
- * has shown, and reconnects with that same number after a drop or a back/forward
- * cache restore, so a hibernated object and a sleeping laptop both resume where
- * the reader left off. Without the script the page still works - the form posts
- * to the no-socket fallback and the browser reloads the thread.
+ * has shown, loads earlier pages above the current window, and reconnects with
+ * the same newest number after a drop or a back/forward cache restore, so a
+ * hibernated object and a sleeping laptop both resume where the reader left off.
+ * Without the script the page still works - the form posts to the no-socket
+ * fallback and the browser reloads the thread.
  */
 
 const counterpartOf = (detail: ChatDetail, userId: typeof UserId.Type) =>
@@ -49,9 +51,8 @@ const messageItem = (
   detail: ChatDetail,
   message: ChatMessage,
   userId: typeof UserId.Type,
-  extra = "",
 ): string => `
-  <li class="${messageBoxClass(isMine(message, userId))}${extra}" data-seq="${message.seq}">
+  <li class="${messageBoxClass(isMine(message, userId))}" data-seq="${message.seq}">
     <p class="text-xs font-medium text-gray-500">${escapeHtml(senderLabel(detail, message, userId))}</p>
     <p class="mt-1 whitespace-pre-line break-words text-sm text-gray-800">${escapeHtml(message.body)}</p>
     <time class="mt-1 block text-xs text-gray-400">${escapeHtml(formatDateTime(message.createdAt) ?? "")}</time>
@@ -127,6 +128,7 @@ export const chatThreadPage = (
     readonly userId: typeof UserId.Type;
     readonly error?: string;
     readonly draft?: string;
+    readonly clientMessageId?: string;
   },
 ) => {
   const counterpart = counterpartOf(detail, options.userId);
@@ -158,6 +160,12 @@ export const chatThreadPage = (
 
         <div class="space-y-3 p-5">
           ${errorBanner(options.error)}
+          ${
+            messages.hasEarlier && messages.items.length > 0
+              ? `<button type="button" id="chat-load-earlier" class="${secondaryButtonClass}"
+                         data-before="${messages.items[0]?.seq ?? 0}" data-limit="${CHAT_MESSAGE_PAGE_MAX_LIMIT}">Load earlier messages</button>`
+              : ""
+          }
           <ul id="chat-messages" class="space-y-3" aria-live="polite">
             ${messages.items.map((message) => messageItem(detail, message, options.userId)).join("")}
           </ul>
@@ -172,7 +180,7 @@ export const chatThreadPage = (
           <label for="chat-body" class="block text-sm font-medium text-gray-900">Message</label>
           <textarea id="chat-body" name="body" rows="3" required maxlength="${CHAT_MESSAGE_MAX_LENGTH}"
                     class="mt-2 block w-full rounded-md border border-gray-300 p-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none">${options.draft === undefined ? "" : escapeHtml(options.draft)}</textarea>
-          <input type="hidden" name="clientMessageId" value="${crypto.randomUUID()}" />
+          <input type="hidden" name="clientMessageId" value="${options.clientMessageId ?? crypto.randomUUID()}" />
           <div class="mt-3 flex items-center gap-3">
             <button type="submit" class="${primaryButtonClass}">Send</button>
             <p id="chat-status" class="text-sm text-gray-500" role="status"></p>
@@ -203,12 +211,16 @@ export const chatThreadPage = (
         const template = document.getElementById("chat-message-template");
         if (list === null || form === null || input === null || template === null) return;
 
+        const clientMessageIdInput = form.querySelector('input[name="clientMessageId"]');
+        const loadEarlierButton = document.getElementById("chat-load-earlier");
+
         let lastSeq = Number(root.dataset.lastSeq || "0");
         let acknowledged = Number(root.dataset.lastReadSeq || "0");
         let socket = null;
         let retry = 0;
         let leaving = false;
         let pending = null;
+        let reconnectTimer = null;
 
         const setStatus = (text) => {
           if (status !== null) status.textContent = text;
@@ -233,11 +245,8 @@ export const chatThreadPage = (
             ? crypto.randomUUID()
             : String(Date.now()) + Math.random().toString(16).slice(2);
 
-        const append = (message) => {
+        const renderMessage = (message) => {
           const seq = Number(message.seq);
-          if (!Number.isFinite(seq) || seq <= lastSeq) return;
-          lastSeq = seq;
-
           const fragment = template.content.cloneNode(true);
           const item = fragment.querySelector("li");
           item.className =
@@ -257,10 +266,74 @@ export const chatThreadPage = (
             minute: "2-digit",
             timeZone: "UTC",
           });
+          return item;
+        };
 
+        const prepend = (items) => {
+          if (items.length === 0) return;
+          const anchor = list.firstElementChild;
+          const anchorTop = anchor === null ? 0 : anchor.getBoundingClientRect().top;
+          const fragment = document.createDocumentFragment();
+          for (const message of items) fragment.appendChild(renderMessage(message));
+          list.insertBefore(fragment, list.firstChild);
+          if (anchor !== null) {
+            window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
+          }
           const empty = document.getElementById("chat-empty");
           if (empty !== null) empty.remove();
-          list.appendChild(fragment);
+        };
+
+        const loadEarlier = () => {
+          if (loadEarlierButton === null) return;
+          const before = Number(loadEarlierButton.dataset.before || "0");
+          const limit = Number(loadEarlierButton.dataset.limit || "0");
+          if (!Number.isFinite(before) || before <= 0 || limit <= 0) return;
+          loadEarlierButton.disabled = true;
+          void fetch(
+            "/api/chats/" +
+              chatId +
+              "/messages?before=" +
+              before +
+              "&limit=" +
+              limit,
+          )
+            .then((response) => {
+              if (!response.ok) throw new Error(String(response.status));
+              return response.json();
+            })
+            .then((page) => {
+              const items = Array.isArray(page.items) ? page.items : [];
+              prepend(items);
+              if (page.hasEarlier === true && items.length > 0) {
+                loadEarlierButton.dataset.before = String(items[0].seq);
+                loadEarlierButton.disabled = false;
+              } else {
+                loadEarlierButton.remove();
+              }
+            })
+            .catch(() => {
+              loadEarlierButton.disabled = false;
+              setStatus("Earlier messages could not be loaded.");
+            });
+        };
+
+        if (loadEarlierButton !== null) {
+          loadEarlierButton.addEventListener("click", loadEarlier);
+        }
+
+        input.addEventListener("input", () => {
+          if (clientMessageIdInput !== null) clientMessageIdInput.value = newId();
+        });
+
+        const append = (message) => {
+          const seq = Number(message.seq);
+          if (!Number.isFinite(seq) || seq <= lastSeq) return;
+          lastSeq = seq;
+
+          const item = renderMessage(message);
+          const empty = document.getElementById("chat-empty");
+          if (empty !== null) empty.remove();
+          list.appendChild(item);
           item.scrollIntoView({ block: "end" });
           if (pending === null) setStatus("");
           acknowledge();
@@ -268,6 +341,10 @@ export const chatThreadPage = (
 
         const connect = () => {
           if (leaving) return;
+          if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
           const protocol = location.protocol === "https:" ? "wss:" : "ws:";
           socket = new WebSocket(
             protocol + "//" + location.host + "/api/chats/" + chatId + "/socket?after=" + lastSeq,
@@ -316,12 +393,19 @@ export const chatThreadPage = (
             setStatus("Reconnecting...");
             const wait = Math.min(1000 * Math.pow(2, retry), 8000);
             retry += 1;
-            setTimeout(connect, wait);
+            reconnectTimer = setTimeout(connect, wait);
           });
         };
 
         form.addEventListener("submit", (event) => {
           if (socket === null || socket.readyState !== 1) {
+            if (
+              pending !== null &&
+              clientMessageIdInput !== null &&
+              input.value.trim() === pending.body
+            ) {
+              clientMessageIdInput.value = pending.clientMessageId;
+            }
             pending = null;
             return;
           }
@@ -342,11 +426,19 @@ export const chatThreadPage = (
 
         window.addEventListener("pagehide", () => {
           leaving = true;
+          if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
           if (socket !== null) socket.close();
         });
 
         window.addEventListener("pageshow", (event) => {
           if (!event.persisted) return;
+          if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
           leaving = false;
           if (socket === null) connect();
           acknowledge();

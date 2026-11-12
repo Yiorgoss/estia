@@ -266,6 +266,20 @@ layer(TestLive, { concurrent: false })("ChatRepository", (it) => {
         limited.map((message) => message.seq),
         [2],
       );
+
+      const beforeThird = yield* repo.listBefore(chatId(chat.id), 3, 10);
+      assert.deepEqual(
+        beforeThird.map((message) => message.seq),
+        [1, 2],
+      );
+
+      const nearestBeforeFourth = yield* repo.listBefore(chatId(chat.id), 4, 2);
+      assert.deepEqual(
+        nearestBeforeFourth.map((message) => message.seq),
+        [2, 3],
+      );
+
+      assert.deepEqual(yield* repo.listBefore(chatId(chat.id), 1, 10), []);
     }),
   );
 

@@ -33,10 +33,11 @@ export const ChatHandler = HttpApiBuilder.group(PrivateApi, "chat-group", (handl
       Effect.gen(function* () {
         const userId = yield* callerId;
         const chats = yield* ChatService;
-        // `after` is absent on a first read and present on a reconnect; `limit`
-        // already carries its default from the query codec.
+        // `after` catches up after a reconnect, `before` pages older history,
+        // and `limit` already carries its default from the query codec.
         return yield* chats.listMessages(userId, params.id, {
-          after: query.after ?? 0,
+          ...(query.after === undefined ? {} : { after: query.after }),
+          ...(query.before === undefined ? {} : { before: query.before }),
           limit: query.limit,
         });
       }),
