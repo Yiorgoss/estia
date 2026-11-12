@@ -41,9 +41,10 @@ type SummarizableCriteria = {
 };
 
 /*
- * A readable name for a search saved without one. It reads in the same order
- * the form does - kind, region, price, size, flags, availability - and never
- * exceeds the name bound, so it can be stored as a name as-is.
+ * A readable summary of a search's criteria. It reads in the same order the form
+ * does - kind, region, price, size, flags, availability - and never exceeds the
+ * name bound, so it serves both as the name of a search saved without one and as
+ * the criteria line under a saved search's name in the list.
  */
 export const summarizeSavedSearch = (criteria: SummarizableCriteria): string => {
   // A search that narrows on nothing reads as the whole feed, not as a list of

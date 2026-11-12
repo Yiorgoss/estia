@@ -18,9 +18,10 @@ import { Effect, Option, Result, Schema } from "effect";
  *
  * A save and a delete answer the saved-search list fragment, which is the
  * element htmx targets. A request without htmx is a navigation and is answered
- * with a redirect, so a browser with no script still ends up on the search page
- * rather than staring at a fragment; only a refused cross-site write keeps the
- * status that describes it.
+ * with a redirect to the page its form came from, so a browser with no script
+ * still ends up on the search page or the listing profile rather than staring at
+ * a fragment; only a refused cross-site write keeps the status that describes
+ * it.
  */
 
 const respond = (body: string, status: number): HttpServerResponse.HttpServerResponse =>

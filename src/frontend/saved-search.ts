@@ -3,15 +3,15 @@ import { summarizeSavedSearch } from "@/services/saved-search.service";
 import { escapeHtml } from "@/utils";
 
 /*
- * The saved-search pieces around the results page. A saved search belongs to the
- * signed-in account, so none of this is rendered for a visitor: the page only
- * calls these when a session identified the caller.
+ * The saved-search pieces shared by the search page and the listing profile.
+ * A saved search belongs to the signed-in account, so none of this is rendered
+ * for a visitor: the page only calls these when a session identified the caller.
  */
 
 const inputClass =
   "w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
-// The apply link is a full navigation: the saved criteria become the form's
+// The row's Run link is a full navigation: the saved criteria become the form's
 // values and the results section's first request, so the page a person lands on
 // is the same page they would have reached by filling the form in by hand.
 export const savedSearchHref = (id: number): string => `/search?saved=${id}`;
