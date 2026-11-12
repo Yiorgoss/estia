@@ -1,9 +1,19 @@
 import { GreekRegionCodes, ListingKind } from "@/db/schema/Listing";
+import type { SavedSearch } from "@/db/schema/SavedSearch";
 import { kindLabels, regionLabels } from "../listing-labels";
 import { head } from "../head";
 import { header } from "../header";
+import { savedSearchesPanel, saveSearchForm } from "../saved-search";
+import { emptySearchFormValues, type SearchFlagValue, type SearchFormValues } from "../search-form";
+import { escapeHtml } from "@/utils";
 
-const numberField = (name: string, label: string, placeholder: string, step = "any") => `
+const numberField = (
+  name: string,
+  label: string,
+  placeholder: string,
+  value: string,
+  step = "any",
+) => `
   <div>
     <label for="${name}" class="mb-1 block text-sm font-medium text-gray-700">${label}</label>
     <input
@@ -13,6 +23,7 @@ const numberField = (name: string, label: string, placeholder: string, step = "a
       min="0"
       step="${step}"
       placeholder="${placeholder}"
+      ${value === "" ? "" : `value="${escapeHtml(value)}"`}
       class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
     />
   </div>`;
@@ -22,6 +33,7 @@ const selectField = (
   label: string,
   defaultLabel: string,
   options: ReadonlyArray<{ readonly value: string; readonly label: string }>,
+  selected: string,
 ) => `
   <div>
     <label for="${name}" class="mb-1 block text-sm font-medium text-gray-700">${label}</label>
@@ -32,21 +44,25 @@ const selectField = (
     >
       <option value="">${defaultLabel}</option>
       ${options
-        .map((option) => `<option value="${option.value}">${option.label}</option>`)
+        .map(
+          (option) =>
+            `<option value="${option.value}" ${option.value === selected ? "selected" : ""}>${option.label}</option>`,
+        )
         .join("")}
     </select>
   </div>`;
 
-const flagField = (name: string, label: string) => `
-  <label class="flex items-center gap-2 text-sm text-gray-700">
-    <input
-      type="checkbox"
-      name="${name}"
-      value="true"
-      class="size-4 accent-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-    />
-    ${label}
-  </label>`;
+const flagField = (name: string, label: string, selected: SearchFlagValue) =>
+  selectField(
+    name,
+    label,
+    "Any",
+    [
+      { value: "true", label: "Yes" },
+      { value: "false", label: "No" },
+    ],
+    selected,
+  );
 
 const regionOptions = GreekRegionCodes.map((code) => ({
   value: code,
@@ -58,7 +74,32 @@ const kindOptions = ListingKind.literals.map((kind) => ({
   label: kindLabels[kind],
 }));
 
-export const searchPage = `<!DOCTYPE html>
+export interface SearchPageOptions {
+  // The values a saved search fills in; an ordinary visit starts empty.
+  readonly values?: SearchFormValues;
+  // The results section's first request. A saved search hands it the stored
+  // criteria, so the page opens on that search instead of the unfiltered feed.
+  readonly resultsUrl?: string;
+  // Present only for a signed-in caller: the saved-search list and the save
+  // control are the account's own, and a visitor sees neither.
+  readonly savedSearches?: ReadonlyArray<SavedSearch>;
+  readonly savedError?: string;
+  readonly appliedSavedSearchId?: number;
+}
+
+export const searchPage = (options: SearchPageOptions = {}) => {
+  const values = options.values ?? emptySearchFormValues;
+  const resultsUrl = options.resultsUrl ?? "/search/results";
+  const saved =
+    options.savedSearches === undefined
+      ? ""
+      : `${saveSearchForm()}
+         ${savedSearchesPanel(options.savedSearches, {
+           error: options.savedError,
+           appliedId: options.appliedSavedSearchId,
+         })}`;
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   ${head}
@@ -82,15 +123,15 @@ export const searchPage = `<!DOCTYPE html>
       class="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
     >
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        ${selectField("regionCode", "Region", "Any region", regionOptions)}
-        ${selectField("kind", "Kind", "Any kind", kindOptions)}
-        ${numberField("minPrice", "Min price (€)", "0")}
-        ${numberField("maxPrice", "Max price (€)", "2000")}
+        ${selectField("regionCode", "Region", "Any region", regionOptions, values.regionCode)}
+        ${selectField("kind", "Kind", "Any kind", kindOptions, values.kind)}
+        ${numberField("minPrice", "Min price (€)", "0", values.minPrice)}
+        ${numberField("maxPrice", "Max price (€)", "2000", values.maxPrice)}
       </div>
 
       <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        ${numberField("minSizeSqm", "Min size (m²)", "0", "1")}
-        ${numberField("maxSizeSqm", "Max size (m²)", "150", "1")}
+        ${numberField("minSizeSqm", "Min size (m²)", "0", values.minSizeSqm, "1")}
+        ${numberField("maxSizeSqm", "Max size (m²)", "150", values.maxSizeSqm, "1")}
         <div>
           <label for="availableFrom" class="mb-1 block text-sm font-medium text-gray-700">
             Available from
@@ -99,6 +140,7 @@ export const searchPage = `<!DOCTYPE html>
             id="availableFrom"
             name="availableFrom"
             type="date"
+            ${values.availableFrom === "" ? "" : `value="${escapeHtml(values.availableFrom)}"`}
             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -107,10 +149,10 @@ export const searchPage = `<!DOCTYPE html>
       <fieldset class="mt-4">
         <legend class="mb-1 block text-sm font-medium text-gray-700">Details</legend>
         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          ${flagField("furnished", "Furnished")}
-          ${flagField("ensuite", "Ensuite")}
-          ${flagField("smoking", "Smoking allowed")}
-          ${flagField("pets", "Pets allowed")}
+          ${flagField("furnished", "Furnished", values.furnished)}
+          ${flagField("ensuite", "Ensuite", values.ensuite)}
+          ${flagField("smoking", "Smoking allowed", values.smoking)}
+          ${flagField("pets", "Pets allowed", values.pets)}
         </div>
       </fieldset>
 
@@ -130,9 +172,11 @@ export const searchPage = `<!DOCTYPE html>
       </div>
     </form>
 
+    ${saved}
+
     <section
       id="results"
-      hx-get="/search/results"
+      hx-get="${escapeHtml(resultsUrl)}"
       hx-trigger="load"
       hx-swap="innerHTML"
       class="mt-8"
@@ -141,3 +185,4 @@ export const searchPage = `<!DOCTYPE html>
 </body>
 </html>
 `;
+};

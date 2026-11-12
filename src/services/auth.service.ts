@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import { UserRepository } from "@/repos/user.repo";
 import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt.service";
 import { HasherService } from "./hasher.service";
-import { RefreshTokenService } from "./refresh-token.service";
+import { RefreshTokenRotatedError, RefreshTokenService } from "./refresh-token.service";
 import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User";
 import { InternalError, UserNotFoundError } from "./user.service";
@@ -48,6 +48,7 @@ export class AuthService extends Context.Service<
       | UnauthorizedError
       | InternalError
       | RefreshTokenNotFoundError
+      | RefreshTokenRotatedError
     >;
     readonly authenticate: (
       credentials: UserCredentialsType,

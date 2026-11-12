@@ -154,11 +154,11 @@ const minePageRequest = (cursor?: typeof ListingCursor.Type) => ({
   cursor,
 });
 
-const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", (request) =>
+const getMyListingsPage = HttpRouter.route("GET", "/listings/mine", () =>
   Effect.gen(function* () {
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const query = yield* Schema.decodeUnknownEffect(ListingMineQueryCodec)(searchParams);
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const listingService = yield* ListingService;
     const page = yield* listingService.listMine(ownerId, minePageRequest(query.cursor));
     return respond(myListingsPage(page, { selfHref: mineHrefFor(query.cursor) }), 200);
@@ -195,7 +195,7 @@ const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
     }
 
     return yield* Effect.gen(function* () {
-      const ownerId = yield* callerId(request);
+      const ownerId = yield* callerId;
       const listingService = yield* ListingService;
       const listing = yield* listingService.createDraft(ownerId, decoded.input);
       return seeOther(`/listings/${listing.id}/edit`);
@@ -208,12 +208,12 @@ const createListing = HttpRouter.route("POST", "/listings/new", (request) =>
   }),
 );
 
-const getEditListingPage = HttpRouter.route("GET", "/listings/:id/edit", (request) =>
+const getEditListingPage = HttpRouter.route("GET", "/listings/:id/edit", () =>
   Effect.gen(function* () {
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return missingListingResponse();
 
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const listingService = yield* ListingService;
     const listing = yield* listingService.getOwn(ownerId, id);
     return respond(editListingPage(listing, listingFormValuesFor(listing)), 200);
@@ -230,7 +230,7 @@ const updateListing = HttpRouter.route("POST", "/listings/:id/edit", (request) =
     const params = yield* readForm(request);
     const values = listingFormValues(params);
     const decoded = decodeUpdateListingForm(params);
-    const ownerId = yield* callerId(request);
+    const ownerId = yield* callerId;
     const listingService = yield* ListingService;
     // Loading first means a rejected submit is answered with the edit page as it
     // stands, including the current status and the existing values.
@@ -285,7 +285,7 @@ const transitionRoute = (action: "publish" | "unlist") =>
 
       const params = yield* readForm(request);
       const returnTo = decodeReturnTo(params["returnTo"]);
-      const ownerId = yield* callerId(request);
+      const ownerId = yield* callerId;
       const listingService = yield* ListingService;
       const move =
         action === "publish"

@@ -1,86 +1,49 @@
-import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
+import { CurrentUserId } from "@/handlers/private/caller";
+import { sessionResolver, retrySessionResponse } from "@/handlers/optional-caller";
 import { signInRequiredPage } from "@/frontend/pages/sign-in-required";
-import { AuthService } from "@/services/auth.service";
-import { JWTService } from "@/services/jwt.service";
-import { RefreshTokenService } from "@/services/refresh-token.service";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { Array, Effect, pipe, Schema } from "effect";
-import { isNotNull } from "effect/Predicate";
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Effect } from "effect";
+
+const isHtmx = (request: HttpServerRequest.HttpServerRequest): boolean =>
+  request.headers["hx-request"] === "true";
 
 /*
  * A request under `/api` is the JSON API, whose contract for a missing session
  * is a 401. Every other private route is a page, and a page answers a signed-out
- * visitor with a prompt carrying a sign-in link, never a bare error string.
+ * visitor with a prompt carrying a sign-in link, never a bare error string. An
+ * htmx request is answered with a real navigation instead, because htmx swaps
+ * only 2xx responses and would otherwise discard the sign-in page and leave the
+ * page looking as if nothing happened.
  */
 const unauthenticatedResponse = (request: HttpServerRequest.HttpServerRequest) =>
-  new URL(request.originalUrl).pathname.startsWith("/api/")
-    ? HttpServerResponse.text("UnauthorizedError", { status: 401 })
-    : HttpServerResponse.text(signInRequiredPage, { status: 401, contentType: "text/html" });
+  isHtmx(request)
+    ? HttpServerResponse.empty({ status: 200, headers: { "HX-Redirect": "/login" } })
+    : new URL(request.originalUrl).pathname.startsWith("/api/")
+      ? HttpServerResponse.text("UnauthorizedError", { status: 401 })
+      : HttpServerResponse.text(signInRequiredPage, { status: 401, contentType: "text/html" });
 
-export const AuthMiddleware = HttpRouter.middleware(
+/*
+ * The one place a private request establishes its session. It runs before the
+ * route, so the caller every handler reads is the account the resolver proved,
+ * and it registers the session's cookie pair on the response this request ends
+ * with - a page, a fragment, a refusal, or the error the runtime derives from a
+ * route that failed. The pair is registered rather than attached to the route's
+ * own response, because a route that fails produces no response, and the
+ * resolver has already spent the presented refresh token by then.
+ */
+export const AuthMiddleware = HttpRouter.middleware<{ provides: CurrentUserId }>()(
   Effect.gen(function* () {
-    const auth = yield* AuthService;
-    const jwtService = yield* JWTService;
-    const refreshTokenService = yield* RefreshTokenService;
+    const resolve = yield* sessionResolver;
     return (app) =>
       Effect.gen(function* () {
-        const response = yield* app;
-
-        yield* Effect.logInfo("Starting Auth Middleware");
-        // Effect.fail(new UnauthorizedError)
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const userAgent = request.headers["user-agent"];
-
-        const oldAccessToken = yield* Schema.decodeUnknownEffect(JWTSchema)(
-          request.cookies["access_token"],
-        ).pipe(
-          Effect.catchTags({
-            SchemaError: () => Effect.succeed(null),
-          }),
+        const session = yield* resolve(request);
+        if (session._tag === "retry") return retrySessionResponse(request);
+        if (session._tag === "anonymous") return unauthenticatedResponse(request);
+        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+          Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
         );
-
-        const oldRefreshToken = yield* Schema.decodeUnknownEffect(RefreshTokenValue)(
-          request.cookies["refresh_token"],
-        ).pipe(
-          Effect.catchTags({
-            SchemaError: () => Effect.succeed(null),
-          }),
-        );
-        const { tokens, user } = yield* auth
-          .tokenAuthFlow(
-            {
-              accessToken: oldAccessToken,
-              refreshToken: oldRefreshToken,
-            },
-            userAgent,
-          )
-          .pipe(
-            Effect.tapError((err) => {
-              console.log(`console.log- ${err}`);
-              return Effect.logInfo(`Error in Auth Middleware ${err}`);
-            }),
-            Effect.mapError(() => unauthenticatedResponse(request)),
-          );
-
-        if (!user) {
-          return unauthenticatedResponse(request);
-        }
-        const newAccessCookie = yield* Effect.fromNullishOr(tokens.accessToken).pipe(
-          Effect.matchEffect({
-            onSuccess: (token) => jwtService.asCookie(token),
-            onFailure: () => Effect.succeed(null),
-          }),
-        );
-        const newRefreshCookie = yield* Effect.fromNullishOr(tokens.refreshToken).pipe(
-          Effect.matchEffect({
-            onSuccess: (token) => refreshTokenService.asCookie(token),
-            onFailure: () => Effect.succeed(null),
-          }),
-        );
-
-        const cookies = pipe([newAccessCookie, newRefreshCookie], Array.filter(isNotNull));
-
-        return yield* HttpServerResponse.setCookies(response, cookies);
+        return yield* Effect.provideService(app, CurrentUserId, session.caller);
       });
   }),
 ).layer;

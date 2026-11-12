@@ -118,9 +118,9 @@ const roleTarget = (
   return role === "seeker" || role === "lister" ? role : undefined;
 };
 
-const getProfilePage = HttpRouter.route("GET", "/profile", (request) =>
+const getProfilePage = HttpRouter.route("GET", "/profile", () =>
   Effect.gen(function* () {
-    const user = yield* callerUser(request);
+    const user = yield* callerUser;
     const role = editableProfileRole(user.role);
     if (role === undefined) {
       return user.role === "user" ? choiceResponse(200) : unavailableResponse();
@@ -146,7 +146,7 @@ const saveProfile = HttpRouter.route("POST", "/profile", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) return crossSiteResponse();
 
-    const user = yield* callerUser(request);
+    const user = yield* callerUser;
     const role = editableProfileRole(user.role);
     if (role === undefined) {
       return user.role === "user"
@@ -185,7 +185,7 @@ const switchRole = HttpRouter.route("POST", "/profile/switch", (request) =>
   Effect.gen(function* () {
     if (!isSameOriginWrite(request)) return crossSiteResponse();
 
-    const user = yield* callerUser(request);
+    const user = yield* callerUser;
     const params = yield* readForm(request);
     const userService = yield* UserService;
     const switched = yield* userService.switchRoles(user.id, roleTarget(params["role"]));

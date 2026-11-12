@@ -1062,6 +1062,174 @@ assert_status "$CODE" 404 "basemap route rejects a non-pmtiles key"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/maps/missing.pmtiles")
 assert_status "$CODE" 404 "basemap route reports a missing archive"
 
+# 5g. saved searches
+#
+# The search page stays the visitor's page: no saved-search control and no list
+# without a session, and a save without one is refused. A signed-in save from
+# the search page is then listed there with every criterion the results route
+# needs, re-run from the saved search's own link, and deleted from the page
+# control.
+SAVED_NAME="Smoke saved search ${SMOKE_TAG}"
+SAVED_NAME_2="Smoke saved search two ${SMOKE_TAG}"
+
+# The newest row of the saved-search panel, as the id its delete control posts.
+saved_id_of() {
+  sed -nE 's|.*action="/search/saved/([0-9]+)/delete".*|\1|p' "$1" | head -1
+}
+
+CODE=$(curl -s -o "$WORK/search-anon" -w '%{http_code}' "${BASE_URL}/search")
+assert_status "$CODE" 200 "search page for a visitor"
+if grep -q 'id="saved-searches"' "$WORK/search-anon"; then
+  fail "the search page rendered a saved-search list for a visitor"
+fi
+if grep -q 'hx-post="/search/saved"' "$WORK/search-anon"; then
+  fail "the search page rendered a save control for a visitor"
+fi
+pass "a visitor sees no saved-search UI"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/search/saved" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "name=${SAVED_NAME}")
+assert_status "$CODE" 401 "saving a search without a session is refused"
+
+CODE=$(curl -s -o "$WORK/search-results-anon" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}")
+assert_status "$CODE" 200 "search results for a visitor"
+if grep -q 'hx-post="/search/saved"' "$WORK/search-results-anon"; then
+  fail "the results fragment offered a visitor a save control"
+fi
+pass "a visitor's results fragment has no save control"
+
+CODE=$(curl -s -o "$WORK/search-results-signed" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${FRAGMENT_QUERY}" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "search results for a signed-in caller"
+if grep -q 'hx-post="/search/saved"' "$WORK/search-results-signed"; then
+  fail "the results fragment carried the save control a search refresh would swap"
+fi
+pass "a signed-in caller's results fragment leaves the save control alone"
+
+# The save control lives on the search page, outside the results fragment, so a
+# name typed there survives a search refresh. Its criteria come from the form
+# through hx-include and it targets the saved-search list.
+CODE=$(curl -s -o "$WORK/search-signed" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "search page for a signed-in caller"
+grep -q 'hx-post="/search/saved"' "$WORK/search-signed" \
+  || fail "the signed-in search page did not offer a save control"
+grep -q 'hx-include="#search-form"' "$WORK/search-signed" \
+  || fail "the save control does not capture the current search form"
+grep -q 'hx-target="#saved-searches"' "$WORK/search-signed" \
+  || fail "the save control does not target the saved-search list"
+pass "a signed-in caller can save the current search from the page"
+
+# Saving from the search page: the form's own field is the optional name, and
+# the criteria travel from the search form through hx-include.
+CODE=$(curl -s -o "$WORK/saved-create" -w '%{http_code}' -X POST "${BASE_URL}/search/saved" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'HX-Request: true' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode "name=${SAVED_NAME}" \
+  --data-urlencode 'regionCode=crete' \
+  --data-urlencode 'kind=' \
+  --data-urlencode "minPrice=${SMOKE_EUR}" \
+  --data-urlencode "maxPrice=${SMOKE_EUR}" \
+  --data-urlencode 'minSizeSqm=' \
+  --data-urlencode 'maxSizeSqm=' \
+  --data-urlencode 'availableFrom=')
+assert_status "$CODE" 200 "saving a search from the search page"
+grep -q "${SAVED_NAME}" "$WORK/saved-create" || fail "the save response did not list the saved search"
+grep -q 'hx-swap-oob="true"' "$WORK/saved-create" || fail "the save response did not clear the name box"
+SAVED_ID="$(saved_id_of "$WORK/saved-create")"
+[ -n "$SAVED_ID" ] || fail "the save response did not name the saved search's id"
+pass "the saved search appears in the list with a delete control"
+
+# The page a saved-search link opens is pre-filled with the stored criteria and
+# asks the results fragment for exactly those criteria on load.
+CODE=$(curl -s -o "$WORK/saved-applied" -w '%{http_code}' \
+  "${BASE_URL}/search?saved=${SAVED_ID}" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the saved search's page"
+grep -q "${SAVED_NAME}" "$WORK/saved-applied" || fail "the applied page did not list the saved search"
+grep -q '<option value="crete" selected>' "$WORK/saved-applied" \
+  || fail "the applied page did not pre-fill the region"
+grep -q "value=\"${SMOKE_EUR}\"" "$WORK/saved-applied" \
+  || fail "the applied page did not pre-fill the price"
+grep -q "hx-get=\"/search/results?.*regionCode=crete" "$WORK/saved-applied" \
+  || fail "the applied page did not ask for the saved criteria"
+pass "applying a saved search pre-fills the form and the results request"
+
+APPLY_QUERY="regionCode=crete&minPriceMinor=${SMOKE_MINOR}&maxPriceMinor=${SMOKE_MINOR}"
+CODE=$(curl -s -o "$WORK/saved-rerun" -w '%{http_code}' \
+  "${BASE_URL}/search/results?${APPLY_QUERY}" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "re-running a saved search"
+grep -q "${CRETE_TITLE}" "$WORK/saved-rerun" || fail "the re-run dropped the crete listing"
+if grep -q "${EPIRUS_TITLE}" "$WORK/saved-rerun"; then
+  fail "the re-run did not narrow to the saved region"
+fi
+pass "a saved search re-runs the same search"
+
+# Another account can neither see nor delete it.
+CODE=$(curl -s -o "$WORK/saved-other-page" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "another account's search page"
+if grep -q "${SAVED_NAME}" "$WORK/saved-other-page"; then
+  fail "another account's search page leaked a saved search"
+fi
+CODE=$(curl -s -o "$WORK/saved-other-delete" -w '%{http_code}' -X POST \
+  "${BASE_URL}/search/saved/${SAVED_ID}/delete" \
+  -H 'HX-Request: true' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${SECOND_ACCESS}")
+assert_status "$CODE" 200 "another account's delete of someone else's saved search"
+grep -q 'That saved search no longer exists.' "$WORK/saved-other-delete" \
+  || fail "another account's delete did not read as no such saved search"
+CODE=$(curl -s -o "$WORK/saved-after-other" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the owner's search page after another account's delete"
+grep -q "${SAVED_NAME}" "$WORK/saved-after-other" \
+  || fail "another account's delete removed the owner's saved search"
+pass "another account's saved searches are never readable or deletable"
+
+# A delete from the page control replaces the list in place.
+CODE=$(curl -s -o "$WORK/saved-delete" -w '%{http_code}' -X POST \
+  "${BASE_URL}/search/saved/${SAVED_ID}/delete" \
+  -H 'HX-Request: true' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "deleting a saved search from the page"
+grep -q 'Saved search deleted.' "$WORK/saved-delete" || fail "the delete response did not confirm it"
+if grep -q "${SAVED_NAME}" "$WORK/saved-delete"; then
+  fail "the deleted saved search stayed in the list"
+fi
+CODE=$(curl -s -o "$WORK/saved-gone" -w '%{http_code}' \
+  "${BASE_URL}/search" -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 200 "the search page after a delete"
+if grep -q "${SAVED_NAME}" "$WORK/saved-gone"; then
+  fail "the deleted saved search is still listed"
+fi
+pass "deleting a saved search removes it from the list"
+
+# The same delete without htmx is a navigation: a redirect back to the search
+# page rather than a bare fragment.
+CODE=$(curl -s -o "$WORK/saved-create-2" -w '%{http_code}' -X POST "${BASE_URL}/search/saved" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'HX-Request: true' \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}" \
+  --data-urlencode "name=${SAVED_NAME_2}" \
+  --data-urlencode 'kind=room')
+assert_status "$CODE" 200 "saving a second search from the search page"
+SAVED_ID_2="$(saved_id_of "$WORK/saved-create-2")"
+[ -n "$SAVED_ID_2" ] || fail "the second save response did not name its id"
+CODE=$(curl -s -D "$WORK/saved-delete-redirect.h" -o /dev/null -w '%{http_code}' -X POST \
+  "${BASE_URL}/search/saved/${SAVED_ID_2}/delete" \
+  -H "Origin: ${BASE_URL}" \
+  -H "Cookie: access_token=${ACCESS}")
+assert_status "$CODE" 303 "a delete without htmx redirects"
+SAVED_LOCATION=$(grep -i '^location:' "$WORK/saved-delete-redirect.h" | head -1 | tr -d '\r' | sed -E 's/^[Ll]ocation: //')
+[ "$SAVED_LOCATION" = "/search" ] || fail "the delete redirect did not go to the search page"
+pass "a delete without htmx redirects to the search page"
+
 # 6. refresh rotation via a route that does not re-read the access token
 CODE=$(curl -s -D "$WORK/rotate.h" -o /dev/null -w '%{http_code}' "${BASE_URL}/private-get" \
   -H "Cookie: refresh_token=${REFRESH}")

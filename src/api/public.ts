@@ -1,7 +1,7 @@
 import { UserCredentials } from "@/db/schema/User";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
@@ -11,6 +11,11 @@ import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
 import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
 import { searchResults, searchResultsError } from "@/frontend/search-results";
+import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
+import { savedSearchResultsHref } from "@/frontend/saved-search";
+import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
+import { optionalCaller, retrySessionResponse } from "@/handlers/optional-caller";
+import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, RefreshTokenValue } from "@/db/schema/brands";
 import {
   decodeListingId,
@@ -201,9 +206,7 @@ export const ListingsGroup = HttpApiGroup.make("listings")
 
 export const PublicApi = HttpApi.make("public").add(AuthGroup).add(ListingsGroup).prefix("/api");
 
-const searchResultsRoute = HttpRouter.route(
-  "GET",
-  "/search/results",
+const searchResultsRoute = HttpRouter.route("GET", "/search/results", () =>
   Effect.gen(function* () {
     const searchParams = yield* HttpServerRequest.ParsedSearchParams;
     const listingService = yield* ListingService;
@@ -238,6 +241,59 @@ const searchResultsRoute = HttpRouter.route(
         ),
     }),
   ),
+);
+
+/*
+ * The search page. A visitor gets the plain form and an empty results section,
+ * exactly as before. A signed-in caller additionally gets their saved searches
+ * and, when the link names one of theirs, the form and the results section
+ * pre-filled from it. `?saved=` is ignored when the id is malformed or belongs
+ * to another account, so the URL cannot be used to probe someone else's list.
+ */
+const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
+  Effect.gen(function* () {
+    const session = yield* optionalCaller(request);
+    if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "anonymous") return HttpServerResponse.html(searchPage());
+
+    const searchParams = yield* HttpServerRequest.ParsedSearchParams;
+    const savedSearchService = yield* SavedSearchService;
+
+    const listed = yield* Effect.result(savedSearchService.list(session.caller));
+    if (Result.isFailure(listed)) {
+      yield* Effect.logError("Saved searches could not be read", { error: listed.failure });
+    }
+    const savedSearches = Result.isSuccess(listed) ? listed.success : [];
+
+    const rawSaved = searchParams["saved"];
+    const savedId = typeof rawSaved === "string" ? decodeSavedSearchId(rawSaved) : undefined;
+    const applied =
+      savedId === undefined
+        ? Option.none()
+        : yield* savedSearchService
+            .findOwned(session.caller, savedId)
+            .pipe(Effect.orElseSucceed(() => Option.none()));
+    const appliedSearch = Option.getOrNull(applied);
+
+    return HttpServerResponse.setCookiesUnsafe(
+      HttpServerResponse.html(
+        searchPage({
+          savedSearches,
+          ...(Result.isFailure(listed)
+            ? { savedError: "Your saved searches could not be loaded just now." }
+            : {}),
+          ...(appliedSearch === null
+            ? {}
+            : {
+                values: searchFormValuesFromSavedSearch(appliedSearch),
+                resultsUrl: savedSearchResultsHref(appliedSearch),
+                appliedSavedSearchId: appliedSearch.id,
+              }),
+        }),
+      ),
+      session.cookies,
+    );
+  }),
 );
 
 /*
@@ -311,7 +367,7 @@ export const PublicRoutes = HttpRouter.addAll([
   listingDetailRoute,
   mapRoute,
   MapTilesRoute,
-  HttpRouter.route("GET", "/search", Effect.succeed(HttpServerResponse.html(searchPage))),
+  searchPageRoute,
   HttpRouter.route(
     "GET",
     "/",

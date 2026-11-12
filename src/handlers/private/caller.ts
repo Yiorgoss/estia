@@ -1,32 +1,23 @@
-import { JWTSchema } from "@/db/schema/brands";
+import { UserId } from "@/db/schema/brands";
 import { UserRepository } from "@/repos/user.repo";
 import { UnauthorizedError } from "@/services/auth.service";
 import { InternalError } from "@/services/user.service";
-import { JWTService } from "@/services/jwt.service";
-import type { HttpServerRequest } from "effect/http";
-import { Effect, Option, Schema } from "effect";
+import { Context, Effect, Option } from "effect";
 
 /*
- * The account id the access token proves. The private router's `AuthMiddleware`
- * has already established the session, so a missing or stale cookie here is an
- * unauthenticated caller: a 401, never a 500.
+ * The account `AuthMiddleware` established for this request. The middleware
+ * resolves the session once, before the route runs, so a handler never verifies
+ * a cookie of its own: the access token it acts on is the one the resolver
+ * accepted, whether the browser presented it live or swapped a live refresh
+ * token for it.
  */
-export const callerId = (request: HttpServerRequest.HttpServerRequest) =>
-  Effect.gen(function* () {
-    const jwtService = yield* JWTService;
-    const accessToken = yield* Schema.decodeUnknownEffect(JWTSchema)(
-      request.cookies["access_token"],
-    );
-    const userJWT = yield* jwtService.verify(accessToken);
-    const user = yield* jwtService.extractUser(userJWT);
-    return user.id;
-  }).pipe(
-    Effect.catchTags({
-      SchemaError: () => Effect.fail(new UnauthorizedError()),
-      ExpiredJWTError: () => Effect.fail(new UnauthorizedError()),
-      InvalidJWTError: () => Effect.fail(new UnauthorizedError()),
-    }),
-  );
+export class CurrentUserId extends Context.Service<CurrentUserId, typeof UserId.Type>()(
+  "CurrentUserId",
+) {}
+
+// The route's caller, provided by `AuthMiddleware`, so a missing session is
+// refused at the boundary rather than inside a handler.
+export const callerId = CurrentUserId;
 
 /*
  * The caller's stored account. The token only proves who is asking; the row is
@@ -35,13 +26,12 @@ export const callerId = (request: HttpServerRequest.HttpServerRequest) =>
  * alive until the token is reissued - up to an hour. A token whose owner is gone
  * is an unauthenticated caller, not a server error.
  */
-export const callerUser = (request: HttpServerRequest.HttpServerRequest) =>
-  Effect.gen(function* () {
-    const id = yield* callerId(request);
-    const userRepo = yield* UserRepository;
-    const user = yield* userRepo.findById(id).pipe(Effect.mapError(() => new InternalError()));
-    if (Option.isNone(user)) {
-      return yield* Effect.fail(new UnauthorizedError());
-    }
-    return user.value;
-  });
+export const callerUser = Effect.gen(function* () {
+  const id = yield* callerId;
+  const userRepo = yield* UserRepository;
+  const user = yield* userRepo.findById(id).pipe(Effect.mapError(() => new InternalError()));
+  if (Option.isNone(user)) {
+    return yield* Effect.fail(new UnauthorizedError());
+  }
+  return user.value;
+});

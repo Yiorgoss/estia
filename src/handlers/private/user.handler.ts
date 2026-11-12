@@ -15,9 +15,9 @@ import { Effect, Option } from "effect";
  */
 export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handlers) =>
   handlers
-    .handle("me", ({ request }) =>
+    .handle("me", () =>
       Effect.gen(function* () {
-        const user = yield* callerUser(request);
+        const user = yield* callerUser;
 
         const listerRepo = yield* ListerRepository;
         const seekerRepo = yield* SeekerRepository;
@@ -34,28 +34,28 @@ export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handl
         };
       }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
     )
-    .handle("profile", ({ request }) =>
+    .handle("profile", () =>
       Effect.gen(function* () {
-        const user = yield* callerUser(request);
+        const user = yield* callerUser;
         const userService = yield* UserService;
         const profile = yield* userService.readProfile(user);
         return { role: user.role, profile: Option.getOrNull(profile) };
       }),
     )
-    .handle("save-profile", ({ payload, request }) =>
+    .handle("save-profile", ({ payload }) =>
       Effect.gen(function* () {
         // An assigned account's role is read from the stored row, so a caller
         // cannot save a listing profile by saying it is one. An unassigned
         // account has no role to match, so the payload is the choice it makes.
-        const user = yield* callerUser(request);
+        const user = yield* callerUser;
         const userService = yield* UserService;
         const saved = yield* userService.saveProfile(user, payload);
         return { role: saved.role, profile: saved.profile };
       }),
     )
-    .handle("change-role", ({ query, request }) =>
+    .handle("change-role", ({ query }) =>
       Effect.gen(function* () {
-        const user = yield* callerUser(request);
+        const user = yield* callerUser;
         const userService = yield* UserService;
         const switched = yield* userService.switchRoles(user.id, query.role);
         return { newProfile: switched.profile };

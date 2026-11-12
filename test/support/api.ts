@@ -97,6 +97,7 @@ export interface TestResponse {
   readonly status: number;
   readonly body: string;
   readonly json: unknown;
+  readonly headers: Headers;
   readonly cookies: Readonly<Record<string, string>>;
   // The `Set-Cookie` headers verbatim, so a test can pin the attributes a
   // browser applies to a cookie, not just its value.
@@ -129,6 +130,7 @@ const callThrough = (
       status: response.status,
       body,
       json,
+      headers: response.headers,
       cookies,
       setCookies,
       location: response.headers.get("location"),

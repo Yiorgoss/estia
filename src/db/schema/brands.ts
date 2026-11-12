@@ -20,5 +20,7 @@ export const ListerId = Schema.Number.pipe(Schema.brand("ListerId"));
 
 export const ListingId = Schema.Number.pipe(Schema.brand("ListingId"));
 
+export const SavedSearchId = Schema.Number.pipe(Schema.brand("SavedSearchId"));
+
 export const SeekerId = Schema.Number.pipe(Schema.brand("SeekerID"));
 export const GenderEnum = Schema.Literals(["male", "female", "NB"]);

@@ -30,6 +30,7 @@ import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
 import { ListingPageRoutes } from "@/handlers/private/listing-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
+import { SavedSearchRoutes } from "@/handlers/private/saved-search-routes";
 
 /*
  * The caller's own profile. The role is the account's stored role, which is what
@@ -195,4 +196,5 @@ export const PrivateRoutes = HttpRouter.addAll([
   ),
   ...ListingPageRoutes,
   ...ProfilePageRoutes,
+  ...SavedSearchRoutes,
 ]);

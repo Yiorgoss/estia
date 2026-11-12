@@ -29,6 +29,17 @@ const refreshCookieOptions = {
   sameSite: "lax",
 } as const satisfies NonNullable<Cookies.Cookie["options"]>;
 
+/*
+ * The presented refresh token was live when this request consumed it and spent
+ * when the same request tried to rotate it, so another request rotated it in
+ * between. The session is still live and the winner's pair is already on its
+ * way back to the browser.
+ */
+export class RefreshTokenRotatedError extends Schema.TaggedError<RefreshTokenRotatedError>()(
+  "RefreshTokenRotatedError",
+  {},
+) {}
+
 export interface RefreshTokenService {
   asCookie: (
     token: typeof RefreshTokenValue.Type,
@@ -74,7 +85,7 @@ export interface RefreshTokenService {
     userId: typeof UserId.Type,
     userAgent: string,
     token: typeof RefreshTokenValue.Type,
-  ) => Effect.Effect<typeof RefreshTokenValue.Type, InternalError | RefreshTokenNotFoundError>;
+  ) => Effect.Effect<typeof RefreshTokenValue.Type, InternalError | RefreshTokenRotatedError>;
 }
 export const RefreshTokenService = Context.Service<RefreshTokenService>("RefreshTokenService");
 
@@ -84,7 +95,6 @@ export const RefreshTokenServiceLive = Layer.effect(
     // const domain = yield* Config.string("DOMAIN")
     const hasher = yield* HasherService;
     const refreshTokenRepo = yield* RefreshTokenRepository;
-    // const refreshTokenService = yield* RefreshTokenService
     const userRepo = yield* UserRepository;
     const jwtService = yield* JWTService;
 
@@ -149,7 +159,7 @@ export const RefreshTokenServiceLive = Layer.effect(
           const revoked = yield* refreshTokenRepo.revoke(oldToken);
           yield* revoked.pipe(
             Option.match({
-              onNone: () => Effect.fail(new RefreshTokenNotFoundError()),
+              onNone: () => Effect.fail(new RefreshTokenRotatedError()),
               onSome: Effect.succeed,
             }),
           );

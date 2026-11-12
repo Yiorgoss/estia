@@ -13,37 +13,37 @@ import { Effect } from "effect";
  */
 export const ListingHandler = HttpApiBuilder.group(PrivateApi, "listing-group", (handlers) =>
   handlers
-    .handle("mine", ({ query, request }) =>
+    .handle("mine", ({ query }) =>
       Effect.gen(function* () {
-        const ownerId = yield* callerId(request);
+        const ownerId = yield* callerId;
         const listingService = yield* ListingService;
         return yield* listingService.listMine(ownerId, query);
       }),
     )
-    .handle("create", ({ payload, request }) =>
+    .handle("create", ({ payload }) =>
       Effect.gen(function* () {
-        const ownerId = yield* callerId(request);
+        const ownerId = yield* callerId;
         const listingService = yield* ListingService;
         return yield* listingService.createDraft(ownerId, payload);
       }),
     )
-    .handle("update", ({ params, payload, request }) =>
+    .handle("update", ({ params, payload }) =>
       Effect.gen(function* () {
-        const ownerId = yield* callerId(request);
+        const ownerId = yield* callerId;
         const listingService = yield* ListingService;
         return yield* listingService.updateListing(ownerId, params.id, payload);
       }),
     )
-    .handle("publish", ({ params, request }) =>
+    .handle("publish", ({ params }) =>
       Effect.gen(function* () {
-        const ownerId = yield* callerId(request);
+        const ownerId = yield* callerId;
         const listingService = yield* ListingService;
         return yield* listingService.publish(ownerId, params.id);
       }),
     )
-    .handle("unlist", ({ params, request }) =>
+    .handle("unlist", ({ params }) =>
       Effect.gen(function* () {
-        const ownerId = yield* callerId(request);
+        const ownerId = yield* callerId;
         const listingService = yield* ListingService;
         return yield* listingService.unlist(ownerId, params.id);
       }),
