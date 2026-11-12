@@ -575,3 +575,51 @@ describe("a listing with no photo still renders", () => {
     }),
   );
 });
+
+describe("the photo route's session", () => {
+  it.effect("carries the rotated session pair on a 404 as well as on a photo", () =>
+    Effect.gen(function* () {
+      const session = yield* register("photo-rotation");
+      const id = yield* createListing(session);
+      const uploaded = yield* upload(id, [jpeg()], session);
+      assert.strictEqual(uploaded.status, 303, uploaded.body);
+      const [photo] = yield* photosOf(id);
+      assert.isDefined(photo);
+
+      // The browser's access token has expired while its refresh token is live,
+      // so resolving the caller spends the token and rotates the pair.
+      const read = yield* call(`/listings/${id}/photos/${String(photo?.id)}`, {
+        headers: {
+          cookie: `access_token=an.expired.token; refresh_token=${session.refreshToken}`,
+          "user-agent": "estia-tests",
+        },
+      });
+      assert.strictEqual(read.status, 200, read.body);
+      const rotatedAccess = read.cookies["access_token"];
+      const rotatedRefresh = read.cookies["refresh_token"];
+      assert.isDefined(rotatedAccess);
+      assert.isDefined(rotatedRefresh);
+      assert.notStrictEqual(rotatedRefresh, session.refreshToken);
+
+      const deleted = yield* postForm(
+        `/listings/${id}/photos/${String(photo?.id)}/delete`,
+        {},
+        session,
+      );
+      assert.strictEqual(deleted.status, 303, deleted.body);
+
+      // The deleted photo answers 404, but the request still spent the refresh
+      // token it presented, so the fresh pair has to travel back.
+      const missing = yield* call(`/listings/${id}/photos/${String(photo?.id)}`, {
+        headers: {
+          cookie: `access_token=an.expired.token; refresh_token=${rotatedRefresh ?? ""}`,
+          "user-agent": "estia-tests",
+        },
+      });
+      assert.strictEqual(missing.status, 404, missing.body);
+      assert.isString(missing.cookies["access_token"]);
+      assert.isString(missing.cookies["refresh_token"]);
+      assert.notStrictEqual(missing.cookies["refresh_token"], rotatedRefresh);
+    }),
+  );
+});

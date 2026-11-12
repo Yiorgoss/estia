@@ -233,6 +233,9 @@ export const testOrigin = TEST_ORIGIN;
 export interface TestUser {
   readonly id: string;
   readonly cookie: string;
+  // The live refresh token the registration issued, for tests that drive a
+  // session rotation from a browser that still holds it.
+  readonly refreshToken: string;
 }
 
 // A browser always sends a user agent, and the refresh-token record stores it,
@@ -304,9 +307,15 @@ export const register = (label: string): Effect.Effect<TestUser> =>
     });
     assert.strictEqual(response.status, 200, `register ${label}: ${response.body}`);
     const accessToken = response.cookies["access_token"];
+    const refreshToken = response.cookies["refresh_token"];
     assert.isString(accessToken);
+    assert.isString(refreshToken);
     const claims = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
-    return { id: String(claims.id), cookie: `access_token=${accessToken}` };
+    return {
+      id: String(claims.id),
+      cookie: `access_token=${accessToken}`,
+      refreshToken,
+    };
   });
 
 export const asObject = (value: unknown): Record<string, unknown> => {

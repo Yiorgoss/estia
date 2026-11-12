@@ -1,6 +1,6 @@
 import { UserCredentials } from "@/db/schema/User";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Option, Result, Schema } from "effect";
 import { InvalidCredentialsError, UnauthorizedError } from "@/services/auth.service";
 import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
@@ -15,7 +15,6 @@ import { searchFormValuesFromSavedSearch } from "@/frontend/search-form";
 import { savedSearchResultsHref } from "@/frontend/saved-search";
 import { decodeSavedSearchId } from "@/db/schema/SavedSearch";
 import { optionalCaller, retrySessionResponse } from "@/handlers/optional-caller";
-import type { OptionalCallerSession } from "@/handlers/optional-caller";
 import { SavedSearchService } from "@/services/saved-search.service";
 import { JWTSchema, ListingId, ListingPhotoId, RefreshTokenValue } from "@/db/schema/brands";
 import {
@@ -444,22 +443,15 @@ const photoResponse = (
     readonly byteSize: number;
     readonly private: boolean;
   },
-  session: OptionalCallerSession,
   ifNoneMatch: string | undefined,
 ): HttpServerResponse.HttpServerResponse => {
   const cacheControl = `${found.private ? "private" : "public"}, max-age=0, must-revalidate`;
-  const carrySession = (response: HttpServerResponse.HttpServerResponse) =>
-    session._tag === "caller"
-      ? HttpServerResponse.setCookiesUnsafe(response, session.cookies)
-      : response;
 
   if (matchesIfNoneMatch(ifNoneMatch, found.object.httpEtag)) {
-    return carrySession(
-      HttpServerResponse.empty({
-        status: 304,
-        headers: { etag: found.object.httpEtag, "cache-control": cacheControl },
-      }),
-    );
+    return HttpServerResponse.empty({
+      status: 304,
+      headers: { etag: found.object.httpEtag, "cache-control": cacheControl },
+    });
   }
 
   const headers = new Headers({
@@ -470,10 +462,7 @@ const photoResponse = (
     etag: found.object.httpEtag,
     "cache-control": cacheControl,
   });
-  const response = HttpServerResponse.fromWeb(
-    new Response(found.object.body, { status: 200, headers }),
-  );
-  return carrySession(response);
+  return HttpServerResponse.fromWeb(new Response(found.object.body, { status: 200, headers }));
 };
 
 const listingPhotoHandler = (variant: PhotoVariant, request: HttpServerRequest.HttpServerRequest) =>
@@ -490,13 +479,21 @@ const listingPhotoHandler = (variant: PhotoVariant, request: HttpServerRequest.H
     // to retry rather than treated as a different caller.
     const session = yield* optionalCaller(request);
     if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "caller") {
+      // The resolver has already spent the presented refresh token, so the
+      // rotated pair belongs on whatever response this handler ends with:
+      // bytes, a 304, or a 404.
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
+      );
+    }
     const viewerId = session._tag === "caller" ? session.caller : undefined;
 
     const photoService = yield* ListingPhotoService;
     const found = yield* photoService.read(listingId, photoId, viewerId, variant);
     if (Option.isNone(found)) return photoNotFound();
 
-    return photoResponse(found.value, session, request.headers["if-none-match"]);
+    return photoResponse(found.value, request.headers["if-none-match"]);
   }).pipe(
     Effect.catchTag("InternalError", (error) =>
       Effect.logError("Photo read failed", { error }).pipe(
