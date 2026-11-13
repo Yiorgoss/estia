@@ -23,8 +23,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # Model
-          config.model: "deepseek/deepseek-v4.1-flash"
-          config.fallback_models: '["deepseek/deepseek-v4.1-flash"]'
+          config.model: "deepseek/deepseek-flash-latest"
+          config.fallback_models: '["deepseek/deepseek-flash-latest]'
           config.custom_model_max_tokens: "128000"
 
           # Automatic commands on new PRs
