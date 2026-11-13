@@ -42,6 +42,7 @@ import {
   listingNotFoundPage,
   listingUnavailablePage,
 } from "@/frontend/pages/listing-detail";
+import type { ListingContact } from "@/frontend/pages/listing-detail";
 import { withMinorUnitPrices } from "@/utils";
 
 const AuthGroup = HttpApiGroup.make("auth")
@@ -375,16 +376,35 @@ const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
 const notFoundResponse = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(listingNotFoundPage(), { status: 404, contentType: "text/html" });
 
-const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
+const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
   Effect.gen(function* () {
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return notFoundResponse();
+
+    // The page is public, but who is reading it decides what it may offer about
+    // contacting the owner: a sign-in link, the owner's own inbox, or the one
+    // control that starts the chat.
+    const session = yield* optionalCaller(request);
+    if (session._tag === "retry") return retrySessionResponse(request);
+    if (session._tag === "caller") {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookiesUnsafe(response, session.cookies)),
+      );
+    }
 
     const listingService = yield* ListingService;
     const listing = yield* listingService.getPublic(id);
     const photoService = yield* ListingPhotoService;
     const photos = yield* photoService.listPublic(id);
-    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos)));
+
+    const contact: ListingContact =
+      session._tag === "anonymous"
+        ? { _tag: "anonymous" }
+        : listing.ownerId === session.caller
+          ? { _tag: "owner" }
+          : { _tag: "member" };
+
+    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos), contact));
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),

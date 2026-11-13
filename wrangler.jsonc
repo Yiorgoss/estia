@@ -13,6 +13,26 @@
     // a code change.
     "PMTILES_GREECE": "/maps/greece.pmtiles",
   },
+  // One Durable Object per chat, bound as `CHATS`. The object is the only writer
+  // of a chat's messages and the only allocator of its sequence numbers, so the
+  // Worker reaches it rather than writing those rows itself.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHATS",
+        "class_name": "Chat",
+      },
+    ],
+  },
+  // Classes are declared once, in an append-only migration list. SQLite-backed
+  // storage is what the object uses for its sequence counter and rate windows,
+  // and it is the shape a hibernatable object wakes up with.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Chat"],
+    },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -58,6 +78,16 @@
       ],
       "images": {
         "binding": "IMAGES",
+      },
+      // The chat namespace is a binding too, so the prod environment repeats it.
+      // The class and its migration are declared once at the top level.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CHATS",
+            "class_name": "Chat",
+          },
+        ],
       },
     },
   },

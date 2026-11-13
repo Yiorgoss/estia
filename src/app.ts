@@ -7,6 +7,7 @@ import {
   FileSystem,
   Layer,
   Logger,
+  ManagedRuntime,
   Path,
   References,
   String,
@@ -16,6 +17,8 @@ import { HealthRouter } from "./api/health";
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "./api";
 import { StorageRepositoryLive } from "./repos/storage.repo";
 import { PhotoThumbnailerLive } from "./services/photo-thumbnail.service";
+import { ChatObjectLive } from "./repos/chat-object.repo";
+import { handleChatSocketUpgrade, isChatSocketPath } from "./handlers/chat-socket";
 
 export class EnvVars extends Context.Service<
   EnvVars,
@@ -68,6 +71,8 @@ type WorkerBindings = {
   readonly STORAGE: R2Bucket;
   // The codec behind the downscaled card image of a gallery photo.
   readonly IMAGES: ImagesBinding;
+  // One Durable Object per chat, addressed by the chat id as a name.
+  readonly CHATS: DurableObjectNamespace;
   readonly ENVIRONMENT: "local" | "production";
 } & {
   readonly [key: string]: string;
@@ -111,32 +116,61 @@ const ProdLoggerLive = Layer.merge(
   Layer.succeed(References.MinimumLogLevel, "Debug"),
 );
 
+/*
+ * The application services, with every binding they need. The same layer serves
+ * the HTTP router and the chat upgrade path: the upgrade is not an Effect route
+ * (a 101 is not something the router represents), but it authenticates and checks
+ * membership through the same services, so there is one session model and one
+ * chat repository rather than a second copy for sockets.
+ */
+const makeServicesLayer = (bindings: WorkerBindings) =>
+  AppServicesLive.pipe(
+    Layer.provideMerge(
+      D1Client.layer({
+        db: bindings.DB,
+        transformQueryNames: String.camelToSnake,
+        transformResultNames: String.snakeToCamel,
+      }),
+    ),
+    // Object storage is a Worker binding, so it is built with the app and is
+    // also visible to the services that capture it (the photo service), not
+    // only to route effects that read it per request.
+    Layer.provideMerge(StorageRepositoryLive(bindings.STORAGE)),
+    Layer.provideMerge(PhotoThumbnailerLive(bindings.IMAGES)),
+    // The chat object namespace is a binding too, so the service that posts
+    // through it takes it from here.
+    Layer.provideMerge(ChatObjectLive(bindings.CHATS)),
+    Layer.provideMerge(ConfigProvider.layer(makeConfigProvider(bindings))),
+    Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
+  );
+
 let runtime: { readonly handler: (request: globalThis.Request) => Promise<Response> } | undefined;
+
+const makeSocketRuntime = (bindings: WorkerBindings) =>
+  ManagedRuntime.make(makeServicesLayer(bindings));
+
+let socketRuntime: ReturnType<typeof makeSocketRuntime> | undefined;
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime;
-  const configProviderLayer = ConfigProvider.layer(makeConfigProvider(bindings));
-
   runtime = HttpRouter.toWebHandler(
-    WorkerApp.pipe(
-      Layer.provide(
-        D1Client.layer({
-          db: bindings.DB,
-          transformQueryNames: String.camelToSnake,
-          transformResultNames: String.snakeToCamel,
-        }),
-      ),
-      // Object storage is a Worker binding, so it is built with the app and is
-      // also visible to the services that capture it (the photo service), not
-      // only to route effects that read it per request.
-      Layer.provideMerge(StorageRepositoryLive(bindings.STORAGE)),
-      Layer.provideMerge(PhotoThumbnailerLive(bindings.IMAGES)),
-      Layer.provide(configProviderLayer),
-      Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
-    ),
+    WorkerApp.pipe(Layer.provideMerge(makeServicesLayer(bindings))),
   );
   return runtime;
 };
+
+const makeOrGetSocketRuntime = (bindings: WorkerBindings) => {
+  const existing = socketRuntime;
+  if (existing !== undefined) return existing;
+  const created = makeSocketRuntime(bindings);
+  socketRuntime = created;
+  return created;
+};
+
+// The Durable Object class the `CHATS` binding names. A Worker can only reach a
+// class it exports, so the object lives behind this re-export from the entry
+// module.
+export { Chat } from "./durable-objects/chat";
 
 export default {
   fetch(
@@ -145,6 +179,19 @@ export default {
     executionContext: ExecutionContext,
   ): Promise<Response> {
     void executionContext;
+    /*
+     * A WebSocket upgrade is handled before the Effect router. The router answers
+     * with an ordinary response, and a 101 is a response the runtime builds around
+     * a socket, so the upgrade is plumbed here and delegates its identity work to
+     * `handleChatSocketUpgrade` and the app's own services.
+     */
+    if (isChatSocketPath(request)) {
+      return handleChatSocketUpgrade({
+        request,
+        chats: env.CHATS,
+        run: (effect) => makeOrGetSocketRuntime(env).runPromise(effect),
+      });
+    }
     return makeOrGetRuntime(env).handler(request);
   },
 };

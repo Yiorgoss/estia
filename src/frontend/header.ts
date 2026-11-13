@@ -30,6 +30,13 @@ export const header = `
         </a>
 
         <a
+          href="/chats"
+          class="text-sm font-medium text-gray-700 hover:text-blue-600"
+        >
+          Chats
+        </a>
+
+        <a
           href="/listings/mine"
           class="text-sm font-medium text-gray-700 hover:text-blue-600"
         >

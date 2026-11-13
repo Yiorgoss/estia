@@ -1,7 +1,17 @@
 import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { ProfileInput, RoleSwitchQuery } from "@/db/schema/Profile";
-import { ListingId, UserRoles } from "@/db/schema/brands";
+import { ChatId, ListingId, UserRoles } from "@/db/schema/brands";
+import {
+  ChatDetailSchema,
+  ChatInboxSchema,
+  ChatMessageSchema,
+  ChatMessagesQuery,
+  ChatMessagesSchema,
+  ChatReadInput,
+  ChatReadSchema,
+  SendMessageInput,
+} from "@/db/schema/Chat";
 import { CurrentUser } from "@/db/schema/User";
 import {
   CreateListingInput,
@@ -25,6 +35,11 @@ import {
   ListingNotOwnedError,
   ListingValidationError,
 } from "@/services/listing.service";
+import {
+  ChatNotFoundError,
+  ChatRateLimitedError,
+  ChatValidationError,
+} from "@/services/chat.service";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
@@ -32,6 +47,7 @@ import { ListingPageRoutes } from "@/handlers/private/listing-pages";
 import { ListingPhotoPageRoutes } from "@/handlers/private/listing-photo-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
 import { SavedSearchRoutes } from "@/handlers/private/saved-search-routes";
+import { ChatPageRoutes } from "@/handlers/private/chat-pages";
 
 /*
  * The caller's own profile. The role is the account's stored role, which is what
@@ -176,10 +192,69 @@ export const ListingGroup = HttpApiGroup.make("listing-group")
   )
   .prefix("/listings");
 
+/*
+ * The caller's chats. Every endpoint is scoped to the cookie: no request carries
+ * a user id, the inbox is chosen by the caller's own participant row, and a chat
+ * id the caller does not belong to is the same 404 as one that does not exist.
+ *
+ * `send` is the no-socket fallback. It posts to the chat object rather than
+ * inserting a row here, so a message sent this way takes the next sequence number
+ * exactly as a live socket send would.
+ */
+export const ChatGroup = HttpApiGroup.make("chat-group")
+  .add(
+    HttpApiEndpoint.get("inbox", "/", {
+      success: ChatInboxSchema,
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("detail", "/:id", {
+      params: { id: ChatId },
+      success: ChatDetailSchema,
+      // Reading a chat is opening it, so the caller's read mark moves here and
+      // the inbox badge for this thread clears.
+      error: [ChatNotFoundError, UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("messages", "/:id/messages", {
+      params: { id: ChatId },
+      query: ChatMessagesQuery,
+      success: ChatMessagesSchema,
+      error: [ChatNotFoundError, UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("send", "/:id/messages", {
+      params: { id: ChatId },
+      payload: SendMessageInput,
+      success: ChatMessageSchema,
+      error: [
+        ChatNotFoundError,
+        ChatValidationError,
+        ChatRateLimitedError,
+        UnauthorizedError,
+        InternalError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("read", "/:id/read", {
+      params: { id: ChatId },
+      payload: ChatReadInput,
+      success: ChatReadSchema,
+      error: [ChatNotFoundError, UnauthorizedError, InternalError],
+    }),
+  )
+  // A group prefix only applies to the endpoints added before it.
+  .prefix("/chats");
+
 // The api prefix only applies to the groups added before it.
 export const PrivateApi = HttpApi.make("private-api")
   .add(UserGroup)
   .add(ListingGroup)
+  .add(ChatGroup)
   .prefix("/api");
 
 export const PrivateRoutes = HttpRouter.addAll([
@@ -199,4 +274,5 @@ export const PrivateRoutes = HttpRouter.addAll([
   ...ListingPhotoPageRoutes,
   ...ProfilePageRoutes,
   ...SavedSearchRoutes,
+  ...ChatPageRoutes,
 ]);

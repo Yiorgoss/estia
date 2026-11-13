@@ -6,6 +6,7 @@ import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Path } from
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { SqlClient } from "effect/sql";
 import { TestSqlLive } from "./sql";
+import { ChatObjectTestLive, TEST_JWT_SECRET } from "./chat-object";
 
 /*
  * A whole app behind a Fetch handler: the real public and private routers, the
@@ -28,7 +29,7 @@ uint8ArrayPrototype.toHex ??= function (this: Uint8Array) {
 };
 
 const DOMAIN = "http://listings.test";
-const JWT_SECRET = "listings-test-secret-listings-test-secret";
+const JWT_SECRET = TEST_JWT_SECRET;
 const TEST_ORIGIN = "http://localhost";
 
 /*
@@ -132,6 +133,9 @@ const makeApp = (config: Readonly<Record<string, string>> = {}) => {
     HttpRouter.provideRequest(AppServicesLive),
     Layer.provideMerge(StorageRepositoryStub),
     Layer.provideMerge(PhotoThumbnailerStub),
+    // The chat object contract, which in production is the `CHATS` Durable
+    // Object binding rather than a layer.
+    Layer.provideMerge(ChatObjectTestLive),
     Layer.provide(TestSqlLive),
     Layer.provide(ConfigLive),
   );
@@ -232,6 +236,7 @@ export const testOrigin = TEST_ORIGIN;
 
 export interface TestUser {
   readonly id: string;
+  readonly email: string;
   readonly cookie: string;
   // The live refresh token the registration issued, for tests that drive a
   // session rotation from a browser that still holds it.
@@ -313,6 +318,7 @@ export const register = (label: string): Effect.Effect<TestUser> =>
     const claims = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString());
     return {
       id: String(claims.id),
+      email,
       cookie: `access_token=${accessToken}`,
       refreshToken,
     };
