@@ -19,12 +19,12 @@ jobs:
         uses: qodo-ai/pr-agent@main
         env:
           # Credentials
-          DEEPSEEK.KEY: ${{ secrets.OPENCODE_API_KEY}}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY}}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # Model
-          config.model: "deepseek/deepseek-v4.1-flash"
-          config.fallback_models: '["deepseek/deepseek-v4.1-flash"]'
+          config.model: "opencode_go/deepseek-v4.1-flash"
+          config.fallback_models: '["opencode_go/deepseek-flash-latest","opencode_go/glm-5.3-flash"]'
           config.custom_model_max_tokens: "128000"
 
           # Automatic commands on new PRs

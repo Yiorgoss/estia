@@ -5,6 +5,7 @@ import { Schema } from "effect";
  * Basically shits getting loaded before each other
  * Maybe cyclical deps, maybe I could give a fuck. Stick all brandedtypes in here and well be all right
  */
+
 export const JWTSchema = Schema.String.pipe(Schema.brand("JWT"));
 
 export const UserPasswordHash = Schema.String.pipe(Schema.brand("UserPasswordHash"));
