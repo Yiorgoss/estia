@@ -19,13 +19,18 @@ jobs:
         uses: qodo-ai/pr-agent@main
         env:
           # Credentials
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY}}
+          OPENAI_KEY: ${{ secrets.OPENCODE_API_KEY}}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Model
-          config.model: "opencode_go/deepseek-v4.1-flash"
-          config.fallback_models: '["opencode_go/deepseek-flash-latest","opencode_go/glm-5.3-flash"]'
-          config.custom_model_max_tokens: "128000"
+          OPENAI.API_BASE: "https://opencode.ai/zen/go/v1"
+          CONFIG.MODEL: "openai/deepseek-v4.1-flash"
+          CONFIG.FALLBACK_MODELS: '["openai/deepseek-flash-latest", "openai/glm-5.3-flash"]'
+
+          # # Model
+          # config.model: "opencode_go/deepseek-v4.1-flash"
+          # config.fallback_models: '["opencode_go/deepseek-flash-latest","opencode_go/glm-5.3-flash"]'
+          # config.custom_model_max_tokens: "128000"
+          
 
           # Automatic commands on new PRs
           github_action_config.auto_review: "true"
