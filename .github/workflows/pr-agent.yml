@@ -27,6 +27,7 @@ jobs:
           CONFIG.MODEL: "openai/deepseek-v4.1-flash"
           CONFIG.FALLBACK_MODELS: '["openai/deepseek-flash-latest", "openai/glm-5.3-flash"]'
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "128000"
+          LITELLM.EXTRA_HEADERS: '{"x-opencode-session": "pr-agent-${{ github.run_id }}", "User-Agent": "pr-agent-estia/1.0"}'
           # # Model
           # config.model: "opencode_go/deepseek-v4.1-flash"
           # config.fallback_models: '["opencode_go/deepseek-flash-latest","opencode_go/glm-5.3-flash"]'
