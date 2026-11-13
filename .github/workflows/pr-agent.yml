@@ -22,10 +22,11 @@ jobs:
           OPENAI_KEY: ${{ secrets.OPENCODE_API_KEY}}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+          # OPENAI.API_BASE: "https://opencode.ai/inference/go/openai/v1/responses"
           OPENAI.API_BASE: "https://opencode.ai/zen/go/v1"
           CONFIG.MODEL: "openai/deepseek-v4.1-flash"
           CONFIG.FALLBACK_MODELS: '["openai/deepseek-flash-latest", "openai/glm-5.3-flash"]'
-
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "128000"
           # # Model
           # config.model: "opencode_go/deepseek-v4.1-flash"
           # config.fallback_models: '["opencode_go/deepseek-flash-latest","opencode_go/glm-5.3-flash"]'
