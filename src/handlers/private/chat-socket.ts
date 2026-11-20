@@ -106,6 +106,14 @@ const isSameOriginUpgrade = (request: Request): boolean => {
   }
 };
 
+const safeDecodeURIComponent = (raw: string): string | undefined => {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return undefined;
+  }
+};
+
 export const matchChatSocketPath = (pathname: string): string | null => {
   const match = /^\/api\/chats\/([^/]+)\/socket$/.exec(pathname);
   return match?.[1] ?? null;
@@ -126,7 +134,7 @@ export const handleChatSocketUpgrade = (
 
     const url = new URL(request.url);
     const rawChatId = matchChatSocketPath(url.pathname);
-    const chatId = rawChatId === null ? undefined : decodeChatId(decodeURIComponent(rawChatId));
+    const chatId = rawChatId === null ? undefined : decodeChatId(safeDecodeURIComponent(rawChatId));
     if (chatId === undefined) {
       return new Response("Not Found", { status: 404 });
     }

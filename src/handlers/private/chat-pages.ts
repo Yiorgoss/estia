@@ -51,11 +51,12 @@ const chatDetailRoute = HttpRouter.route("GET", "/chats/:id", () =>
 
     const chatService = yield* ChatService;
     const chat = yield* chatService.getChat(user.id, chatId);
-    const { messages } = yield* chatService.listMessages(user.id, chatId, { after: 0, limit: 100 });
+    const { messages } = yield* chatService.listRecentMessages(user.id, chatId, 100);
+    const lastRenderedSeq = messages[messages.length - 1]?.seq ?? 0;
 
     // Opening a chat clears the caller's unread count and notifies the Chat DO
     // so the other participant's live thread updates.
-    const read = yield* chatService.markRead(user.id, chatId);
+    const read = yield* chatService.markRead(user.id, chatId, lastRenderedSeq);
 
     return html(
       chatDetailPage({
@@ -129,7 +130,7 @@ const postChatMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (re
     }
 
     const chat = yield* chatService.getChat(user.id, chatId);
-    const { messages } = yield* chatService.listMessages(user.id, chatId, { after: 0, limit: 100 });
+    const { messages } = yield* chatService.listRecentMessages(user.id, chatId, 100);
     const status =
       failure._tag === "ChatRateLimitError"
         ? 429

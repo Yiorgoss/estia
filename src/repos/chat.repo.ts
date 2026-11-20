@@ -58,6 +58,11 @@ export interface ChatRepository {
     limit: number,
   ) => Effect.Effect<{ readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean }, SqlError>;
 
+  readonly listRecentMessages: (
+    chatId: typeof ChatId.Type,
+    limit: number,
+  ) => Effect.Effect<{ readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean }, SqlError>;
+
   readonly markRead: (
     chatId: typeof ChatId.Type,
     userId: typeof UserId.Type,
@@ -84,6 +89,38 @@ const generateChatId = (): string => {
   crypto.getRandomValues(bytes);
   return toHex(bytes);
 };
+
+export const LIST_INBOX_FOR_USER_SQL = `
+  SELECT
+    c.id,
+    c.listing_id,
+    l.title AS listing_title,
+    l.region_code AS listing_region_code,
+    l.price_minor AS listing_price_minor,
+    cp_other.user_id AS counterpart_id,
+    cp_other.role AS counterpart_role,
+    CASE
+      WHEN cp_other.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), 'Listing owner')
+      ELSE COALESCE(NULLIF(TRIM(sk.name), ''), 'Seeker')
+    END AS counterpart_name,
+    cp.role AS my_role,
+    cp.last_seq,
+    cp.last_read_seq,
+    cp.unread_count,
+    c.last_message_body,
+    c.last_message_sender_id,
+    c.last_message_at,
+    c.created_at
+  FROM chat_participants cp
+  JOIN chats c ON c.id = cp.chat_id
+  JOIN listings l ON l.id = c.listing_id
+  JOIN chat_participants cp_other
+    ON cp_other.chat_id = cp.chat_id AND cp_other.user_id <> cp.user_id
+  LEFT JOIN listers li ON li.user_id = cp_other.user_id
+  LEFT JOIN seekers sk ON sk.user_id = cp_other.user_id
+  WHERE cp.user_id = ?
+  ORDER BY cp.last_message_at DESC, cp.last_seq DESC, cp.chat_id DESC
+`;
 
 export const ChatRepositoryLive = Layer.effect(
   ChatRepository,
@@ -197,37 +234,9 @@ export const ChatRepositoryLive = Layer.effect(
         ),
 
       listInboxForUser: (userId) =>
-        sql<Record<string, unknown>>`
-          SELECT
-            c.id,
-            c.listing_id,
-            l.title AS listing_title,
-            l.region_code AS listing_region_code,
-            l.price_minor AS listing_price_minor,
-            cp_other.user_id AS counterpart_id,
-            cp_other.role AS counterpart_role,
-            CASE
-              WHEN cp_other.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), 'Listing owner')
-              ELSE COALESCE(NULLIF(TRIM(sk.name), ''), 'Seeker')
-            END AS counterpart_name,
-            cp.role AS my_role,
-            cp.last_seq,
-            cp.last_read_seq,
-            cp.unread_count,
-            c.last_message_body,
-            c.last_message_sender_id,
-            c.last_message_at,
-            c.created_at
-          FROM chat_participants cp
-          JOIN chats c ON c.id = cp.chat_id
-          JOIN listings l ON l.id = c.listing_id
-          JOIN chat_participants cp_other
-            ON cp_other.chat_id = cp.chat_id AND cp_other.user_id <> cp.user_id
-          LEFT JOIN listers li ON li.user_id = cp_other.user_id
-          LEFT JOIN seekers sk ON sk.user_id = cp_other.user_id
-          WHERE cp.user_id = ${userId}
-          ORDER BY cp.last_message_at DESC, cp.last_seq DESC, cp.chat_id DESC;
-        `.pipe(Effect.map((rows) => rows.map(decodeChatSummary))),
+        sql
+          .unsafe<Record<string, unknown>>(LIST_INBOX_FOR_USER_SQL, [userId])
+          .pipe(Effect.map((rows) => rows.map(decodeChatSummary))),
 
       listMessagesAfter: (chatId, afterSeq, limit) =>
         sql<Record<string, unknown>>`
@@ -245,43 +254,49 @@ export const ChatRepositoryLive = Layer.effect(
           }),
         ),
 
+      listRecentMessages: (chatId, limit) =>
+        sql<Record<string, unknown>>`
+          SELECT id, chat_id, seq, sender_id, client_message_id, body, created_at
+            FROM chat_messages
+           WHERE chat_id = ${chatId}
+          ORDER BY seq DESC
+           LIMIT ${limit + 1};
+        `.pipe(
+          Effect.map((rows) => {
+            const hasMore = rows.length > limit;
+            const page = hasMore ? rows.slice(0, limit) : rows;
+            return { messages: page.map(decodeChatMessage).reverse(), hasMore };
+          }),
+        ),
+
       markRead: (chatId, userId, targetSeq) =>
         Effect.gen(function* () {
-          const rows = yield* sql<{ readonly lastSeq: number; readonly lastReadSeq: number }>`
-            SELECT last_seq, last_read_seq
-              FROM chat_participants
+          const seqParam = targetSeq ?? null;
+          const rows = yield* sql<{ readonly lastReadSeq: number; readonly unreadCount: number }>`
+            UPDATE chat_participants
+               SET last_read_seq = MAX(last_read_seq, MIN(COALESCE(${seqParam}, last_seq), last_seq)),
+                   unread_count = (
+                     SELECT COUNT(*)
+                       FROM chat_messages
+                      WHERE chat_id = chat_participants.chat_id
+                        AND seq > MAX(
+                              chat_participants.last_read_seq,
+                              MIN(COALESCE(${seqParam}, chat_participants.last_seq), chat_participants.last_seq)
+                            )
+                        AND sender_id <> chat_participants.user_id
+                   )
              WHERE chat_id = ${chatId}
                AND user_id = ${userId}
-             LIMIT 1;
+            RETURNING last_read_seq, unread_count;
           `;
           const row = rows[0];
           if (row === undefined) {
             return { lastReadSeq: 0, unreadCount: 0 };
           }
-
-          const lastSeq = Number(row.lastSeq);
-          const prevRead = Number(row.lastReadSeq);
-          const clampedTarget = targetSeq === undefined ? lastSeq : Math.min(targetSeq, lastSeq);
-          const nextRead = Math.max(prevRead, clampedTarget);
-
-          const unreadRows = yield* sql<{ readonly total: number }>`
-            SELECT COUNT(*) AS total
-              FROM chat_messages
-             WHERE chat_id = ${chatId}
-               AND seq > ${nextRead}
-               AND sender_id <> ${userId};
-          `;
-          const unreadCount = Number(unreadRows[0]?.total ?? 0);
-
-          yield* sql`
-            UPDATE chat_participants
-               SET last_read_seq = ${nextRead},
-                   unread_count = ${unreadCount}
-             WHERE chat_id = ${chatId}
-               AND user_id = ${userId};
-          `;
-
-          return { lastReadSeq: nextRead, unreadCount };
+          return {
+            lastReadSeq: Number(row.lastReadSeq),
+            unreadCount: Number(row.unreadCount),
+          };
         }),
     } satisfies ChatRepository;
   }).pipe(Effect.tapError((error) => Effect.logError("Chat repository failed", { error }))),

@@ -1,5 +1,5 @@
 import { ChatId, ListingId, UserId } from "@/db/schema/brands";
-import { ChatRepository, ChatRepositoryLive } from "@/repos/chat.repo";
+import { ChatRepository, ChatRepositoryLive, LIST_INBOX_FOR_USER_SQL } from "@/repos/chat.repo";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
@@ -102,37 +102,45 @@ describe("ChatRepository", () => {
 
       yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
 
-      const plan = yield* sql<{ readonly detail: string }>`
-        EXPLAIN QUERY PLAN
-        SELECT
-          c.id,
-          c.listing_id,
-          l.title AS listing_title,
-          l.region_code AS listing_region_code,
-          l.price_minor AS listing_price_minor,
-          cp_other.user_id AS counterpart_id,
-          cp_other.role AS counterpart_role,
-          cp.role AS my_role,
-          cp.last_seq,
-          cp.last_read_seq,
-          cp.unread_count,
-          c.last_message_body,
-          c.last_message_sender_id,
-          c.last_message_at,
-          c.created_at
-        FROM chat_participants cp
-        JOIN chats c ON c.id = cp.chat_id
-        JOIN listings l ON l.id = c.listing_id
-        JOIN chat_participants cp_other
-          ON cp_other.chat_id = cp.chat_id AND cp_other.user_id <> cp.user_id
-        WHERE cp.user_id = ${"u-seeker"}
-        ORDER BY cp.last_message_at DESC, cp.last_seq DESC, cp.chat_id DESC;
-      `;
+      const plan = yield* sql.unsafe<{ readonly detail: string }>(
+        `EXPLAIN QUERY PLAN ${LIST_INBOX_FOR_USER_SQL}`,
+        ["u-seeker"],
+      );
 
       const details = plan.map((row) => row.detail).join("\n");
       assert.include(details, "idx_chat_participants_inbox");
       assert.notInclude(details, "chat_messages");
       assert.notInclude(details, "TEMP B-TREE");
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("lists the most recent message window in ascending seq order", () =>
+    Effect.gen(function* () {
+      yield* seedUsersAndListing;
+      const repo = yield* ChatRepository;
+      const sql = yield* SqlClient.SqlClient;
+
+      const chat = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
+      for (let seq = 1; seq <= 5; seq += 1) {
+        yield* sql.unsafe(
+          "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
+          [chat.id, seq, "u-seeker", `r-${seq}`, `Message #${seq}`],
+        );
+      }
+
+      const recent = yield* repo.listRecentMessages(cid(chat.id), 3);
+      assert.isTrue(recent.hasMore);
+      assert.deepStrictEqual(
+        recent.messages.map((m) => m.seq),
+        [3, 4, 5],
+      );
+
+      const all = yield* repo.listRecentMessages(cid(chat.id), 10);
+      assert.isFalse(all.hasMore);
+      assert.deepStrictEqual(
+        all.messages.map((m) => m.seq),
+        [1, 2, 3, 4, 5],
+      );
     }).pipe(Effect.provide(TestLayer)),
   );
 

@@ -361,10 +361,7 @@ export const chatDetailPage = (state: {
   readonly error?: string | undefined;
 }): string => {
   const region = regionLabels[state.chat.listingRegionCode];
-  const lastSeq =
-    state.messages.length > 0
-      ? Math.max(state.chat.lastSeq, state.messages[state.messages.length - 1]?.seq ?? 0)
-      : state.chat.lastSeq;
+  const lastSeq = state.messages[state.messages.length - 1]?.seq ?? 0;
 
   return pageShell(
     `Chat with ${state.chat.counterpartName}`,

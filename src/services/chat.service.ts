@@ -71,6 +71,12 @@ export interface ChatService {
     options?: { readonly after?: number | undefined; readonly limit?: number | undefined },
   ) => Effect.Effect<ChatMessagesResponse, ChatNotFoundError | ChatForbiddenError | InternalError>;
 
+  readonly listRecentMessages: (
+    callerId: typeof UserId.Type,
+    chatId: typeof ChatId.Type,
+    limit?: number | undefined,
+  ) => Effect.Effect<ChatMessagesResponse, ChatNotFoundError | ChatForbiddenError | InternalError>;
+
   readonly sendMessage: (
     callerId: typeof UserId.Type,
     chatId: typeof ChatId.Type,
@@ -185,6 +191,16 @@ export const ChatServiceLive = Layer.effect(
             Math.max(1, Math.floor(options.limit ?? CHAT_MESSAGES_DEFAULT_LIMIT)),
           );
           return yield* fromSql(chatRepo.listMessagesAfter(chatId, after, limit));
+        }),
+
+      listRecentMessages: (callerId, chatId, limit) =>
+        Effect.gen(function* () {
+          yield* assertParticipant(callerId, chatId);
+          const clampedLimit = Math.min(
+            CHAT_MESSAGES_MAX_LIMIT,
+            Math.max(1, Math.floor(limit ?? CHAT_MESSAGES_DEFAULT_LIMIT)),
+          );
+          return yield* fromSql(chatRepo.listRecentMessages(chatId, clampedLimit));
         }),
 
       sendMessage: (callerId, chatId, input) =>

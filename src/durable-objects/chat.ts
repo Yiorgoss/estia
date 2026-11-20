@@ -168,7 +168,12 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
       return jsonResponse({ error: "Not found" }, 404);
     }
 
-    const chatId = decodeURIComponent(match[1] ?? "");
+    let chatId: string;
+    try {
+      chatId = decodeURIComponent(match[1] ?? "");
+    } catch {
+      return jsonResponse({ error: "Not found" }, 404);
+    }
     const action = match[2];
 
     const ticketHeader = request.headers.get(CHAT_TICKET_HEADER) ?? "";
@@ -372,7 +377,9 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
         safeSend(ws, { type: "error", code: "invalid_seq", message: "seq must be a non-negative integer." });
         return;
       }
-      const updated = await this.markReadInD1(attachment.chatId, attachment.userId, requestedSeq);
+      const updated = await this.enqueueWrite(() =>
+        this.markReadInD1(attachment.chatId, attachment.userId, requestedSeq),
+      );
       this.broadcastReadEvent(attachment.chatId, attachment.userId, updated.lastReadSeq);
       return;
     }
@@ -688,39 +695,34 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
     userId: string,
     requestedSeq: number | undefined,
   ): Promise<{ readonly lastReadSeq: number; readonly unreadCount: number }> {
-    const current = await this.env.DB.prepare(
-      `SELECT last_seq, last_read_seq FROM chat_participants WHERE chat_id = ? AND user_id = ?`,
+    const seqParam = requestedSeq ?? null;
+    const updated = await this.env.DB.prepare(
+      `UPDATE chat_participants
+          SET last_read_seq = MAX(last_read_seq, MIN(COALESCE(?, last_seq), last_seq)),
+              unread_count = (
+                SELECT COUNT(*)
+                  FROM chat_messages
+                 WHERE chat_id = chat_participants.chat_id
+                   AND seq > MAX(
+                         chat_participants.last_read_seq,
+                         MIN(COALESCE(?, chat_participants.last_seq), chat_participants.last_seq)
+                       )
+                   AND sender_id <> chat_participants.user_id
+              )
+        WHERE chat_id = ? AND user_id = ?
+       RETURNING last_read_seq, unread_count`,
     )
-      .bind(chatId, userId)
-      .first<{ last_seq: number; last_read_seq: number }>();
+      .bind(seqParam, seqParam, chatId, userId)
+      .first<{ last_read_seq: number; unread_count: number }>();
 
-    if (!current) {
+    if (!updated) {
       return { lastReadSeq: 0, unreadCount: 0 };
     }
 
-    const lastSeq = Number(current.last_seq);
-    const prevRead = Number(current.last_read_seq);
-    const target = requestedSeq === undefined ? lastSeq : Math.min(requestedSeq, lastSeq);
-    const nextRead = Math.max(prevRead, target);
-
-    const unreadRow = await this.env.DB.prepare(
-      `SELECT COUNT(*) AS total
-         FROM chat_messages
-        WHERE chat_id = ? AND seq > ? AND sender_id <> ?`,
-    )
-      .bind(chatId, nextRead, userId)
-      .first<{ total: number }>();
-    const unreadCount = Number(unreadRow?.total ?? 0);
-
-    await this.env.DB.prepare(
-      `UPDATE chat_participants
-          SET last_read_seq = ?, unread_count = ?
-        WHERE chat_id = ? AND user_id = ?`,
-    )
-      .bind(nextRead, unreadCount, chatId, userId)
-      .run();
-
-    return { lastReadSeq: nextRead, unreadCount };
+    return {
+      lastReadSeq: Number(updated.last_read_seq),
+      unreadCount: Number(updated.unread_count),
+    };
   }
 
   private broadcastReadEvent(chatId: string, userId: string, lastReadSeq: number): void {

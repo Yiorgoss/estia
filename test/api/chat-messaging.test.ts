@@ -668,4 +668,63 @@ describe("Chats: creation, ordering, gap replay, auth, hibernation, unread, and 
       assert.strictEqual(asObject(listerReply.json).seq, 11);
     }),
   );
+
+  it.effect("renders the latest 100 messages on GET /chats/:id when history exceeds 100 messages", () =>
+    Effect.gen(function* () {
+      const lister = yield* register("chat-window-lister");
+      const seeker = yield* register("chat-window-seeker");
+      const listingId = yield* createPublishedListing(lister, "Long History Flat");
+
+      const opened = yield* send("POST", "/api/chats", {
+        cookie: seeker.cookie,
+        payload: { listingId },
+      });
+      const chatId = asObject(opened.json).id as string;
+
+      const now = 1_750_000_000_000;
+      for (let seq = 1; seq <= 105; seq += 1) {
+        yield* query(
+          "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [chatId, seq, seeker.id, `bulk-${seq}`, `Message number ${seq}`, now + seq],
+        );
+      }
+      yield* query(
+        "UPDATE chats SET last_seq = 105, last_message_body = 'Message number 105', last_message_sender_id = ?, last_message_at = ? WHERE id = ?",
+        [seeker.id, now + 105, chatId],
+      );
+      yield* query(
+        "UPDATE chat_participants SET last_seq = 105, last_message_at = ?, last_read_seq = 0, unread_count = 105 WHERE chat_id = ? AND user_id = ?",
+        [now + 105, chatId, lister.id],
+      );
+
+      const page = yield* call(`/chats/${chatId}`, { headers: { cookie: lister.cookie } });
+      assert.strictEqual(page.status, 200);
+      assert.include(page.body, "Message number 105");
+      assert.include(page.body, "Message number 6");
+      assert.notInclude(page.body, 'data-seq="5"');
+      assert.include(page.body, '"lastSeq":105');
+
+      const inbox = yield* send("GET", "/api/chats", { cookie: lister.cookie });
+      assert.strictEqual(asObject(inbox.json).totalUnread, 0);
+    }),
+  );
+
+  it.effect("returns 404 on malformed percent-encoded chat ids for both Worker socket and Chat DO", () =>
+    Effect.gen(function* () {
+      const seeker = yield* register("chat-malformed-seeker");
+
+      const workerRes = yield* openSocket("%E0%A4%A", seeker.cookie);
+      assert.strictEqual(workerRes.status, 404);
+
+      const stub = testChatNamespace.namespace.get(testChatNamespace.namespace.idFromName("malformed"));
+      const doRes = yield* Effect.promise(() =>
+        stub.fetch(
+          new Request("https://chat.internal/chats/%E0%A4%A/socket", {
+            headers: { upgrade: "websocket" },
+          }),
+        ),
+      );
+      assert.strictEqual(doRes.status, 404);
+    }),
+  );
 });

@@ -99,6 +99,24 @@ describe("chat pages", () => {
     assert.include(html, "Maria read up to #1");
   });
 
+  it("initializes client lastSeq from the last rendered message instead of chat.lastSeq", () => {
+    const html = chatDetailPage({
+      chat: detail({ lastSeq: 150 }),
+      messages: [message({ seq: 100, body: "Rendered tail" })],
+      currentUserId: seekerId,
+    });
+
+    assert.include(html, '"lastSeq":100');
+    assert.notInclude(html, '"lastSeq":150');
+
+    const emptyHtml = chatDetailPage({
+      chat: detail({ lastSeq: 5 }),
+      messages: [],
+      currentUserId: seekerId,
+    });
+    assert.include(emptyHtml, '"lastSeq":0');
+  });
+
   it("renders chat error pages cleanly", () => {
     const html = chatErrorPage("Access denied", "You are not a participant in this chat.");
     assert.include(html, "Access denied");
