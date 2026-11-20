@@ -32,7 +32,9 @@ const chatsInboxRoute = HttpRouter.route("GET", "/chats", () =>
   }).pipe(
     Effect.catchTags({
       UnauthorizedError: () =>
-        Effect.succeed(html(chatErrorPage("Sign in required", "Please sign in to view your chats."), 401)),
+        Effect.succeed(
+          html(chatErrorPage("Sign in required", "Please sign in to view your chats."), 401),
+        ),
       InternalError: () =>
         Effect.succeed(
           html(chatErrorPage("Chats unavailable", "Your chats could not be loaded just now."), 500),
@@ -72,7 +74,9 @@ const chatDetailRoute = HttpRouter.route("GET", "/chats/:id", () =>
   }).pipe(
     Effect.catchTags({
       UnauthorizedError: () =>
-        Effect.succeed(html(chatErrorPage("Sign in required", "Please sign in to view this chat."), 401)),
+        Effect.succeed(
+          html(chatErrorPage("Sign in required", "Please sign in to view this chat."), 401),
+        ),
       ChatNotFoundError: () =>
         Effect.succeed(html(chatErrorPage("Chat not found", "This chat does not exist."), 404)),
       ChatForbiddenError: () =>
@@ -156,7 +160,9 @@ const postChatMessageRoute = HttpRouter.route("POST", "/chats/:id/messages", (re
   }).pipe(
     Effect.catchTags({
       UnauthorizedError: () =>
-        Effect.succeed(html(chatErrorPage("Sign in required", "Please sign in to send messages."), 401)),
+        Effect.succeed(
+          html(chatErrorPage("Sign in required", "Please sign in to send messages."), 401),
+        ),
       ChatNotFoundError: () =>
         Effect.succeed(html(chatErrorPage("Chat not found", "This chat does not exist."), 404)),
       ChatForbiddenError: () =>
@@ -193,12 +199,19 @@ const openListingChatRoute = HttpRouter.route("POST", "/listings/:id/chat", (req
   }).pipe(
     Effect.catchTags({
       UnauthorizedError: () =>
-        Effect.succeed(html(chatErrorPage("Sign in required", "Please sign in to message the lister."), 401)),
+        Effect.succeed(
+          html(chatErrorPage("Sign in required", "Please sign in to message the lister."), 401),
+        ),
       ListingNotFoundError: () =>
-        Effect.succeed(html(chatErrorPage("Listing not found", "This listing is not available."), 404)),
+        Effect.succeed(
+          html(chatErrorPage("Listing not found", "This listing is not available."), 404),
+        ),
       ChatSelfNotAllowedError: () =>
         Effect.succeed(
-          html(chatErrorPage("Cannot message yourself", "You cannot open a chat on your own listing."), 400),
+          html(
+            chatErrorPage("Cannot message yourself", "You cannot open a chat on your own listing."),
+            400,
+          ),
         ),
       InternalError: () =>
         Effect.succeed(

@@ -220,10 +220,7 @@ export const testJwtSecret: string = shared.jwtSecret;
  * Drives the Worker's real WebSocket upgrade boundary (`handleChatSocketUpgrade`)
  * against the shared in-memory database and real `Chat` Durable Object class.
  */
-export const callChatSocket = (
-  path: string,
-  init?: RequestInit,
-): Effect.Effect<Response> =>
+export const callChatSocket = (path: string, init?: RequestInit): Effect.Effect<Response> =>
   Effect.scoped(
     Effect.gen(function* () {
       const scope = yield* Effect.scope;

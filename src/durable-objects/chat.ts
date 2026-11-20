@@ -75,7 +75,13 @@ const rateKey = (userId: string) => `rate:${userId}`;
 
 type PersistOutcome =
   | { readonly ok: true; readonly message: PersistedChatMessage; readonly deduplicated: boolean }
-  | { readonly ok: false; readonly status: 400 | 409 | 429 | 500; readonly code: string; readonly error: string; readonly retryAfterMs?: number };
+  | {
+      readonly ok: false;
+      readonly status: 400 | 409 | 429 | 500;
+      readonly code: string;
+      readonly error: string;
+      readonly retryAfterMs?: number;
+    };
 
 const mapMessageRow = (row: StoredMessageRow): PersistedChatMessage => ({
   id: Number(row.id),
@@ -194,7 +200,12 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return jsonResponse({ error: "Upgrade required" }, 426);
       }
-      return this.handleSocketUpgrade(url, ticket.chatId, ticket.userId, ticket.socketExp ?? ticket.exp);
+      return this.handleSocketUpgrade(
+        url,
+        ticket.chatId,
+        ticket.userId,
+        ticket.socketExp ?? ticket.exp,
+      );
     }
 
     if (action === "messages" && request.method === "POST") {
@@ -308,7 +319,8 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
       return jsonResponse({ error: "Invalid JSON payload" }, 400);
     }
 
-    const record = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
+    const record =
+      typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
     const lastReadSeq = record["lastReadSeq"];
     if (typeof lastReadSeq !== "number" || !Number.isInteger(lastReadSeq) || lastReadSeq < 0) {
       return jsonResponse({ error: "Invalid lastReadSeq" }, 400);
@@ -337,7 +349,11 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
     }
 
     if (typeof parsed !== "object" || parsed === null) {
-      safeSend(ws, { type: "error", code: "invalid_frame", message: "Message frame must be an object." });
+      safeSend(ws, {
+        type: "error",
+        code: "invalid_frame",
+        message: "Message frame must be an object.",
+      });
       return;
     }
 
@@ -355,7 +371,11 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
     if (type === "sync") {
       const after = frame["after"];
       if (typeof after !== "number" || !Number.isInteger(after) || after < 0) {
-        safeSend(ws, { type: "error", code: "invalid_after", message: "after must be a non-negative integer." });
+        safeSend(ws, {
+          type: "error",
+          code: "invalid_after",
+          message: "after must be a non-negative integer.",
+        });
         return;
       }
       const missed = await this.loadMessagesAfter(attachment.chatId, after);
@@ -374,7 +394,11 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
         requestedSeq !== undefined &&
         (typeof requestedSeq !== "number" || !Number.isInteger(requestedSeq) || requestedSeq < 0)
       ) {
-        safeSend(ws, { type: "error", code: "invalid_seq", message: "seq must be a non-negative integer." });
+        safeSend(ws, {
+          type: "error",
+          code: "invalid_seq",
+          message: "seq must be a non-negative integer.",
+        });
         return;
       }
       const updated = await this.enqueueWrite(() =>
@@ -389,7 +413,13 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
       const clientMessageId =
         typeof frame["clientMessageId"] === "string" ? frame["clientMessageId"] : "";
       const outcome = await this.enqueueWrite(() =>
-        this.persistAndBroadcastMessage(attachment.chatId, attachment.userId, clientMessageId, body, ws),
+        this.persistAndBroadcastMessage(
+          attachment.chatId,
+          attachment.userId,
+          clientMessageId,
+          body,
+          ws,
+        ),
       );
       if (!outcome.ok) {
         safeSend(ws, {
@@ -499,7 +529,9 @@ export class Chat extends DurableObject<ChatDurableObjectEnv> {
 
   private async consumeRateLimit(
     senderId: string,
-  ): Promise<{ readonly allowed: true } | { readonly allowed: false; readonly retryAfterMs: number }> {
+  ): Promise<
+    { readonly allowed: true } | { readonly allowed: false; readonly retryAfterMs: number }
+  > {
     const { max, windowMs } = this.rateLimitConfig();
     const now = Date.now();
     const key = rateKey(senderId);

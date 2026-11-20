@@ -194,7 +194,8 @@ const main = async () => {
   const detailBeforeHtml = await detailBefore.text();
   check(
     "listing detail shows Message lister CTA",
-    detailBefore.status === 200 && detailBeforeHtml.includes(`action="/listings/${listing.id}/chat"`),
+    detailBefore.status === 200 &&
+      detailBeforeHtml.includes(`action="/listings/${listing.id}/chat"`),
   );
 
   const openPageRes = await fetch(`${BASE_URL}/listings/${listing.id}/chat`, {
@@ -250,7 +251,10 @@ const main = async () => {
 
   try {
     await seekerWs.connect();
-    const seekerConnected = await seekerWs.waitFor((f) => f.type === "connected", "seeker connected");
+    const seekerConnected = await seekerWs.waitFor(
+      (f) => f.type === "connected",
+      "seeker connected",
+    );
     check(
       "seeker socket ignores tampered ?userId= and uses session identity",
       seekerConnected.userId === seeker.id && seekerConnected.chatId === chatId,
@@ -258,7 +262,10 @@ const main = async () => {
     );
 
     await listerWs.connect();
-    const listerConnected = await listerWs.waitFor((f) => f.type === "connected", "lister connected");
+    const listerConnected = await listerWs.waitFor(
+      (f) => f.type === "connected",
+      "lister connected",
+    );
     check("lister socket connected", listerConnected.userId === lister.id);
 
     seekerWs.send({ type: "ping" });
@@ -282,7 +289,9 @@ const main = async () => {
     );
     check(
       "live message 1 delivered with seq=1 and verified senderId",
-      ack1.message?.seq === 1 && live1.message?.senderId === seeker.id && live1.message?.body === "Hello from seeker #1",
+      ack1.message?.seq === 1 &&
+        live1.message?.senderId === seeker.id &&
+        live1.message?.body === "Hello from seeker #1",
     );
 
     seekerWs.send({ type: "send", clientMessageId: "live-2", body: "Hello from seeker #2" });
@@ -348,7 +357,10 @@ const main = async () => {
     );
     try {
       await listerReconnectWs.connect();
-      const replay = await listerReconnectWs.waitFor((f) => f.type === "replay", "reconnect replay");
+      const replay = await listerReconnectWs.waitFor(
+        (f) => f.type === "replay",
+        "reconnect replay",
+      );
       const seqs = (replay.messages ?? []).map((m) => m.seq);
       check(
         "reconnect with ?after=3 over refresh_token replays seq [4, 5] only",

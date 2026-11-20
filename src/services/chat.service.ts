@@ -46,10 +46,7 @@ export interface ChatService {
   readonly openForListing: (
     callerId: typeof UserId.Type,
     listingId: typeof ListingId.Type,
-  ) => Effect.Effect<
-    ChatDetail,
-    ListingNotFoundError | ChatSelfNotAllowedError | InternalError
-  >;
+  ) => Effect.Effect<ChatDetail, ListingNotFoundError | ChatSelfNotAllowedError | InternalError>;
 
   readonly findForListingAndCaller: (
     callerId: typeof UserId.Type,

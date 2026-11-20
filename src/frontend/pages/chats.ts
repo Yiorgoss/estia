@@ -112,7 +112,9 @@ const messageItem = (
 ): string => {
   const mine = message.senderId === currentUserId;
   const senderLabel = mine ? "You" : counterpartName;
-  const alignClass = mine ? "ml-auto bg-blue-700 text-white" : "mr-auto bg-white text-gray-900 border border-gray-200";
+  const alignClass = mine
+    ? "ml-auto bg-blue-700 text-white"
+    : "mr-auto bg-white text-gray-900 border border-gray-200";
   const metaClass = mine ? "text-blue-100" : "text-gray-500";
 
   return `
@@ -133,10 +135,7 @@ const messageItem = (
 };
 
 const safeInlineJson = (value: unknown): string =>
-  JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026");
+  JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 
 const chatClientScript = (config: {
   readonly chatId: string;

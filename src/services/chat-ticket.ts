@@ -38,7 +38,8 @@ const toBase64Url = (bytes: Uint8Array): string => {
 
 const fromBase64Url = (encoded: string): Uint8Array<ArrayBuffer> | null => {
   if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
-  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (encoded.length % 4)) % 4);
+  const padded =
+    encoded.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (encoded.length % 4)) % 4);
   try {
     const binary = atob(padded);
     const buffer = new ArrayBuffer(binary.length);

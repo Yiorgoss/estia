@@ -3,10 +3,7 @@ import { decodeChatId } from "@/db/schema/Chat";
 import { ChatRepository } from "@/repos/chat.repo";
 import { UserRepository } from "@/repos/user.repo";
 import { AuthService } from "@/services/auth.service";
-import {
-  CHAT_TICKET_HEADER,
-  signShortChatTicket,
-} from "@/services/chat-ticket";
+import { CHAT_TICKET_HEADER, signShortChatTicket } from "@/services/chat-ticket";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenService } from "@/services/refresh-token.service";
 import { Effect, Option, Schema } from "effect";
@@ -216,9 +213,9 @@ export const handleChatSocketUpgrade = (
     };
 
     // Verify the account still exists in D1 rather than trusting only the token.
-    const storedUser = yield* userRepo.findById(user.id).pipe(
-      Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }),
-    );
+    const storedUser = yield* userRepo
+      .findById(user.id)
+      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }));
     if (Option.isNone(storedUser)) {
       return withRotatedCookies(new Response("Unauthorized", { status: 401 }));
     }
@@ -233,16 +230,16 @@ export const handleChatSocketUpgrade = (
       );
     }
 
-    const chatExists = yield* chatRepo.findById(chatId).pipe(
-      Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }),
-    );
+    const chatExists = yield* chatRepo
+      .findById(chatId)
+      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }));
     if (Option.isNone(chatExists)) {
       return withRotatedCookies(new Response("Not Found", { status: 404 }));
     }
 
-    const isMember = yield* chatRepo.isParticipant(chatId, user.id).pipe(
-      Effect.catchTags({ SqlError: () => Effect.succeed(false) }),
-    );
+    const isMember = yield* chatRepo
+      .isParticipant(chatId, user.id)
+      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(false) }));
     if (!isMember) {
       return withRotatedCookies(new Response("Forbidden", { status: 403 }));
     }
@@ -281,7 +278,8 @@ export const handleChatSocketUpgrade = (
 
     const stub = env.CHATS.get(env.CHATS.idFromName(chatId));
     const doResponse = yield* Effect.tryPromise({
-      try: () => stub.fetch(new Request(doUrl.toString(), { method: "GET", headers: forwardedHeaders })),
+      try: () =>
+        stub.fetch(new Request(doUrl.toString(), { method: "GET", headers: forwardedHeaders })),
       catch: () => null,
     }).pipe(Effect.catch(() => Effect.succeed(null)));
 

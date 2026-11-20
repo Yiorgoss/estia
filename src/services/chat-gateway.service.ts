@@ -1,14 +1,7 @@
 import { ChatId, UserId } from "@/db/schema/brands";
 import { ChatMessageSchema, type ChatMessage } from "@/db/schema/Chat";
-import {
-  ChatConflictError,
-  ChatRateLimitError,
-  ChatValidationError,
-} from "@/services/chat-errors";
-import {
-  CHAT_TICKET_HEADER,
-  signShortChatTicket,
-} from "@/services/chat-ticket";
+import { ChatConflictError, ChatRateLimitError, ChatValidationError } from "@/services/chat-errors";
+import { CHAT_TICKET_HEADER, signShortChatTicket } from "@/services/chat-ticket";
 import { InternalError } from "@/services/user.service";
 import { Config, Context, Effect, Layer, Schema } from "effect";
 
@@ -74,14 +67,17 @@ export const ChatGatewayLive = (
             const response = yield* Effect.tryPromise({
               try: () =>
                 stub.fetch(
-                  new Request(`https://chat.internal/chats/${encodeURIComponent(chatId)}/messages`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify({
-                      body: input.body,
-                      clientMessageId: input.clientMessageId,
-                    }),
-                  }),
+                  new Request(
+                    `https://chat.internal/chats/${encodeURIComponent(chatId)}/messages`,
+                    {
+                      method: "POST",
+                      headers,
+                      body: JSON.stringify({
+                        body: input.body,
+                        clientMessageId: input.clientMessageId,
+                      }),
+                    },
+                  ),
                 ),
               catch: () => new InternalError(),
             });
@@ -110,7 +106,8 @@ export const ChatGatewayLive = (
             }
             if (response.status === 429) {
               const retryAfterMs =
-                typeof record["retryAfterMs"] === "number" && Number.isFinite(record["retryAfterMs"])
+                typeof record["retryAfterMs"] === "number" &&
+                Number.isFinite(record["retryAfterMs"])
                   ? Math.max(100, Math.round(record["retryAfterMs"]))
                   : 1000;
               return yield* Effect.fail(new ChatRateLimitError({ message, retryAfterMs }));

@@ -213,12 +213,7 @@ export const ChatGroup = HttpApiGroup.make("chat-group")
     HttpApiEndpoint.post("open", "/", {
       payload: OpenChatInput,
       success: ChatDetailSchema,
-      error: [
-        ListingNotFoundError,
-        ChatSelfNotAllowedError,
-        UnauthorizedError,
-        InternalError,
-      ],
+      error: [ListingNotFoundError, ChatSelfNotAllowedError, UnauthorizedError, InternalError],
     }),
   )
   .add(

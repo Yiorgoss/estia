@@ -51,47 +51,49 @@ describe("ChatRepository", () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect("enforces unique indexes on (chat_id, seq) and (chat_id, client_message_id) and rejects self-chat", () =>
-    Effect.gen(function* () {
-      yield* seedUsersAndListing;
-      const repo = yield* ChatRepository;
-      const sql = yield* SqlClient.SqlClient;
+  it.effect(
+    "enforces unique indexes on (chat_id, seq) and (chat_id, client_message_id) and rejects self-chat",
+    () =>
+      Effect.gen(function* () {
+        yield* seedUsersAndListing;
+        const repo = yield* ChatRepository;
+        const sql = yield* SqlClient.SqlClient;
 
-      const chat = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
+        const chat = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
 
-      // Self-chat is refused by the database CHECK constraint.
-      const selfExit = yield* Effect.exit(
-        sql.unsafe(
-          "INSERT INTO chats (id, listing_id, seeker_id, lister_id) VALUES (?, ?, ?, ?)",
-          ["self-chat-id", 101, "u-lister", "u-lister"],
-        ),
-      );
-      assert.strictEqual(selfExit._tag, "Failure");
+        // Self-chat is refused by the database CHECK constraint.
+        const selfExit = yield* Effect.exit(
+          sql.unsafe(
+            "INSERT INTO chats (id, listing_id, seeker_id, lister_id) VALUES (?, ?, ?, ?)",
+            ["self-chat-id", 101, "u-lister", "u-lister"],
+          ),
+        );
+        assert.strictEqual(selfExit._tag, "Failure");
 
-      // Insert message seq=1 with client_message_id='m-1'.
-      yield* sql.unsafe(
-        "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
-        [chat.id, 1, "u-seeker", "m-1", "Hello"],
-      );
-
-      // Duplicate (chat_id, seq) is rejected by idx_chat_messages_chat_seq.
-      const dupSeqExit = yield* Effect.exit(
-        sql.unsafe(
+        // Insert message seq=1 with client_message_id='m-1'.
+        yield* sql.unsafe(
           "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
-          [chat.id, 1, "u-lister", "m-2", "Clash seq"],
-        ),
-      );
-      assert.strictEqual(dupSeqExit._tag, "Failure");
+          [chat.id, 1, "u-seeker", "m-1", "Hello"],
+        );
 
-      // Duplicate (chat_id, client_message_id) is rejected by idx_chat_messages_chat_client_id.
-      const dupClientExit = yield* Effect.exit(
-        sql.unsafe(
-          "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
-          [chat.id, 2, "u-seeker", "m-1", "Duplicate retry"],
-        ),
-      );
-      assert.strictEqual(dupClientExit._tag, "Failure");
-    }).pipe(Effect.provide(TestLayer)),
+        // Duplicate (chat_id, seq) is rejected by idx_chat_messages_chat_seq.
+        const dupSeqExit = yield* Effect.exit(
+          sql.unsafe(
+            "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
+            [chat.id, 1, "u-lister", "m-2", "Clash seq"],
+          ),
+        );
+        assert.strictEqual(dupSeqExit._tag, "Failure");
+
+        // Duplicate (chat_id, client_message_id) is rejected by idx_chat_messages_chat_client_id.
+        const dupClientExit = yield* Effect.exit(
+          sql.unsafe(
+            "INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body) VALUES (?, ?, ?, ?, ?)",
+            [chat.id, 2, "u-seeker", "m-1", "Duplicate retry"],
+          ),
+        );
+        assert.strictEqual(dupClientExit._tag, "Failure");
+      }).pipe(Effect.provide(TestLayer)),
   );
 
   it.effect("inbox query uses idx_chat_participants_inbox and never scans chat_messages", () =>

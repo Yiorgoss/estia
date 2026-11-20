@@ -145,7 +145,9 @@ const makePlatformLayer = (bindings: WorkerBindings) => {
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime;
-  runtime = HttpRouter.toWebHandler(WorkerApp.pipe(Layer.provideMerge(makePlatformLayer(bindings))));
+  runtime = HttpRouter.toWebHandler(
+    WorkerApp.pipe(Layer.provideMerge(makePlatformLayer(bindings))),
+  );
   return runtime;
 };
 

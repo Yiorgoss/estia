@@ -42,8 +42,7 @@ export class MockWebSocket {
     if (this.readyState !== 1) {
       throw new Error("WebSocket is not open");
     }
-    const text =
-      typeof data === "string" ? data : new TextDecoder().decode(new Uint8Array(data));
+    const text = typeof data === "string" ? data : new TextDecoder().decode(new Uint8Array(data));
     if (this.peer !== null) {
       this.peer.sent.push(text);
       this.peer.onMessageHandler?.(text);
@@ -222,13 +221,25 @@ export const createMockDurableObjectState = (idName: string): MockChatState => {
 
 export interface MockChatNamespaceHandle {
   readonly namespace: DurableObjectNamespace;
-  readonly getInstance: (chatId: string) => { readonly chat: Chat; readonly mockState: MockChatState };
+  readonly getInstance: (chatId: string) => {
+    readonly chat: Chat;
+    readonly mockState: MockChatState;
+  };
   // Simulates Cloudflare Durable Object hibernation: drops the in-memory `Chat`
   // instance while preserving `ctx.storage` and all accepted sockets, so the
   // next request/message/alarm constructs a brand new `Chat` instance.
   readonly hibernate: (chatId: string) => void;
-  readonly sendClientMessage: (chatId: string, clientSocket: MockWebSocket, payload: unknown) => Promise<void>;
-  readonly closeClientSocket: (chatId: string, clientSocket: MockWebSocket, code?: number, reason?: string) => Promise<void>;
+  readonly sendClientMessage: (
+    chatId: string,
+    clientSocket: MockWebSocket,
+    payload: unknown,
+  ) => Promise<void>;
+  readonly closeClientSocket: (
+    chatId: string,
+    clientSocket: MockWebSocket,
+    code?: number,
+    reason?: string,
+  ) => Promise<void>;
   readonly fireAlarm: (chatId: string) => Promise<void>;
   readonly resetAll: () => void;
 }
@@ -357,10 +368,10 @@ export const installWorkerd101ResponseShim = (): void => {
   globalRecord["__estia101ResponsePatched"] = true;
 };
 
-export const runEffectSql = (
-  sqlClient: SqlClient.SqlClient,
-) => <T extends object = Record<string, unknown>>(
-  statement: string,
-  params: ReadonlyArray<unknown>,
-): Promise<ReadonlyArray<T>> =>
-  Effect.runPromise(sqlClient.unsafe<T>(statement, params).pipe(Effect.orDie));
+export const runEffectSql =
+  (sqlClient: SqlClient.SqlClient) =>
+  <T extends object = Record<string, unknown>>(
+    statement: string,
+    params: ReadonlyArray<unknown>,
+  ): Promise<ReadonlyArray<T>> =>
+    Effect.runPromise(sqlClient.unsafe<T>(statement, params).pipe(Effect.orDie));

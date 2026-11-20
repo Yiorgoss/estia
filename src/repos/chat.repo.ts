@@ -31,7 +31,9 @@ export interface ChatRepository {
     listerId: typeof UserId.Type,
   ) => Effect.Effect<ChatRow, SqlError>;
 
-  readonly findById: (chatId: typeof ChatId.Type) => Effect.Effect<Option.Option<ChatRow>, SqlError>;
+  readonly findById: (
+    chatId: typeof ChatId.Type,
+  ) => Effect.Effect<Option.Option<ChatRow>, SqlError>;
 
   readonly findByListingAndSeeker: (
     listingId: typeof ListingId.Type,
@@ -56,12 +58,18 @@ export interface ChatRepository {
     chatId: typeof ChatId.Type,
     afterSeq: number,
     limit: number,
-  ) => Effect.Effect<{ readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean }, SqlError>;
+  ) => Effect.Effect<
+    { readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean },
+    SqlError
+  >;
 
   readonly listRecentMessages: (
     chatId: typeof ChatId.Type,
     limit: number,
-  ) => Effect.Effect<{ readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean }, SqlError>;
+  ) => Effect.Effect<
+    { readonly messages: ReadonlyArray<ChatMessage>; readonly hasMore: boolean },
+    SqlError
+  >;
 
   readonly markRead: (
     chatId: typeof ChatId.Type,
