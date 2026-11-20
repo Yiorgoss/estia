@@ -29,6 +29,7 @@ import {
 } from "@/db/schema/Listing";
 import { approximateLocation, ListingPinPage } from "@/db/schema/ListingPin";
 import { ListingNotFoundError, ListingService } from "@/services/listing.service";
+import { ChatService } from "@/services/chat.service";
 import {
   listingPhotoCardUrl,
   listingPhotoUrl,
@@ -38,6 +39,7 @@ import type { ListingPhoto } from "@/db/schema/ListingPhoto";
 import { ListingPhotoService } from "@/services/listing-photo.service";
 import type { PhotoVariant } from "@/services/listing-photo.service";
 import {
+  type ListingContactCta,
   listingDetailPage,
   listingNotFoundPage,
   listingUnavailablePage,
@@ -375,7 +377,7 @@ const searchPageRoute = HttpRouter.route("GET", "/search", (request) =>
 const notFoundResponse = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(listingNotFoundPage(), { status: 404, contentType: "text/html" });
 
-const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
+const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", (request) =>
   Effect.gen(function* () {
     const id = yield* Effect.map(HttpRouter.params, (params) => decodeListingId(params["id"]));
     if (id === undefined) return notFoundResponse();
@@ -384,7 +386,31 @@ const listingDetailRoute = HttpRouter.route("GET", "/listings/:id", () =>
     const listing = yield* listingService.getPublic(id);
     const photoService = yield* ListingPhotoService;
     const photos = yield* photoService.listPublic(id);
-    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos)));
+
+    const session = yield* optionalCaller(request);
+    if (session._tag === "retry") return retrySessionResponse(request);
+
+    let cta: ListingContactCta = { kind: "sign-in" };
+    if (session._tag === "caller") {
+      if (listing.ownerId === session.caller) {
+        cta = { kind: "owner" };
+      } else {
+        const chatService = yield* ChatService;
+        const existingChat = yield* chatService
+          .findForListingAndCaller(session.caller, listing.id)
+          .pipe(Effect.orElseSucceed(() => Option.none()));
+        cta = Option.isSome(existingChat)
+          ? { kind: "open-chat", chatId: existingChat.value }
+          : { kind: "start-chat" };
+      }
+
+      return HttpServerResponse.setCookiesUnsafe(
+        HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos), cta)),
+        session.cookies,
+      );
+    }
+
+    return HttpServerResponse.html(listingDetailPage(toPublicListing(listing, photos), cta));
   }).pipe(
     Effect.catchTags({
       ListingNotFoundError: () => Effect.succeed(notFoundResponse()),

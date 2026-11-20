@@ -1,10 +1,18 @@
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
+import { handleChatSocketUpgrade } from "@/handlers/private/chat-socket";
 import { StorageRepository } from "@/repos/storage.repo";
+import { ChatGatewayLive } from "@/services/chat-gateway.service";
 import { PhotoThumbnailer } from "@/services/photo-thumbnail.service";
 import { assert } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { SqlClient } from "effect/sql";
+import {
+  createD1Adapter,
+  createMockChatNamespace,
+  installWorkerd101ResponseShim,
+  type MockChatNamespaceHandle,
+} from "./chat-do";
 import { TestSqlLive } from "./sql";
 
 /*
@@ -119,8 +127,46 @@ const PhotoThumbnailerStub = Layer.succeed(PhotoThumbnailer, {
 });
 
 const makeApp = (config: Readonly<Record<string, string>> = {}) => {
-  const ConfigLive = ConfigProvider.layer(
-    ConfigProvider.fromUnknown({ DOMAIN, JWT_SECRET, ENVIRONMENT: "local", ...config }),
+  installWorkerd101ResponseShim();
+
+  const mergedConfig: Readonly<Record<string, string>> = {
+    DOMAIN,
+    JWT_SECRET,
+    ENVIRONMENT: "local",
+    ...config,
+  };
+  const jwtSecret = mergedConfig["JWT_SECRET"] ?? JWT_SECRET;
+  const ConfigLive = ConfigProvider.layer(ConfigProvider.fromUnknown(mergedConfig));
+
+  // Sharing the memo map is what lets `query`, `chatNamespace`, and `callChatSocket`
+  // reach the exact same in-memory SQLite database this app instance runs on.
+  const memoMap = Layer.makeMemoMapUnsafe();
+
+  const runSharedSql = <T extends object = Record<string, unknown>>(
+    statement: string,
+    params: ReadonlyArray<unknown>,
+  ): Promise<ReadonlyArray<T>> =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scope = yield* Effect.scope;
+          const context = yield* Layer.buildWithMemoMap(TestSqlLive, memoMap, scope);
+          const sql = Context.get(context, SqlClient.SqlClient);
+          return yield* sql.unsafe<T>(statement, params);
+        }),
+      ).pipe(Effect.orDie),
+    );
+
+  const d1 = createD1Adapter(runSharedSql);
+  const chatNamespace = createMockChatNamespace(() => ({
+    DB: d1,
+    JWT_SECRET: jwtSecret,
+    CHAT_RATE_LIMIT_MAX: mergedConfig["CHAT_RATE_LIMIT_MAX"],
+    CHAT_RATE_LIMIT_WINDOW_MS: mergedConfig["CHAT_RATE_LIMIT_WINDOW_MS"],
+  }));
+
+  const ChatGatewayTestLive = ChatGatewayLive(chatNamespace.namespace).pipe(
+    Layer.provide(ConfigLive),
   );
 
   const AppLayer = Layer.mergeAll(PublicRouterLive, PrivateRouterLive).pipe(
@@ -132,14 +178,26 @@ const makeApp = (config: Readonly<Record<string, string>> = {}) => {
     HttpRouter.provideRequest(AppServicesLive),
     Layer.provideMerge(StorageRepositoryStub),
     Layer.provideMerge(PhotoThumbnailerStub),
+    Layer.provideMerge(ChatGatewayTestLive),
     Layer.provide(TestSqlLive),
     Layer.provide(ConfigLive),
   );
 
-  // Sharing the memo map is what lets `query` below reach the one database this
-  // app instance runs on instead of opening a second, empty one.
-  const memoMap = Layer.makeMemoMapUnsafe();
-  return { memoMap, web: HttpRouter.toWebHandler(AppLayer, { disableLogger: true, memoMap }) };
+  const ServicesLayer = AppServicesLive.pipe(
+    Layer.provide(StorageRepositoryStub),
+    Layer.provide(PhotoThumbnailerStub),
+    Layer.provide(ChatGatewayTestLive),
+    Layer.provide(TestSqlLive),
+    Layer.provide(ConfigLive),
+  );
+
+  return {
+    memoMap,
+    chatNamespace,
+    jwtSecret,
+    servicesLayer: ServicesLayer,
+    web: HttpRouter.toWebHandler(AppLayer, { disableLogger: true, memoMap }),
+  };
 };
 
 /*
@@ -154,6 +212,28 @@ type TestApp = {
 
 const shared = makeApp();
 const app: TestApp = shared.web;
+
+export const testChatNamespace: MockChatNamespaceHandle = shared.chatNamespace;
+export const testJwtSecret: string = shared.jwtSecret;
+
+/*
+ * Drives the Worker's real WebSocket upgrade boundary (`handleChatSocketUpgrade`)
+ * against the shared in-memory database and real `Chat` Durable Object class.
+ */
+export const callChatSocket = (
+  path: string,
+  init?: RequestInit,
+): Effect.Effect<Response> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope;
+      const context = yield* Layer.buildWithMemoMap(shared.servicesLayer, shared.memoMap, scope);
+      return yield* handleChatSocketUpgrade(new Request(`${TEST_ORIGIN}${path}`, init), {
+        CHATS: shared.chatNamespace.namespace,
+        JWT_SECRET: shared.jwtSecret,
+      }).pipe(Effect.provide(context));
+    }),
+  ).pipe(Effect.orDie);
 
 /*
  * The database behind the shared app, for a test that has to prove what an

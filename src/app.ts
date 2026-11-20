@@ -7,6 +7,7 @@ import {
   FileSystem,
   Layer,
   Logger,
+  ManagedRuntime,
   Path,
   References,
   String,
@@ -14,8 +15,12 @@ import {
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HealthRouter } from "./api/health";
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "./api";
+import { handleChatSocketUpgrade, matchChatSocketPath } from "./handlers/private/chat-socket";
 import { StorageRepositoryLive } from "./repos/storage.repo";
+import { ChatGatewayLive } from "./services/chat-gateway.service";
 import { PhotoThumbnailerLive } from "./services/photo-thumbnail.service";
+
+export { Chat } from "./durable-objects/chat";
 
 export class EnvVars extends Context.Service<
   EnvVars,
@@ -68,6 +73,9 @@ type WorkerBindings = {
   readonly STORAGE: R2Bucket;
   // The codec behind the downscaled card image of a gallery photo.
   readonly IMAGES: ImagesBinding;
+  // One Durable Object per chat: owns ordering, live sockets, fan-out, and rate limits.
+  readonly CHATS: DurableObjectNamespace;
+  readonly JWT_SECRET: string;
   readonly ENVIRONMENT: "local" | "production";
 } & {
   readonly [key: string]: string;
@@ -112,30 +120,49 @@ const ProdLoggerLive = Layer.merge(
 );
 
 let runtime: { readonly handler: (request: globalThis.Request) => Promise<Response> } | undefined;
+let socketRuntime:
+  | ManagedRuntime.ManagedRuntime<Layer.Success<typeof AppServicesLive>, unknown>
+  | undefined;
+
+const makePlatformLayer = (bindings: WorkerBindings) => {
+  const configProviderLayer = ConfigProvider.layer(makeConfigProvider(bindings));
+  return Layer.mergeAll(
+    D1Client.layer({
+      db: bindings.DB,
+      transformQueryNames: String.camelToSnake,
+      transformResultNames: String.snakeToCamel,
+    }),
+    // Object storage, thumbnailer, and the Chat DO gateway are Worker bindings
+    // captured alongside the app layer so both route handlers and services see them.
+    StorageRepositoryLive(bindings.STORAGE),
+    PhotoThumbnailerLive(bindings.IMAGES),
+    ChatGatewayLive(bindings.CHATS),
+  ).pipe(
+    Layer.provideMerge(configProviderLayer),
+    Layer.provideMerge(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
+  );
+};
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime;
-  const configProviderLayer = ConfigProvider.layer(makeConfigProvider(bindings));
-
-  runtime = HttpRouter.toWebHandler(
-    WorkerApp.pipe(
-      Layer.provide(
-        D1Client.layer({
-          db: bindings.DB,
-          transformQueryNames: String.camelToSnake,
-          transformResultNames: String.snakeToCamel,
-        }),
-      ),
-      // Object storage is a Worker binding, so it is built with the app and is
-      // also visible to the services that capture it (the photo service), not
-      // only to route effects that read it per request.
-      Layer.provideMerge(StorageRepositoryLive(bindings.STORAGE)),
-      Layer.provideMerge(PhotoThumbnailerLive(bindings.IMAGES)),
-      Layer.provide(configProviderLayer),
-      Layer.provide(bindings.ENVIRONMENT === "local" ? DevLoggerLive : ProdLoggerLive),
-    ),
-  );
+  runtime = HttpRouter.toWebHandler(WorkerApp.pipe(Layer.provideMerge(makePlatformLayer(bindings))));
   return runtime;
+};
+
+const makeOrGetSocketRuntime = (bindings: WorkerBindings) => {
+  if (socketRuntime != undefined) return socketRuntime;
+  socketRuntime = ManagedRuntime.make(
+    AppServicesLive.pipe(Layer.provide(makePlatformLayer(bindings))),
+  );
+  return socketRuntime;
+};
+
+const isChatSocketRequest = (request: Request): boolean => {
+  try {
+    return matchChatSocketPath(new URL(request.url).pathname) !== null;
+  } catch {
+    return false;
+  }
 };
 
 export default {
@@ -145,6 +172,14 @@ export default {
     executionContext: ExecutionContext,
   ): Promise<Response> {
     void executionContext;
+    if (isChatSocketRequest(request)) {
+      return makeOrGetSocketRuntime(env).runPromise(
+        handleChatSocketUpgrade(request, {
+          CHATS: env.CHATS,
+          JWT_SECRET: env.JWT_SECRET,
+        }),
+      );
+    }
     return makeOrGetRuntime(env).handler(request);
   },
 };
