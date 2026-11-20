@@ -17,10 +17,23 @@ import { escapeHtml, formatDate, formatPriceMinor } from "@/utils";
 
 const backLinkClass =
   "inline-flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800";
+const primaryButtonClass =
+  "inline-block rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2";
 const secondaryButtonClass =
   "inline-block rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50";
 const chipClass = "rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700";
 const sectionHeadingClass = "text-sm font-semibold text-gray-900";
+
+/*
+ * The single contact surface on the listing detail page. A signed-in visitor
+ * opens or resumes the one-to-one chat for `(listing, seeker)`, an owner is
+ * pointed to their inbox, and a signed-out visitor is directed to sign in.
+ */
+export type ListingContactCta =
+  | { readonly kind: "sign-in" }
+  | { readonly kind: "owner" }
+  | { readonly kind: "open-chat"; readonly chatId: string }
+  | { readonly kind: "start-chat" };
 
 interface PageMetadata {
   readonly title: string;
@@ -122,7 +135,54 @@ const gallery = (listing: PublicListing): string => {
       </section>`;
 };
 
-export const listingDetailPage = (listing: PublicListing) => {
+const contactSection = (
+  listingId: PublicListing["id"],
+  cta: ListingContactCta | undefined,
+): string => {
+  if (cta === undefined) return "";
+
+  if (cta.kind === "owner") {
+    return `
+        <section class="mt-6 border-t border-gray-100 pt-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-gray-600">This is your listing.</p>
+            <a href="/chats" class="${secondaryButtonClass}">View chats</a>
+          </div>
+        </section>`;
+  }
+
+  if (cta.kind === "open-chat") {
+    return `
+        <section class="mt-6 border-t border-gray-100 pt-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-gray-600">You already have a chat about this listing.</p>
+            <a href="/chats/${escapeHtml(cta.chatId)}" class="${primaryButtonClass}">Open chat</a>
+          </div>
+        </section>`;
+  }
+
+  if (cta.kind === "start-chat") {
+    return `
+        <section class="mt-6 border-t border-gray-100 pt-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-gray-600">Interested in this place? Start a chat with the lister.</p>
+            <form method="post" action="/listings/${listingId}/chat">
+              <button type="submit" class="${primaryButtonClass}">Message lister</button>
+            </form>
+          </div>
+        </section>`;
+  }
+
+  return `
+        <section class="mt-6 border-t border-gray-100 pt-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-gray-600">Sign in to message the lister about this place.</p>
+            <a href="/login" class="${primaryButtonClass}">Sign in to message</a>
+          </div>
+        </section>`;
+};
+
+export const listingDetailPage = (listing: PublicListing, cta?: ListingContactCta) => {
   const region = regionLabels[listing.regionCode];
   const kind = kindLabels[listing.kind];
   const available = formatDate(listing.availableFrom);
@@ -189,6 +249,8 @@ export const listingDetailPage = (listing: PublicListing) => {
             ${detailRow("Published", published ?? "Not stated")}
           </dl>
         </section>
+
+        ${contactSection(listing.id, cta)}
       </div>
     </article>
     `,

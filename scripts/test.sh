@@ -69,4 +69,7 @@ BLOCKED_CODE="$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Host: evil.examp
 echo "==> HTTP smoke checklist"
 BASE_URL="$BASE_URL" bash scripts/smoke.sh
 
+echo "==> live messaging WebSocket integration"
+BASE_URL="$BASE_URL" node scripts/messaging-integration.mjs
+
 echo "all estia tests passed"

@@ -29,3 +29,4 @@ export const SeekerId = Schema.Number.pipe(Schema.brand("SeekerID"));
 export const GenderEnum = Schema.Literals(["male", "female", "NB"]);
 
 export const ChatId = Schema.String.pipe(Schema.brand("ChatId"));
+export const ChatMessageId = Schema.Number.pipe(Schema.brand("ChatMessageId"));
