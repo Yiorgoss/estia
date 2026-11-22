@@ -50,6 +50,8 @@ export interface SeedListing {
 }
 
 export declare const DEFAULT_BASE_URL: string;
+export declare const TEST_HOSTNAME: string;
+export declare const TEST_BASE_URL: string;
 export declare const SEED_PASSWORD: string;
 export declare const LOCAL_HOSTNAMES: ReadonlySet<string>;
 export declare const LISTING_PHOTO_MAX_BYTES: number;
@@ -60,11 +62,15 @@ export declare const SEED_LISTINGS: ReadonlyArray<SeedListing>;
 
 export declare class SeedSafetyError extends Error {}
 
-export declare const assertLocalTarget: (input: {
+export interface SeedTargetInput {
   readonly environment?: string | undefined;
   readonly nodeEnv?: string | undefined;
   readonly argv?: ReadonlyArray<string>;
   readonly baseUrl?: string;
-}) => URL;
+}
+
+export declare const assertSeedTarget: (input: SeedTargetInput) => URL;
+
+export declare const resolveSeedTarget: (input: SeedTargetInput) => URL;
 
 export declare const formatCredentialsTable: (users: ReadonlyArray<SeedUser>) => string;

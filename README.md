@@ -15,8 +15,19 @@ pnpm dev
 Then open http://localhost:5173.
 
 To fill the local database with dummy accounts, profiles, listings, and photos,
-run `pnpm seed` against the running dev server. See [docs/seed.md](docs/seed.md)
-for the command and the seeded logins.
+run `pnpm seed` against the running dev server. `pnpm seed:test` seeds the
+deployed test environment at https://estia.calisto.studio instead. See
+[docs/seed.md](docs/seed.md) for the commands and the seeded logins.
+
+## Test environment
+
+The `test` environment deploys to `https://estia.calisto.studio`:
+
+```bash
+pnpm migrate:test   # apply D1 migrations to the test database
+pnpm deploy:test    # build for env.test and deploy it
+pnpm seed:test      # fill it with the seed data
+```
 
 ## Checks
 

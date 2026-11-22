@@ -2,17 +2,20 @@
 /*
  * Local development seed data for estia.
  *
- * The script drives a running dev server through its own HTTP surface - the
- * public auth API, the private profile and listing APIs, and the real
- * multipart photo upload route - so the rows it creates are the rows the app
- * would create for a person: password hashes, provisioned profile rows, owned
- * listings, R2 objects, `listing_photos` rows, and the downscaled card images
- * the Images binding produces. Nothing here writes to the database directly.
+ * The script drives a running server - a local dev server by default, or the
+ * deployed test environment - through its own HTTP surface: the public auth
+ * API, the private profile and listing APIs, and the real multipart photo
+ * upload route. So the rows it creates are the rows the app would create for a
+ * person: password hashes, provisioned profile rows, owned listings, R2 objects,
+ * `listing_photos` rows, and the downscaled card images the Images binding
+ * produces. Nothing here writes to the database directly.
  *
- * Safety: this is a local tool. It refuses to run when the environment asks for
- * production, when `--remote` is passed, or when the target is not a loopback
- * address, and it is wired to its own `pnpm seed` script so no build, deploy,
- * or production startup path can reach it.
+ * Safety: this is a development tool. It refuses to run when the environment
+ * asks for production, when `--prod` or `--remote` is passed, or when the target
+ * is neither a loopback address nor the named test host
+ * (`estia.calisto.studio`). It is wired to its own `pnpm seed` and
+ * `pnpm seed:test` scripts, so no build, deploy, or production startup path can
+ * reach it.
  *
  * Re-running is safe: existing seeded accounts are signed in to, profiles are
  * upserted, listings are found by their deterministic seed titles, and only
@@ -23,18 +26,41 @@ import { pathToFileURL } from "node:url";
 
 export const DEFAULT_BASE_URL = "http://127.0.0.1:5173";
 
+/*
+ * The one remote host this tool may write to: the deployed test environment
+ * (`env.test` in `wrangler.jsonc`, served from a Cloudflare custom domain). The
+ * host is named here rather than derived from an environment variable, so no
+ * other remote address can ever become seedable by a typo.
+ */
+export const TEST_HOSTNAME = "estia.calisto.studio";
+export const TEST_BASE_URL = `https://${TEST_HOSTNAME}`;
+
 // Every seeded account shares this password. The app's only password rule is
 // "not empty", so the shortest memorable value is allowed and no production
 // validation is weakened for the seed.
 export const SEED_PASSWORD = "test";
 
-// A loopback address, in the forms a URL parser produces for one. Anything else
-// is not local, and the script refuses it.
+// A loopback address, in the forms a URL parser produces for one.
 export const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 // Environment values that mean "this is not a dev machine". `prod` is the
 // wrangler environment name this repository uses, so it is refused as well.
 const NON_LOCAL_ENVIRONMENTS = new Set(["production", "prod", "staging", "stage", "remote"]);
+
+// The environments `--env` may name. Only the deployed test environment is
+// seedable remotely; `--env prod` and friends are refused by name.
+const SEEDABLE_ENVIRONMENTS = new Set(["test"]);
+
+// Flags that ask for a remote or production target. `--remote` is wrangler's
+// own flag, so passing it here means the caller expected a wrangler command and
+// not this script; refusing it keeps the two workflows apart.
+const REMOTE_FLAGS = new Set([
+  "--remote",
+  "--remote=1",
+  "--remote=true",
+  "--prod",
+  "--production",
+]);
 
 // The gallery's ceiling, mirrored from `src/db/schema/ListingPhoto.ts`. An image
 // larger than this cannot pass the upload route, so the picture is requested at
@@ -58,13 +84,17 @@ export class SeedSafetyError extends Error {
 }
 
 /*
- * The one gate in front of every network call. `baseUrl` has to parse to a URL
- * whose host is a loopback name, because a production database is only ever
- * reachable by a non-local address. The environment checks are belt and braces
- * for the same intent: a shell that says "production" is not a shell this tool
- * should act in, even before the address is read.
+ * The one gate in front of every network call. The target has to be a loopback
+ * address or the named test host, because a production database is reachable by
+ * neither. The environment checks are belt and braces for the same intent: a
+ * shell that says "production" is not a shell this tool should act in, even
+ * before the address is read.
+ *
+ * A remote target is only ever the test environment, and only over HTTPS: the
+ * custom domain is HTTPS-only, so a plain-HTTP spelling is a mistake rather
+ * than a supported target.
  */
-export const assertLocalTarget = ({
+export const assertSeedTarget = ({
   environment,
   nodeEnv,
   argv = [],
@@ -75,7 +105,7 @@ export const assertLocalTarget = ({
     .toLowerCase();
   if (NON_LOCAL_ENVIRONMENTS.has(environmentValue)) {
     throw new SeedSafetyError(
-      `Refusing to seed: ENVIRONMENT=${environment} is not a local environment.`,
+      `Refusing to seed: ENVIRONMENT=${environment} is not a local or test environment.`,
     );
   }
 
@@ -84,16 +114,14 @@ export const assertLocalTarget = ({
     .toLowerCase();
   if (NON_LOCAL_ENVIRONMENTS.has(nodeEnvValue)) {
     throw new SeedSafetyError(
-      `Refusing to seed: NODE_ENV=${nodeEnv} is not a local environment.`,
+      `Refusing to seed: NODE_ENV=${nodeEnv} is not a local or test environment.`,
     );
   }
 
-  const remoteFlag = argv.find((argument) =>
-    ["--remote", "--remote=1", "--remote=true", "--prod", "--production"].includes(argument),
-  );
+  const remoteFlag = argv.find((argument) => REMOTE_FLAGS.has(argument));
   if (remoteFlag !== undefined) {
     throw new SeedSafetyError(
-      `Refusing to seed: ${remoteFlag} targets a remote worker, and this script only seeds a local dev server.`,
+      `Refusing to seed: ${remoteFlag} targets a remote worker or production, and this script only seeds a local dev server or the test environment.`,
     );
   }
 
@@ -106,18 +134,79 @@ export const assertLocalTarget = ({
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new SeedSafetyError(
-      `Refusing to seed: ${url.protocol} is not an HTTP address a dev server listens on.`,
+      `Refusing to seed: ${url.protocol} is not an HTTP address a dev server or the test environment listens on.`,
     );
   }
 
-  if (!LOCAL_HOSTNAMES.has(url.hostname)) {
-    throw new SeedSafetyError(
-      `Refusing to seed: ${url.hostname} is not a local loopback address. ` +
-        `Set SEED_BASE_URL to http://127.0.0.1:<port> to seed a dev server.`,
-    );
+  if (LOCAL_HOSTNAMES.has(url.hostname)) return url;
+
+  if (url.hostname === TEST_HOSTNAME) {
+    if (url.protocol !== "https:") {
+      throw new SeedSafetyError(
+        `Refusing to seed: the test environment is only reachable over HTTPS. Use ${TEST_BASE_URL}.`,
+      );
+    }
+    // The deployed custom domain answers on the default HTTPS port; any other
+    // port is a different listener, so it is not the test environment.
+    if (url.port !== "" && url.port !== "443") {
+      throw new SeedSafetyError(
+        `Refusing to seed: ${url.host} is neither a local loopback address nor the test environment ${TEST_HOSTNAME}.`,
+      );
+    }
+    return url;
   }
 
-  return url;
+  throw new SeedSafetyError(
+    `Refusing to seed: ${url.hostname} is neither a local loopback address nor the test environment ${TEST_HOSTNAME}. ` +
+      `Set SEED_BASE_URL to http://127.0.0.1:<port> for a dev server, or use \`pnpm seed:test\` for ${TEST_HOSTNAME}.`,
+  );
+};
+
+/*
+ * The `--env` names on the command line, in both spellings the CLI accepts. A
+ * missing value is reported as an empty one so `--env` alone is a readable
+ * refusal instead of a silent local run.
+ */
+const environmentFlags = (argv) => {
+  const values = [];
+  argv.forEach((argument, index) => {
+    if (argument === "--env" || argument === "-e") {
+      values.push(argv[index + 1] ?? "");
+    } else if (argument.startsWith("--env=")) {
+      values.push(argument.slice("--env=".length));
+    }
+  });
+  return values;
+};
+
+/*
+ * Which target a run should use, before anything is fetched. `--env test` (or
+ * the `--test` shorthand) names the deployed test environment; otherwise
+ * `SEED_BASE_URL` and the local default decide, and the shared guard still has
+ * the final word on every one of them.
+ */
+export const resolveSeedTarget = ({
+  argv = [],
+  environment,
+  nodeEnv,
+  baseUrl = DEFAULT_BASE_URL,
+}) => {
+  for (const requested of environmentFlags(argv)) {
+    if (!SEEDABLE_ENVIRONMENTS.has(requested)) {
+      throw new SeedSafetyError(
+        `Refusing to seed: --env ${requested === "" ? "(no value)" : requested} is not a seedable environment. ` +
+          `Only "test" may be seeded remotely, and a local dev server needs no --env.`,
+      );
+    }
+  }
+
+  const wantsTest = environmentFlags(argv).includes("test") || argv.includes("--test");
+  return assertSeedTarget({
+    environment,
+    nodeEnv,
+    argv,
+    baseUrl: wantsTest ? TEST_BASE_URL : baseUrl,
+  });
 };
 
 /*
@@ -454,7 +543,10 @@ const waitForServer = async (baseUrl) => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error(
-    `No dev server answered ${healthUrl}. Start one with \`pnpm dev\`, then run \`pnpm seed\` again.`,
+    `No server answered ${healthUrl}. ` +
+      (baseUrl.hostname === TEST_HOSTNAME
+        ? `Check that ${TEST_BASE_URL} is deployed (\`pnpm deploy:test\`), then run \`pnpm seed:test\` again.`
+        : "Start one with `pnpm dev`, then run `pnpm seed` again."),
   );
 };
 
@@ -676,14 +768,18 @@ const seedListing = async (session, listing, existing) => {
 
 const run = async ({ argv, env }) => {
   const baseUrl = env.SEED_BASE_URL ?? DEFAULT_BASE_URL;
-  const target = assertLocalTarget({
+  const target = resolveSeedTarget({
+    argv,
     environment: env.ENVIRONMENT,
     nodeEnv: env.NODE_ENV,
-    argv,
     baseUrl,
   });
 
-  console.log(`Seeding ${target.origin}`);
+  if (target.hostname === TEST_HOSTNAME) {
+    console.log(`Seeding the shared test environment ${target.origin}`);
+  } else {
+    console.log(`Seeding ${target.origin}`);
+  }
   await waitForServer(target);
 
   const listingsByOwner = new Map();

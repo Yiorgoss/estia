@@ -49,6 +49,51 @@
     },
   ],
   "env": {
+    "test": {
+      // The shared test deployment. `estia.calisto.studio` is the one remote
+      // host `pnpm seed:test` may write to (`scripts/seed.mjs` names it), so a
+      // test deploy and its seed data always agree on where they live.
+      "routes": [{ "pattern": "estia.calisto.studio", "custom_domain": true }],
+      "vars": {
+        // `src/app.ts` reads this through its config literal. `test` is not the
+        // production branch, so the test deploy keeps the permissive CORS list
+        // rather than the production allowlist.
+        "ENVIRONMENT": "test",
+        // The bare-hostname form `ORIGIN` already uses in this file. Nothing in
+        // `src/` reads it today; it names the host the deployment is served on.
+        "ORIGIN": "estia.calisto.studio",
+        // The same placeholder archive the top-level config names.
+        "PMTILES_GREECE": "/maps/greece.pmtiles",
+      },
+      // Bindings are not inherited by a named environment, so the test
+      // environment repeats the database, the bucket, the codec, and the chat
+      // Durable Object the top-level config binds.
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "estia-db-test",
+          "database_id": "1e3085db-a5ff-432b-b2d4-7135906f87f0",
+          "migrations_dir": "src/db/migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "STORAGE",
+          "bucket_name": "estia",
+        },
+      ],
+      "images": {
+        "binding": "IMAGES",
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CHATS",
+            "class_name": "Chat",
+          },
+        ],
+      },
+    },
     "prod": {
       "vars": {
         "ENVIRONMENT": "prod",
