@@ -145,6 +145,8 @@ export const LIST_INBOX_FOR_USER_SQL = `
   ORDER BY cp.last_message_at DESC, cp.last_seq DESC, cp.chat_id DESC
 `;
 
+const MAX_CHAT_ID_BATCH_SIZE = 90;
+
 export const ChatRepositoryLive = Layer.effect(
   ChatRepository,
   Effect.gen(function* () {
@@ -156,40 +158,50 @@ export const ChatRepositoryLive = Layer.effect(
       if (chatIds.length === 0) {
         return Effect.succeed(new Map());
       }
-      return sql<Record<string, unknown>>`
-        SELECT
-          cp.chat_id,
-          cp.user_id,
-          cp.role,
-          cp.last_read_seq,
-          CASE
-            WHEN cp.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
-            WHEN cp.role = 'seeker' THEN COALESCE(NULLIF(TRIM(sk.name), ''), NULLIF(TRIM(li.name), ''), '')
-            ELSE COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
-          END AS profile_name
-        FROM chat_participants cp
-        LEFT JOIN listers li ON li.user_id = cp.user_id
-        LEFT JOIN seekers sk ON sk.user_id = cp.user_id
-        WHERE ${sql.in("cp.chat_id", chatIds)}
-        ORDER BY cp.chat_id ASC, cp.user_id ASC;
-      `.pipe(
-        Effect.map((rows) => {
+      const uniqueChatIds = Array.from(new Set(chatIds));
+      const batches: Array<ReadonlyArray<string>> = [];
+      for (let offset = 0; offset < uniqueChatIds.length; offset += MAX_CHAT_ID_BATCH_SIZE) {
+        batches.push(uniqueChatIds.slice(offset, offset + MAX_CHAT_ID_BATCH_SIZE));
+      }
+      return Effect.forEach(batches, (batch) =>
+        sql<Record<string, unknown>>`
+          SELECT
+            cp.chat_id,
+            cp.user_id,
+            cp.role,
+            cp.last_read_seq,
+            CASE
+              WHEN cp.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
+              WHEN cp.role = 'seeker' THEN COALESCE(NULLIF(TRIM(sk.name), ''), NULLIF(TRIM(li.name), ''), '')
+              ELSE COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
+            END AS profile_name
+          FROM chat_participants cp
+          LEFT JOIN listers li ON li.user_id = cp.user_id
+          LEFT JOIN seekers sk ON sk.user_id = cp.user_id
+          WHERE ${sql.in("cp.chat_id", batch)}
+          ORDER BY cp.chat_id ASC, cp.user_id ASC;
+        `,
+      ).pipe(
+        Effect.map((batchRows) => {
           const grouped = new Map<string, Array<ChatParticipant>>();
-          for (const row of rows) {
-            const chatId = String(row["chatId"] ?? "");
-            const role = String(row["role"] ?? "");
-            const rawName = typeof row["profileName"] === "string" ? row["profileName"].trim() : "";
-            const participant = decodeChatParticipant({
-              userId: row["userId"],
-              role,
-              displayName: rawName.length > 0 ? rawName : humanizeRoleFallback(role),
-              lastReadSeq: row["lastReadSeq"],
-            });
-            const list = grouped.get(chatId);
-            if (list === undefined) {
-              grouped.set(chatId, [participant]);
-            } else {
-              list.push(participant);
+          for (const rows of batchRows) {
+            for (const row of rows) {
+              const chatId = String(row["chatId"] ?? "");
+              const role = String(row["role"] ?? "");
+              const rawName =
+                typeof row["profileName"] === "string" ? row["profileName"].trim() : "";
+              const participant = decodeChatParticipant({
+                userId: row["userId"],
+                role,
+                displayName: rawName.length > 0 ? rawName : humanizeRoleFallback(role),
+                lastReadSeq: row["lastReadSeq"],
+              });
+              const list = grouped.get(chatId);
+              if (list === undefined) {
+                grouped.set(chatId, [participant]);
+              } else {
+                list.push(participant);
+              }
             }
           }
           return grouped;

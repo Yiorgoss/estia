@@ -302,4 +302,82 @@ describe("ChatRepository", () => {
         assert.lengthOf(Option.getOrThrow(listerDetail).participants, 3);
       }).pipe(Effect.provide(TestLayer)),
   );
+
+  it.effect(
+    "loads inbox participants across >100 chats without exceeding D1's 100-parameter SQL limit",
+    () => {
+      const D1_MAX_BOUND_PARAMS = 100;
+      const D1ParamLimitSqlLayer = Layer.effect(
+        SqlClient.SqlClient,
+        Effect.gen(function* () {
+          const base = yield* SqlClient.SqlClient;
+          return new Proxy(base, {
+            apply(target, thisArg, argArray) {
+              if (argArray.length - 1 > D1_MAX_BOUND_PARAMS) {
+                throw new Error(`too many SQL variables: ${argArray.length - 1}`);
+              }
+              return Reflect.apply(target, thisArg, argArray);
+            },
+            get(target, prop, receiver) {
+              const value: unknown = Reflect.get(target, prop, receiver);
+              if (prop === "in" && typeof value === "function") {
+                return (...args: ReadonlyArray<unknown>) => {
+                  const items = args.length === 2 ? args[1] : args[0];
+                  if (Array.isArray(items) && items.length > D1_MAX_BOUND_PARAMS) {
+                    throw new Error(`too many SQL variables in IN clause: ${items.length}`);
+                  }
+                  return Reflect.apply(value, target, args);
+                };
+              }
+              if (prop === "unsafe" && typeof value === "function") {
+                return (...args: ReadonlyArray<unknown>) => {
+                  const params = args[1];
+                  if (Array.isArray(params) && params.length > D1_MAX_BOUND_PARAMS) {
+                    throw new Error(`too many SQL variables: ${params.length}`);
+                  }
+                  return Reflect.apply(value, target, args);
+                };
+              }
+              return value;
+            },
+          });
+        }),
+      ).pipe(Layer.provide(TestSqlLive));
+      const D1ParamLimitTestLayer = ChatRepositoryLive.pipe(
+        Layer.provideMerge(D1ParamLimitSqlLayer),
+      );
+
+      return Effect.gen(function* () {
+        yield* seedUsersAndListing;
+        const repo = yield* ChatRepository;
+        const sql = yield* SqlClient.SqlClient;
+        const totalChats = 120;
+        const baseTime = 1_750_000_000_000;
+
+        for (let i = 0; i < totalChats; i += 1) {
+          const chatId = `bulk-chat-${String(i).padStart(4, "0")}`;
+          const ts = baseTime + i * 1000;
+          yield* sql.unsafe(
+            `INSERT INTO chats (id, listing_id, direct_key, last_seq, last_message_at, created_at)
+             VALUES (?, 101, NULL, 0, ?, ?)`,
+            [chatId, ts, ts],
+          );
+          yield* sql.unsafe(
+            `INSERT INTO chat_participants (chat_id, user_id, role, last_read_seq, last_seq, unread_count, last_message_at)
+             VALUES (?, 'u-lister', 'lister', 0, 0, 0, ?), (?, 'u-seeker', 'seeker', 0, 0, 0, ?)`,
+            [chatId, ts, chatId, ts],
+          );
+        }
+
+        const inbox = yield* repo.listInboxForUser(uid("u-lister"));
+        assert.lengthOf(inbox, totalChats);
+        for (const summary of inbox) {
+          assert.deepStrictEqual(
+            summary.participants.map((p) => p.userId),
+            [uid("u-lister"), uid("u-seeker")],
+          );
+        }
+      }).pipe(Effect.provide(D1ParamLimitTestLayer));
+    },
+  );
 });
