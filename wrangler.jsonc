@@ -59,6 +59,11 @@
         // production branch, so the test deploy keeps the permissive CORS list
         // rather than the production allowlist.
         "ENVIRONMENT": "test",
+        // The public origin the worker serves, read by `JWTServiceLive` as the
+        // JWT issuer. It is public information, so it lives here in `vars`,
+        // not in a Cloudflare secret. Only `JWT_SECRET` is a secret for this
+        // environment (`wrangler secret put JWT_SECRET --env test`).
+        "DOMAIN": "https://estia.calisto.studio",
         // The bare-hostname form `ORIGIN` already uses in this file. Nothing in
         // `src/` reads it today; it names the host the deployment is served on.
         "ORIGIN": "estia.calisto.studio",
@@ -96,7 +101,10 @@
     },
     "prod": {
       "vars": {
-        "ENVIRONMENT": "prod",
+        // Must be one of the `ENVIRONMENTS` literals in `src/app.ts`. `prod` is
+        // the wrangler environment name; the value the app accepts is
+        // `production`. An invalid literal fails the whole service graph.
+        "ENVIRONMENT": "production",
       },
       "d1_databases": [
         {
