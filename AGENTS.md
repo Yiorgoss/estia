@@ -2,6 +2,8 @@
 
 When writing Effect code, inspect @repos/effect/ for examples of idiomatic usage, tests, module structure, and API design. Treat it as the source of truth for Effect patterns.
 
+Use the Effect (`effect`) TypeScript library to write all scripts in this repository.
+
 ## Vendored Repositories
 
 This project vendors external repositories under @repos/

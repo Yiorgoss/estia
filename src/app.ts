@@ -25,12 +25,16 @@ export { Chat } from "./durable-objects/chat";
 export class EnvVars extends Context.Service<
   EnvVars,
   {
-    readonly ENVIRONMENT: "local" | "production";
+    // `test` is the deployed test environment (`env.test` in `wrangler.jsonc`).
+    // It is not production: the CORS list and the logger below treat it the way
+    // they treat a local run, while the app still runs from the deployed
+    // worker's bindings.
+    readonly ENVIRONMENT: "local" | "test" | "production";
   }
 >()("EnvVars", {
   make: Effect.gen(function* () {
     return {
-      ENVIRONMENT: yield* Config.Literals(["local", "production"], "ENVIRONMENT").pipe(
+      ENVIRONMENT: yield* Config.Literals(["local", "test", "production"], "ENVIRONMENT").pipe(
         Config.withDefault("local" as const),
       ),
     };
@@ -76,7 +80,7 @@ type WorkerBindings = {
   // One Durable Object per chat: owns ordering, live sockets, fan-out, and rate limits.
   readonly CHATS: DurableObjectNamespace;
   readonly JWT_SECRET: string;
-  readonly ENVIRONMENT: "local" | "production";
+  readonly ENVIRONMENT: "local" | "test" | "production";
 } & {
   readonly [key: string]: string;
 };
