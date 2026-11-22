@@ -1,5 +1,6 @@
 import { D1Client } from "@effect/sql-d1";
 import {
+  Cause,
   Config,
   ConfigProvider,
   Context,
@@ -22,19 +23,30 @@ import { PhotoThumbnailerLive } from "./services/photo-thumbnail.service";
 
 export { Chat } from "./durable-objects/chat";
 
+/*
+ * The `ENVIRONMENT` values the app accepts. Every environment in
+ * `wrangler.jsonc` must name one of these: an invalid literal is a build
+ * failure of the whole service graph, not a warning, and
+ * `test/config/wrangler-config.test.ts` holds the configuration to this list.
+ *
+ * `test` is the deployed test environment (`env.test` in `wrangler.jsonc`). It
+ * is not production: the CORS list and the logger below treat it the way they
+ * treat a local run, while the app still runs from the deployed worker's
+ * bindings.
+ */
+export const ENVIRONMENTS = ["local", "test", "production"] as const;
+
+export type Environment = (typeof ENVIRONMENTS)[number];
+
 export class EnvVars extends Context.Service<
   EnvVars,
   {
-    // `test` is the deployed test environment (`env.test` in `wrangler.jsonc`).
-    // It is not production: the CORS list and the logger below treat it the way
-    // they treat a local run, while the app still runs from the deployed
-    // worker's bindings.
-    readonly ENVIRONMENT: "local" | "test" | "production";
+    readonly ENVIRONMENT: Environment;
   }
 >()("EnvVars", {
   make: Effect.gen(function* () {
     return {
-      ENVIRONMENT: yield* Config.Literals(["local", "test", "production"], "ENVIRONMENT").pipe(
+      ENVIRONMENT: yield* Config.Literals(ENVIRONMENTS, "ENVIRONMENT").pipe(
         Config.withDefault("local" as const),
       ),
     };
@@ -80,7 +92,7 @@ type WorkerBindings = {
   // One Durable Object per chat: owns ordering, live sockets, fan-out, and rate limits.
   readonly CHATS: DurableObjectNamespace;
   readonly JWT_SECRET: string;
-  readonly ENVIRONMENT: "local" | "test" | "production";
+  readonly ENVIRONMENT: Environment;
 } & {
   readonly [key: string]: string;
 };
@@ -149,6 +161,9 @@ const makePlatformLayer = (bindings: WorkerBindings) => {
 
 const makeOrGetRuntime = (bindings: WorkerBindings) => {
   if (runtime != undefined) return runtime;
+  // `toWebHandler` starts the graph build immediately. If that build fails, the
+  // handler stays cached and every request rejects with the same error, which
+  // `respondWithDiagnostics` turns into a readable 500 and a log line.
   runtime = HttpRouter.toWebHandler(
     WorkerApp.pipe(Layer.provideMerge(makePlatformLayer(bindings))),
   );
@@ -171,6 +186,135 @@ const isChatSocketRequest = (request: Request): boolean => {
   }
 };
 
+/*
+  DIAGNOSABLE STARTUP FAILURES
+
+  `HttpRouter.toWebHandler` builds the whole service graph and, if the build
+  fails, rejects every request with the build error (see the `toWebHandlerLayer`
+  docs). The common cause is a missing Worker variable: `JWTServiceLive` reads
+  `DOMAIN` and `JWT_SECRET`, so a worker that has neither cannot answer any
+  route, not even `/api/health`.
+
+  That build error is an Effect `ConfigError`, which is not an `Error` instance.
+  The Workers runtime formats a rejected `Error` with its message but has only
+  `Object.prototype.toString` for anything else, so an unguarded rejection
+  surfaces as `Error: [object Object]` and the operator cannot see which key is
+  missing. The functions below keep the readable cause: they log it and answer a
+  500 whose body names it. `/api/health` answers that 500 too, because the graph
+  that serves it is the same graph that failed to build.
+*/
+
+const MAX_FAILURE_DETAIL_LENGTH = 2_000;
+const MAX_FAILURE_DEPTH = 4;
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null;
+
+const stringField = (value: Readonly<Record<string, unknown>>, key: string): string | undefined => {
+  const field = value[key];
+  return typeof field === "string" && field !== "" ? field : undefined;
+};
+
+// Effect's `ConfigError` and `SchemaError` carry a `toString` that renders the
+// readable cause. A plain object inherits `Object.prototype.toString`, which
+// renders `[object Object]` and is exactly what must not reach the operator.
+const customToString = (value: Readonly<Record<string, unknown>>): string | undefined => {
+  try {
+    const candidate = value["toString"];
+    if (typeof candidate !== "function" || candidate === Object.prototype.toString) {
+      return undefined;
+    }
+    const text = `${value}`;
+    return text === "" || text === "[object Object]" ? undefined : text;
+  } catch {
+    return undefined;
+  }
+};
+
+/*
+ * A readable description of a rejected value. It prefers, in order: a string, an
+ * Effect `Cause`, a real `Error`, the value's own `toString`, and finally the
+ * tagged-error fields (`_tag`, `name`, `message`, `cause`). Every path returns
+ * text; none returns `[object Object]`.
+ */
+export const describeFailure = (failure: unknown, depth = 0): string => {
+  if (typeof failure === "string") return failure;
+  if (failure === undefined) return "undefined";
+  if (failure === null) return "null";
+  if (Cause.isCause(failure)) return Cause.pretty(failure);
+  if (failure instanceof Error) {
+    const message = `${failure.name}: ${failure.message}`;
+    const cause: unknown = failure.cause;
+    return cause === undefined || depth >= MAX_FAILURE_DEPTH
+      ? message
+      : `${message}, caused by ${describeFailure(cause, depth + 1)}`;
+  }
+  if (isRecord(failure)) {
+    const custom = customToString(failure);
+    if (custom !== undefined) return custom;
+    const label =
+      stringField(failure, "name") ?? stringField(failure, "_tag") ?? "Unhandled worker failure";
+    const message = stringField(failure, "message");
+    const head = message === undefined ? label : `${label}: ${message}`;
+    const cause = failure["cause"];
+    return cause === undefined || depth >= MAX_FAILURE_DEPTH
+      ? head
+      : `${head}, caused by ${describeFailure(cause, depth + 1)}`;
+  }
+  try {
+    return `${failure}`;
+  } catch {
+    return "Unhandled worker failure";
+  }
+};
+
+const truncate = (text: string): string =>
+  text.length <= MAX_FAILURE_DETAIL_LENGTH
+    ? text
+    : `${text.slice(0, MAX_FAILURE_DETAIL_LENGTH)}...`;
+
+const logFailure = (request: Request, detail: string): void => {
+  try {
+    // Logging must never replace the diagnostic with a second failure.
+    Effect.runSync(
+      Effect.logError(`[worker] ${request.method} ${request.url} rejected: ${detail}`),
+    );
+  } catch {
+    // The response below still carries the cause.
+  }
+};
+
+const failureResponse = (request: Request, failure: unknown): Response => {
+  const detail = describeFailure(failure);
+  logFailure(request, detail);
+  return Response.json(
+    {
+      error: "WorkerStartupError",
+      message: truncate(detail),
+    },
+    {
+      status: 500,
+      headers: { "cache-control": "no-store" },
+    },
+  );
+};
+
+/*
+ * Runs one request against the worker. A rejection here is normally the layer
+ * build failing, so the response names the cause instead of letting a non-Error
+ * value reach the runtime as `[object Object]`.
+ */
+export const respondWithDiagnostics = async (
+  request: Request,
+  respond: () => Promise<Response>,
+): Promise<Response> => {
+  try {
+    return await respond();
+  } catch (failure) {
+    return failureResponse(request, failure);
+  }
+};
+
 export default {
   fetch(
     request: Request,
@@ -178,14 +322,15 @@ export default {
     executionContext: ExecutionContext,
   ): Promise<Response> {
     void executionContext;
-    if (isChatSocketRequest(request)) {
-      return makeOrGetSocketRuntime(env).runPromise(
-        handleChatSocketUpgrade(request, {
-          CHATS: env.CHATS,
-          JWT_SECRET: env.JWT_SECRET,
-        }),
-      );
-    }
-    return makeOrGetRuntime(env).handler(request);
+    const respond = (): Promise<Response> =>
+      isChatSocketRequest(request)
+        ? makeOrGetSocketRuntime(env).runPromise(
+            handleChatSocketUpgrade(request, {
+              CHATS: env.CHATS,
+              JWT_SECRET: env.JWT_SECRET,
+            }),
+          )
+        : makeOrGetRuntime(env).handler(request);
+    return respondWithDiagnostics(request, respond);
   },
 };

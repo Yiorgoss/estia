@@ -50,6 +50,11 @@ Deploy and migrate that environment with `pnpm deploy:test` and
 is how the Vite build copies the `env.test` bindings and the custom-domain route
 into the worker it deploys.
 
+That worker needs the `JWT_SECRET` secret to start. Set it once with
+`pnpm exec wrangler secret put JWT_SECRET --env test`, before the first deploy.
+Without the secret every request answers 500, and `pnpm seed:test` stops at its
+health check with its "no server answered" message.
+
 ## Logins
 
 Every seeded account uses the password `test`. The table below is the same one

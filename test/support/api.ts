@@ -1,4 +1,5 @@
 import { AppServicesLive, PrivateRouterLive, PublicRouterLive } from "@/api";
+import { respondWithDiagnostics } from "@/app";
 import { handleChatSocketUpgrade } from "@/handlers/private/chat-socket";
 import { StorageRepository } from "@/repos/storage.repo";
 import { ChatGatewayLive } from "@/services/chat-gateway.service";
@@ -126,15 +127,21 @@ const PhotoThumbnailerStub = Layer.succeed(PhotoThumbnailer, {
     Effect.succeed(bytes.length > 64 ? Option.some(cardImageBytes.slice()) : Option.none()),
 });
 
-const makeApp = (config: Readonly<Record<string, string>> = {}) => {
+const makeApp = (
+  config: Readonly<Record<string, string>> = {},
+  options: { readonly omit?: ReadonlyArray<string> } = {},
+) => {
   installWorkerd101ResponseShim();
 
-  const mergedConfig: Readonly<Record<string, string>> = {
+  // `omit` exists so a test can drive the deployed config shape: a worker whose
+  // bindings lack a required key. Ordinary tests get every key.
+  const mergedConfig: Record<string, string | undefined> = {
     DOMAIN,
     JWT_SECRET,
     ENVIRONMENT: "local",
     ...config,
   };
+  for (const key of options.omit ?? []) delete mergedConfig[key];
   const jwtSecret = mergedConfig["JWT_SECRET"] ?? JWT_SECRET;
   const ConfigLive = ConfigProvider.layer(ConfigProvider.fromUnknown(mergedConfig));
 
@@ -268,7 +275,10 @@ const callThrough = (
   init?: RequestInit,
 ): Effect.Effect<TestResponse> =>
   Effect.promise(async () => {
-    const response = await testApp.handler(new Request(`${TEST_ORIGIN}${path}`, init));
+    const request = new Request(`${TEST_ORIGIN}${path}`, init);
+    // Every test goes through the production request wrapper, so a layer build
+    // failure surfaces as the same readable 500 the deployed worker answers.
+    const response = await respondWithDiagnostics(request, () => testApp.handler(request));
     const body = await response.text();
     const cookies: Record<string, string> = {};
     const setCookies = response.headers.getSetCookie();
@@ -304,6 +314,17 @@ export const callWithConfig = (
   path: string,
   init?: RequestInit,
 ): Effect.Effect<TestResponse> => callThrough(makeApp(config).web, path, init);
+
+/*
+ * The deployed config shape: the app built without one required binding. It is
+ * how the test worker behaved before `DOMAIN` and `JWT_SECRET` were provided,
+ * and how any worker behaves when a key is missing.
+ */
+export const callWithMissingConfig = (
+  missingKeys: ReadonlyArray<string>,
+  path: string,
+  init?: RequestInit,
+): Effect.Effect<TestResponse> => callThrough(makeApp({}, { omit: missingKeys }).web, path, init);
 
 export const testOrigin = TEST_ORIGIN;
 

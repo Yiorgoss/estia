@@ -8,6 +8,7 @@ with server-rendered pages and a small progressive-enhancement frontend.
 
 ```bash
 pnpm install
+cp .dev.vars.example .dev.vars   # DOMAIN, JWT_SECRET, ENVIRONMENT
 pnpm exec wrangler d1 migrations apply DB --local
 pnpm dev
 ```
@@ -23,7 +24,22 @@ seeded logins.
 
 ## Test environment
 
-The `test` environment deploys to `https://estia.calisto.studio`:
+The `test` environment deploys to `https://estia.calisto.studio`.
+
+Set the worker's signing secret once. `JWT_SECRET` is a Cloudflare secret, so it
+is not in `wrangler.jsonc`. `DOMAIN` is public and comes from the `env.test.vars`
+section of `wrangler.jsonc`.
+
+```bash
+pnpm exec wrangler secret put JWT_SECRET --env test
+```
+
+The `--env test` part is required. Without it the command writes the secret to
+the top-level `estia-effect` worker, and `estia-effect-test` keeps no secret. The
+test worker then fails at startup: every path answers 500, and the body names the
+missing key.
+
+Then deploy and fill it:
 
 ```bash
 pnpm migrate:test   # apply D1 migrations to the test database

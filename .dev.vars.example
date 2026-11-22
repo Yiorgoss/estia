@@ -1,0 +1,20 @@
+# Copy this file to `.dev.vars` for local development:
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored. The Cloudflare Vite plugin and `wrangler dev` read it
+# as the local worker's variables and secrets.
+#
+# The deployed test worker gets `DOMAIN` from `env.test.vars` in
+# `wrangler.jsonc`. Its other key, `JWT_SECRET`, is a Cloudflare secret. Set it
+# with `wrangler secret put JWT_SECRET --env test`.
+
+# The origin the worker serves. `JWTServiceLive` uses it as the JWT issuer.
+DOMAIN=http://localhost:8799
+
+# Signs the access tokens and the short-lived chat tickets. Use any non-empty
+# value locally; the deployed workers need a long random value.
+JWT_SECRET=local-dev-secret
+
+# One of the values `src/app.ts` accepts: local, test, production.
+ENVIRONMENT=local
