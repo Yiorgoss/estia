@@ -1,8 +1,19 @@
 import { ListerSchema } from "@/db/schema/Lister";
 import { SeekerSchema } from "@/db/schema/Seeker";
 import { ProfileInput, RoleSwitchQuery } from "@/db/schema/Profile";
-import { ListingId, UserRoles } from "@/db/schema/brands";
+import { ChatId, ListingId, UserRoles } from "@/db/schema/brands";
 import { CurrentUser } from "@/db/schema/User";
+import {
+  ChatDetailSchema,
+  ChatInboxResponse,
+  ChatMessageSchema,
+  ChatMessagesQuery,
+  ChatMessagesResponse,
+  MarkChatReadInput,
+  MarkChatReadResponse,
+  OpenChatInput,
+  PostChatMessageInput,
+} from "@/db/schema/Chat";
 import {
   CreateListingInput,
   ListingCursorFromString,
@@ -11,6 +22,14 @@ import {
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { UnauthorizedError } from "@/services/auth.service";
+import {
+  ChatConflictError,
+  ChatForbiddenError,
+  ChatNotFoundError,
+  ChatRateLimitError,
+  ChatSelfNotAllowedError,
+  ChatValidationError,
+} from "@/services/chat.service";
 import {
   AdminRoleSwitchError,
   InternalError,
@@ -28,6 +47,7 @@ import {
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Schema } from "effect";
+import { ChatPageRoutes } from "@/handlers/private/chat-pages";
 import { ListingPageRoutes } from "@/handlers/private/listing-pages";
 import { ListingPhotoPageRoutes } from "@/handlers/private/listing-photo-pages";
 import { ProfilePageRoutes } from "@/handlers/private/profile-pages";
@@ -176,10 +196,72 @@ export const ListingGroup = HttpApiGroup.make("listing-group")
   )
   .prefix("/listings");
 
+/*
+ * Authenticated chat endpoints under `/api/chats`. Reads come strictly from D1
+ * (so listing the inbox never wakes any Chat Durable Object); posting a message
+ * forwards to the Chat Durable Object as the no-socket fallback so message
+ * ordering and fan-out match the WebSocket path.
+ */
+export const ChatGroup = HttpApiGroup.make("chat-group")
+  .add(
+    HttpApiEndpoint.get("inbox", "/", {
+      success: ChatInboxResponse,
+      error: [UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("open", "/", {
+      payload: OpenChatInput,
+      success: ChatDetailSchema,
+      error: [ListingNotFoundError, ChatSelfNotAllowedError, UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("detail", "/:id", {
+      params: { id: ChatId },
+      success: ChatDetailSchema,
+      error: [ChatNotFoundError, ChatForbiddenError, UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("messages", "/:id/messages", {
+      params: { id: ChatId },
+      query: ChatMessagesQuery,
+      success: ChatMessagesResponse,
+      error: [ChatNotFoundError, ChatForbiddenError, UnauthorizedError, InternalError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("post-message", "/:id/messages", {
+      params: { id: ChatId },
+      payload: PostChatMessageInput,
+      success: ChatMessageSchema,
+      error: [
+        ChatNotFoundError,
+        ChatForbiddenError,
+        ChatValidationError,
+        ChatConflictError,
+        ChatRateLimitError,
+        UnauthorizedError,
+        InternalError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("mark-read", "/:id/read", {
+      params: { id: ChatId },
+      payload: MarkChatReadInput,
+      success: MarkChatReadResponse,
+      error: [ChatNotFoundError, ChatForbiddenError, UnauthorizedError, InternalError],
+    }),
+  )
+  .prefix("/chats");
+
 // The api prefix only applies to the groups added before it.
 export const PrivateApi = HttpApi.make("private-api")
   .add(UserGroup)
   .add(ListingGroup)
+  .add(ChatGroup)
   .prefix("/api");
 
 export const PrivateRoutes = HttpRouter.addAll([
@@ -199,4 +281,5 @@ export const PrivateRoutes = HttpRouter.addAll([
   ...ListingPhotoPageRoutes,
   ...ProfilePageRoutes,
   ...SavedSearchRoutes,
+  ...ChatPageRoutes,
 ]);

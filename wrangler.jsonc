@@ -34,6 +34,20 @@
   "images": {
     "binding": "IMAGES",
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHATS",
+        "class_name": "Chat",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Chat"],
+    },
+  ],
   "env": {
     "prod": {
       "vars": {
@@ -58,6 +72,14 @@
       ],
       "images": {
         "binding": "IMAGES",
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CHATS",
+            "class_name": "Chat",
+          },
+        ],
       },
     },
   },
