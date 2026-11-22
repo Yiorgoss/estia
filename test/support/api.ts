@@ -202,6 +202,7 @@ const makeApp = (
     memoMap,
     chatNamespace,
     jwtSecret,
+    environment: mergedConfig["ENVIRONMENT"],
     servicesLayer: ServicesLayer,
     web: HttpRouter.toWebHandler(AppLayer, { disableLogger: true, memoMap }),
   };
@@ -273,12 +274,17 @@ const callThrough = (
   testApp: TestApp,
   path: string,
   init?: RequestInit,
+  environment?: string,
 ): Effect.Effect<TestResponse> =>
   Effect.promise(async () => {
     const request = new Request(`${TEST_ORIGIN}${path}`, init);
     // Every test goes through the production request wrapper, so a layer build
     // failure surfaces as the same readable 500 the deployed worker answers.
-    const response = await respondWithDiagnostics(request, () => testApp.handler(request));
+    const response = await respondWithDiagnostics(
+      request,
+      () => testApp.handler(request),
+      environment,
+    );
     const body = await response.text();
     const cookies: Record<string, string> = {};
     const setCookies = response.headers.getSetCookie();
@@ -305,7 +311,7 @@ const callThrough = (
   });
 
 export const call = (path: string, init?: RequestInit): Effect.Effect<TestResponse> =>
-  callThrough(app, path, init);
+  callThrough(app, path, init, shared.environment);
 
 // A separate app instance, so a test can drive a configuration the shared one
 // does not use.
@@ -313,7 +319,10 @@ export const callWithConfig = (
   config: Readonly<Record<string, string>>,
   path: string,
   init?: RequestInit,
-): Effect.Effect<TestResponse> => callThrough(makeApp(config).web, path, init);
+): Effect.Effect<TestResponse> => {
+  const built = makeApp(config);
+  return callThrough(built.web, path, init, built.environment);
+};
 
 /*
  * The deployed config shape: the app built without one required binding. It is
@@ -324,7 +333,11 @@ export const callWithMissingConfig = (
   missingKeys: ReadonlyArray<string>,
   path: string,
   init?: RequestInit,
-): Effect.Effect<TestResponse> => callThrough(makeApp({}, { omit: missingKeys }).web, path, init);
+  config: Readonly<Record<string, string>> = {},
+): Effect.Effect<TestResponse> => {
+  const built = makeApp(config, { omit: missingKeys });
+  return callThrough(built.web, path, init, built.environment);
+};
 
 export const testOrigin = TEST_ORIGIN;
 

@@ -199,9 +199,10 @@ const isChatSocketRequest = (request: Request): boolean => {
   The Workers runtime formats a rejected `Error` with its message but has only
   `Object.prototype.toString` for anything else, so an unguarded rejection
   surfaces as `Error: [object Object]` and the operator cannot see which key is
-  missing. The functions below keep the readable cause: they log it and answer a
-  500 whose body names it. `/api/health` answers that 500 too, because the graph
-  that serves it is the same graph that failed to build.
+  missing. The functions below keep the readable cause: they always log it and
+  answer a 500 whose body names it outside production and stays generic in
+  production. `/api/health` answers that 500 too, because the graph that serves
+  it is the same graph that failed to build.
 */
 
 const MAX_FAILURE_DETAIL_LENGTH = 2_000;
@@ -284,13 +285,18 @@ const logFailure = (request: Request, detail: string): void => {
   }
 };
 
-const failureResponse = (request: Request, failure: unknown): Response => {
+const failureResponse = (
+  request: Request,
+  failure: unknown,
+  environment?: string,
+): Response => {
   const detail = describeFailure(failure);
   logFailure(request, detail);
+  const includeDetail = environment !== "production";
   return Response.json(
     {
-      error: "WorkerStartupError",
-      message: truncate(detail),
+      error: "InternalServerError",
+      message: includeDetail ? truncate(detail) : "Internal Server Error",
     },
     {
       status: 500,
@@ -300,18 +306,20 @@ const failureResponse = (request: Request, failure: unknown): Response => {
 };
 
 /*
- * Runs one request against the worker. A rejection here is normally the layer
- * build failing, so the response names the cause instead of letting a non-Error
- * value reach the runtime as `[object Object]`.
+ * Runs one request against the worker. Any uncaught rejection is logged in
+ * readable form instead of reaching the runtime as `[object Object]`, and
+ * answered as a 500 JSON response with failure details included only outside
+ * production.
  */
 export const respondWithDiagnostics = async (
   request: Request,
   respond: () => Promise<Response>,
+  environment?: string,
 ): Promise<Response> => {
   try {
     return await respond();
   } catch (failure) {
-    return failureResponse(request, failure);
+    return failureResponse(request, failure, environment);
   }
 };
 
@@ -331,6 +339,6 @@ export default {
             }),
           )
         : makeOrGetRuntime(env).handler(request);
-    return respondWithDiagnostics(request, respond);
+    return respondWithDiagnostics(request, respond, env.ENVIRONMENT);
   },
 };
