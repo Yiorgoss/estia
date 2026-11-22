@@ -18,9 +18,6 @@ dist-server/
 node_modules/
 /node_modules
 
-# vendored reference repos (root-anchored: src/repos/ is tracked application code)
-/repos/
-
 .wrangler
 
 # env
