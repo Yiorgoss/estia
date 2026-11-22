@@ -163,8 +163,10 @@ export const ChatRepositoryLive = Layer.effect(
       for (let offset = 0; offset < uniqueChatIds.length; offset += MAX_CHAT_ID_BATCH_SIZE) {
         batches.push(uniqueChatIds.slice(offset, offset + MAX_CHAT_ID_BATCH_SIZE));
       }
-      return Effect.forEach(batches, (batch) =>
-        sql<Record<string, unknown>>`
+      return Effect.forEach(
+        batches,
+        (batch) =>
+          sql<Record<string, unknown>>`
           SELECT
             cp.chat_id,
             cp.user_id,

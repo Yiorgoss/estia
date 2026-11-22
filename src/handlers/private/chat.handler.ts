@@ -5,9 +5,9 @@ import { HttpApiBuilder } from "effect/http-api";
 import { Effect } from "effect";
 
 /*
- * Authenticated JSON endpoints for one-to-one chats. Identity comes strictly
- * from the session cookie verified by `AuthMiddleware` plus the stored account
- * row (`callerUser`), never from request fields. Every error raised by
+ * Authenticated JSON endpoints for chats. Identity comes strictly from the
+ * session cookie verified by `AuthMiddleware` plus the stored account row
+ * (`callerUser`), never from request fields. Every error raised by
  * `ChatService` already carries its `httpApiStatus`.
  */
 export const ChatHandler = HttpApiBuilder.group(PrivateApi, "chat-group", (handlers) =>

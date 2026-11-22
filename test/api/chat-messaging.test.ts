@@ -21,9 +21,9 @@ import {
 import type { MockWebSocket } from "../support/chat-do";
 
 /*
- * End-to-end integration tests for one-to-one chats driven through the real
- * Worker HTTP handlers, real `handleChatSocketUpgrade` boundary, real `Chat`
- * Durable Object class, and in-memory D1-shaped SQLite database.
+ * End-to-end integration tests for chats driven through the real Worker HTTP
+ * handlers, real `handleChatSocketUpgrade` boundary, real `Chat` Durable Object
+ * class, and in-memory D1-shaped SQLite database.
  */
 
 const createPublishedListing = (owner: TestUser, title = "Sunny Athens flat") =>

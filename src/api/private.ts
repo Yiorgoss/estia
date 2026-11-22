@@ -197,10 +197,10 @@ export const ListingGroup = HttpApiGroup.make("listing-group")
   .prefix("/listings");
 
 /*
- * Authenticated one-to-one chat endpoints under `/api/chats`. Reads come
- * strictly from D1 (so listing the inbox never wakes any Chat Durable Object);
- * posting a message forwards to the Chat Durable Object as the no-socket
- * fallback so message ordering and fan-out match the WebSocket path.
+ * Authenticated chat endpoints under `/api/chats`. Reads come strictly from D1
+ * (so listing the inbox never wakes any Chat Durable Object); posting a message
+ * forwards to the Chat Durable Object as the no-socket fallback so message
+ * ordering and fan-out match the WebSocket path.
  */
 export const ChatGroup = HttpApiGroup.make("chat-group")
   .add(
