@@ -29,14 +29,30 @@ const SIGN_IN_TAG = ">Sign in</span>";
 const hrefsIn = (html: string): ReadonlyArray<string> =>
   Array.from(html.matchAll(/href="([^"]+)"/g), (match) => match[1] ?? "");
 
+const mainRegion = (html: string): string => {
+  const start = html.indexOf("<main");
+  assert.notStrictEqual(start, -1, "homepage is missing a <main> region");
+  const end = html.indexOf("</main>", start);
+  assert.notStrictEqual(end, -1, "homepage is missing a closing </main> tag");
+  return html.slice(start, end);
+};
+
+const cardFor = (html: string, href: string): string => {
+  const start = html.indexOf(`href="${href}"`);
+  assert.notStrictEqual(start, -1, `homepage is missing the ${href} link`);
+  const end = html.indexOf("</a>", start);
+  assert.notStrictEqual(end, -1, `homepage link ${href} is missing a closing </a> tag`);
+  return html.slice(start, end);
+};
+
 describe("homePage", () => {
   it("links every user-facing page", () => {
-    const html = homePage();
-    const hrefs = hrefsIn(html);
+    const main = mainRegion(homePage());
+    const hrefs = hrefsIn(main);
 
     for (const [href, label] of expectedLinks) {
       assert.include(hrefs, href, `homepage is missing the ${href} link`);
-      assert.include(html, label, `homepage is missing the ${label} label`);
+      assert.include(cardFor(main, href), label, `homepage is missing the ${label} label`);
     }
   });
 
@@ -54,17 +70,14 @@ describe("homePage", () => {
   it("marks the pages that need a session and leaves the public ones unmarked", () => {
     // The header repeats four of these links without a tag, so the directory is
     // read from the main region only.
-    const page = homePage();
-    const html = page.slice(page.indexOf("<main"));
+    const main = mainRegion(homePage());
 
     for (const gated of ["/listings/mine", "/listings/new", "/chats", "/profile"]) {
-      const card = html.slice(html.indexOf(`href="${gated}"`));
-      assert.include(card.slice(0, card.indexOf("</a>")), SIGN_IN_TAG, `${gated} is not marked`);
+      assert.include(cardFor(main, gated), SIGN_IN_TAG, `${gated} is not marked`);
     }
 
     for (const open of ["/search", "/map", "/login", "/register"]) {
-      const card = html.slice(html.indexOf(`href="${open}"`));
-      assert.notInclude(card.slice(0, card.indexOf("</a>")), SIGN_IN_TAG, `${open} is marked`);
+      assert.notInclude(cardFor(main, open), SIGN_IN_TAG, `${open} is marked`);
     }
   });
 

@@ -16,6 +16,14 @@ import { Effect } from "effect";
 const linksIn = (html: string): ReadonlyArray<string> =>
   Array.from(new Set(Array.from(html.matchAll(/href="([^"]+)"/g), (match) => match[1] ?? "")));
 
+const mainRegion = (html: string): string => {
+  const start = html.indexOf("<main");
+  assert.notStrictEqual(start, -1, "the homepage is missing a <main> region");
+  const end = html.indexOf("</main>", start);
+  assert.notStrictEqual(end, -1, "the homepage is missing a closing </main> tag");
+  return html.slice(start, end);
+};
+
 const EXPECTED_LINKS = [
   "/search",
   "/map",
@@ -43,7 +51,7 @@ describe("GET /", () => {
   it.effect("links every user-facing page", () =>
     Effect.gen(function* () {
       const response = yield* call("/");
-      const links = linksIn(response.body);
+      const links = linksIn(mainRegion(response.body));
 
       for (const href of EXPECTED_LINKS) {
         assert.include(links, href, `the homepage does not link ${href}`);
