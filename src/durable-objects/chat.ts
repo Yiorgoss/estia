@@ -7,7 +7,7 @@ import {
 } from "@/services/chat-ticket";
 
 /*
- * One Durable Object per one-to-one chat.
+ * One Durable Object per chat.
  *
  * Responsibilities:
  * - Own per-chat message ordering (`seq`) so two concurrent writes can never

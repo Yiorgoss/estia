@@ -1,4 +1,5 @@
 import { ChatId, ListingId, UserId } from "@/db/schema/brands";
+import { listingDirectChatKey } from "@/db/schema/Chat";
 import { ChatRepository, ChatRepositoryLive, LIST_INBOX_FOR_USER_SQL } from "@/repos/chat.repo";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -17,6 +18,8 @@ const seedUsersAndListing = Effect.gen(function* () {
   yield* insertLister(1, "u-lister", { name: "Nikos" });
   yield* insertUser("u-seeker", "seeker@test.local", "seeker");
   yield* insertSeeker("u-seeker", { name: "Eleni" });
+  yield* insertUser("u-manager", "manager@test.local", "lister");
+  yield* insertLister(2, "u-manager", { name: "Kostas" });
   yield* insertUser("u-other", "other@test.local", "seeker");
   yield* insertSeeker("u-other", { name: "Giorgos" });
   yield* insertListing(101, "u-lister", {
@@ -28,31 +31,32 @@ const seedUsersAndListing = Effect.gen(function* () {
 });
 
 describe("ChatRepository", () => {
-  it.effect("opens a chat once per (listing, seeker) pair and returns the same row on retry", () =>
-    Effect.gen(function* () {
-      yield* seedUsersAndListing;
-      const repo = yield* ChatRepository;
+  it.effect(
+    "opens a direct listing chat once via direct_key and returns the same row on retry",
+    () =>
+      Effect.gen(function* () {
+        yield* seedUsersAndListing;
+        const repo = yield* ChatRepository;
 
-      const first = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
-      const second = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
+        const first = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
+        const second = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
 
-      assert.strictEqual(second.id, first.id);
-      assert.strictEqual(first.listingId, lid(101));
-      assert.strictEqual(first.seekerId, uid("u-seeker"));
-      assert.strictEqual(first.listerId, uid("u-lister"));
+        assert.strictEqual(second.id, first.id);
+        assert.strictEqual(first.listingId, lid(101));
+        assert.strictEqual(first.directKey, listingDirectChatKey(lid(101), uid("u-seeker")));
 
-      assert.isTrue(yield* repo.isParticipant(first.id, uid("u-seeker")));
-      assert.isTrue(yield* repo.isParticipant(first.id, uid("u-lister")));
-      assert.isFalse(yield* repo.isParticipant(first.id, uid("u-other")));
+        assert.isTrue(yield* repo.isParticipant(first.id, uid("u-seeker")));
+        assert.isTrue(yield* repo.isParticipant(first.id, uid("u-lister")));
+        assert.isFalse(yield* repo.isParticipant(first.id, uid("u-other")));
 
-      const found = yield* repo.findByListingAndSeeker(lid(101), uid("u-seeker"));
-      assert.isTrue(Option.isSome(found));
-      assert.strictEqual(Option.getOrThrow(found).id, first.id);
-    }).pipe(Effect.provide(TestLayer)),
+        const found = yield* repo.findByListingAndSeeker(lid(101), uid("u-seeker"));
+        assert.isTrue(Option.isSome(found));
+        assert.strictEqual(Option.getOrThrow(found).id, first.id);
+      }).pipe(Effect.provide(TestLayer)),
   );
 
   it.effect(
-    "enforces unique indexes on (chat_id, seq) and (chat_id, client_message_id) and rejects self-chat",
+    "enforces partial unique direct_key, unique message indexes, and non-empty participant roles",
     () =>
       Effect.gen(function* () {
         yield* seedUsersAndListing;
@@ -61,14 +65,41 @@ describe("ChatRepository", () => {
 
         const chat = yield* repo.openOrFind(lid(101), uid("u-seeker"), uid("u-lister"));
 
-        // Self-chat is refused by the database CHECK constraint.
-        const selfExit = yield* Effect.exit(
-          sql.unsafe(
-            "INSERT INTO chats (id, listing_id, seeker_id, lister_id) VALUES (?, ?, ?, ?)",
-            ["self-chat-id", 101, "u-lister", "u-lister"],
-          ),
+        // Duplicate non-null direct_key is rejected by idx_chats_direct_key.
+        const dupDirectExit = yield* Effect.exit(
+          sql.unsafe("INSERT INTO chats (id, listing_id, direct_key) VALUES (?, ?, ?)", [
+            "dup-direct-chat-id",
+            101,
+            listingDirectChatKey(lid(101), uid("u-seeker")),
+          ]),
         );
-        assert.strictEqual(selfExit._tag, "Failure");
+        assert.strictEqual(dupDirectExit._tag, "Failure");
+
+        // Multiple chats with NULL direct_key (e.g. group chats) are allowed.
+        yield* sql.unsafe("INSERT INTO chats (id, listing_id, direct_key) VALUES (?, ?, NULL)", [
+          "group-chat-a",
+          101,
+        ]);
+        yield* sql.unsafe("INSERT INTO chats (id, listing_id, direct_key) VALUES (?, ?, NULL)", [
+          "group-chat-b",
+          101,
+        ]);
+
+        // Blank/whitespace role is refused by the role CHECK constraint.
+        const blankRoleExit = yield* Effect.exit(
+          sql.unsafe("INSERT INTO chat_participants (chat_id, user_id, role) VALUES (?, ?, ?)", [
+            "group-chat-a",
+            "u-manager",
+            "   ",
+          ]),
+        );
+        assert.strictEqual(blankRoleExit._tag, "Failure");
+
+        // Custom role (e.g. property_manager) is accepted without a migration.
+        yield* sql.unsafe(
+          "INSERT INTO chat_participants (chat_id, user_id, role) VALUES (?, ?, ?)",
+          ["group-chat-a", "u-manager", "property_manager"],
+        );
 
         // Insert message seq=1 with client_message_id='m-1'.
         yield* sql.unsafe(
@@ -146,7 +177,7 @@ describe("ChatRepository", () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect("lists inbox with counterpart profile names and clears unread count on markRead", () =>
+  it.effect("lists inbox with participants[] and clears unread count on markRead", () =>
     Effect.gen(function* () {
       yield* seedUsersAndListing;
       const repo = yield* ChatRepository;
@@ -180,14 +211,18 @@ describe("ChatRepository", () => {
 
       const listerInbox = yield* repo.listInboxForUser(uid("u-lister"));
       assert.lengthOf(listerInbox, 1);
-      assert.strictEqual(listerInbox[0]?.counterpartName, "Eleni");
       assert.strictEqual(listerInbox[0]?.unreadCount, 2);
       assert.strictEqual(listerInbox[0]?.lastSeq, 2);
+      assert.strictEqual(listerInbox[0]?.myRole, "lister");
+      assert.deepStrictEqual(listerInbox[0]?.participants, [
+        { userId: uid("u-lister"), role: "lister", displayName: "Nikos", lastReadSeq: 0 },
+        { userId: uid("u-seeker"), role: "seeker", displayName: "Eleni", lastReadSeq: 2 },
+      ]);
 
       const seekerInbox = yield* repo.listInboxForUser(uid("u-seeker"));
       assert.lengthOf(seekerInbox, 1);
-      assert.strictEqual(seekerInbox[0]?.counterpartName, "Nikos");
       assert.strictEqual(seekerInbox[0]?.unreadCount, 0);
+      assert.strictEqual(seekerInbox[0]?.myRole, "seeker");
 
       // Partial markRead to seq 1 leaves 1 unread.
       const partial = yield* repo.markRead(cid(chat.id), uid("u-lister"), 1);
@@ -203,5 +238,68 @@ describe("ChatRepository", () => {
       assert.strictEqual(backwards.lastReadSeq, 2);
       assert.strictEqual(backwards.unreadCount, 0);
     }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    "returns a 3+ participant chat with a custom role once in the inbox with all participants",
+    () =>
+      Effect.gen(function* () {
+        yield* seedUsersAndListing;
+        const repo = yield* ChatRepository;
+        const sql = yield* SqlClient.SqlClient;
+        const now = 1_750_000_000_000;
+        const groupChatId = cid("groupchat0000001");
+
+        // Group chat leaves direct_key NULL and adds 3 participants including a custom role.
+        yield* sql.unsafe(
+          `INSERT INTO chats (id, listing_id, direct_key, last_seq, last_message_body, last_message_sender_id, last_message_at, created_at)
+           VALUES (?, 101, NULL, 1, 'Welcome everyone', 'u-manager', ?, ?)`,
+          [groupChatId, now, now],
+        );
+        yield* sql.unsafe(
+          `INSERT INTO chat_participants (chat_id, user_id, role, last_read_seq, last_seq, unread_count, last_message_at)
+           VALUES
+             (?, 'u-seeker', 'seeker', 0, 1, 1, ?),
+             (?, 'u-lister', 'lister', 0, 1, 1, ?),
+             (?, 'u-manager', 'property_manager', 1, 1, 0, ?)`,
+          [groupChatId, now, groupChatId, now, groupChatId, now],
+        );
+        yield* sql.unsafe(
+          `INSERT INTO chat_messages (chat_id, seq, sender_id, client_message_id, body, created_at)
+           VALUES (?, 1, 'u-manager', 'pm-1', 'Welcome everyone', ?)`,
+          [groupChatId, now],
+        );
+
+        // Every member sees the chat once (never duplicated per counterpart) with all 3 participants.
+        for (const memberId of ["u-seeker", "u-lister", "u-manager"] as const) {
+          const inbox = yield* repo.listInboxForUser(uid(memberId));
+          assert.lengthOf(inbox, 1);
+          assert.strictEqual(inbox[0]?.id, groupChatId);
+          assert.isNull(inbox[0]?.directKey);
+          assert.lengthOf(inbox[0]?.participants ?? [], 3);
+          assert.deepStrictEqual(
+            inbox[0]?.participants.map((p) => ({
+              userId: p.userId,
+              role: p.role,
+              displayName: p.displayName,
+            })),
+            [
+              { userId: uid("u-lister"), role: "lister", displayName: "Nikos" },
+              { userId: uid("u-manager"), role: "property_manager", displayName: "Kostas" },
+              { userId: uid("u-seeker"), role: "seeker", displayName: "Eleni" },
+            ],
+          );
+        }
+
+        // Clearing seeker's unread count leaves lister's unread count untouched.
+        const seekerRead = yield* repo.markRead(groupChatId, uid("u-seeker"));
+        assert.strictEqual(seekerRead.lastReadSeq, 1);
+        assert.strictEqual(seekerRead.unreadCount, 0);
+
+        const listerDetail = yield* repo.findDetailForUser(groupChatId, uid("u-lister"));
+        assert.isTrue(Option.isSome(listerDetail));
+        assert.strictEqual(Option.getOrThrow(listerDetail).unreadCount, 1);
+        assert.lengthOf(Option.getOrThrow(listerDetail).participants, 3);
+      }).pipe(Effect.provide(TestLayer)),
   );
 });

@@ -28,7 +28,7 @@ const chatsInboxRoute = HttpRouter.route("GET", "/chats", () =>
     const user = yield* callerUser;
     const chatService = yield* ChatService;
     const inbox = yield* chatService.listInbox(user.id);
-    return html(chatsInboxPage(inbox));
+    return html(chatsInboxPage({ ...inbox, currentUserId: user.id }));
   }).pipe(
     Effect.catchTags({
       UnauthorizedError: () =>
@@ -66,6 +66,11 @@ const chatDetailRoute = HttpRouter.route("GET", "/chats/:id", () =>
           ...chat,
           lastReadSeq: read.lastReadSeq,
           unreadCount: read.unreadCount,
+          participants: chat.participants.map((participant) =>
+            participant.userId === user.id
+              ? { ...participant, lastReadSeq: read.lastReadSeq }
+              : participant,
+          ),
         },
         messages,
         currentUserId: user.id,

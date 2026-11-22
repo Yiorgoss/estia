@@ -163,13 +163,24 @@ describe("Chats: creation, ordering, gap replay, auth, hibernation, unread, and 
         assert.include(seekerPageAfter.body, `href="/chats/${chatId}"`);
         assert.include(seekerPageAfter.body, "Open chat");
 
-        // Opening again via JSON API returns the exact same chat id.
+        // Opening again via JSON API returns the exact same chat id and participants[].
         const reopened = yield* send("POST", "/api/chats", {
           cookie: seeker.cookie,
           payload: { listingId },
         });
         assert.strictEqual(reopened.status, 200, reopened.body);
-        assert.strictEqual(asObject(reopened.json).id, chatId);
+        const reopenedObj = asObject(reopened.json);
+        assert.strictEqual(reopenedObj.id, chatId);
+        const reopenedParticipants = reopenedObj.participants as ReadonlyArray<
+          Record<string, unknown>
+        >;
+        assert.lengthOf(reopenedParticipants, 2);
+        assert.isTrue(
+          reopenedParticipants.some((p) => p.userId === seeker.id && p.role === "seeker"),
+        );
+        assert.isTrue(
+          reopenedParticipants.some((p) => p.userId === lister.id && p.role === "lister"),
+        );
       }),
   );
 
@@ -755,6 +766,107 @@ describe("Chats: creation, ordering, gap replay, auth, hibernation, unread, and 
           ),
         );
         assert.strictEqual(doRes.status, 404);
+      }),
+  );
+
+  it.effect(
+    "supports a 3-participant chat with a custom role (property_manager) without duplicating inbox rows",
+    () =>
+      Effect.gen(function* () {
+        const lister = yield* register("chat-group-lister");
+        const seeker = yield* register("chat-group-seeker");
+        const manager = yield* register("chat-group-manager");
+        const listingId = yield* createPublishedListing(lister, "Managed Villa in Syros");
+
+        // Create a multi-participant chat (direct_key = NULL) with 3 participants including a custom role.
+        const groupChatId = `groupchat${Date.now().toString(16)}`;
+        const now = Date.now();
+        yield* query(
+          "INSERT INTO chats (id, listing_id, direct_key, created_at) VALUES (?, ?, NULL, ?)",
+          [groupChatId, listingId, now],
+        );
+        yield* query(
+          `INSERT INTO chat_participants (chat_id, user_id, role, last_read_seq, last_seq, unread_count, last_message_at)
+           VALUES
+             (?, ?, 'seeker', 0, 0, 0, ?),
+             (?, ?, 'lister', 0, 0, 0, ?),
+             (?, ?, 'property_manager', 0, 0, 0, ?)`,
+          [groupChatId, seeker.id, now, groupChatId, lister.id, now, groupChatId, manager.id, now],
+        );
+
+        // Manager opens a live WebSocket and seeker posts a message; both lister and manager get unread=1.
+        const wsManager = socketFrom101(yield* openSocket(groupChatId, manager.cookie));
+        const wsLister = socketFrom101(yield* openSocket(groupChatId, lister.cookie));
+
+        const sent = yield* send("POST", `/api/chats/${groupChatId}/messages`, {
+          cookie: seeker.cookie,
+          payload: { clientMessageId: "grp-1", body: "Hello lister and property manager!" },
+        });
+        assert.strictEqual(sent.status, 200, sent.body);
+        assert.strictEqual(asObject(sent.json).seq, 1);
+
+        // Both other participants receive the live broadcast.
+        assert.isDefined(
+          wsManager
+            .receivedJson()
+            .find((f) => f.type === "message" && asObject(f.message).seq === 1),
+        );
+        assert.isDefined(
+          wsLister
+            .receivedJson()
+            .find((f) => f.type === "message" && asObject(f.message).seq === 1),
+        );
+
+        // Manager sends a reply over WebSocket; lister gets unread=2 and seeker gets unread=1.
+        yield* Effect.promise(() =>
+          testChatNamespace.sendClientMessage(groupChatId, wsManager, {
+            type: "send",
+            clientMessageId: "grp-2",
+            body: "Hi! I manage the keys and viewing schedule.",
+          }),
+        );
+
+        // Every participant's inbox lists the chat exactly once with all 3 participants.
+        const managerInbox = yield* send("GET", "/api/chats", { cookie: manager.cookie });
+        assert.strictEqual(managerInbox.status, 200, managerInbox.body);
+        const managerItems = asObject(managerInbox.json).items as ReadonlyArray<
+          Record<string, unknown>
+        >;
+        assert.lengthOf(managerItems, 1);
+        assert.strictEqual(managerItems[0]?.id, groupChatId);
+        assert.strictEqual(managerItems[0]?.myRole, "property_manager");
+        assert.strictEqual(managerItems[0]?.unreadCount, 0);
+        const participants = managerItems[0]?.participants as ReadonlyArray<
+          Record<string, unknown>
+        >;
+        assert.lengthOf(participants, 3);
+        assert.isTrue(
+          participants.some((p) => p.userId === manager.id && p.role === "property_manager"),
+        );
+        assert.isTrue(participants.some((p) => p.userId === lister.id && p.role === "lister"));
+        assert.isTrue(participants.some((p) => p.userId === seeker.id && p.role === "seeker"));
+
+        const listerInbox = yield* send("GET", "/api/chats", { cookie: lister.cookie });
+        assert.strictEqual(asObject(listerInbox.json).totalUnread, 2);
+        assert.lengthOf(asObject(listerInbox.json).items as ReadonlyArray<unknown>, 1);
+
+        const seekerInbox = yield* send("GET", "/api/chats", { cookie: seeker.cookie });
+        assert.strictEqual(asObject(seekerInbox.json).totalUnread, 1);
+        assert.lengthOf(asObject(seekerInbox.json).items as ReadonlyArray<unknown>, 1);
+
+        // Opening `/chats/:id` as seeker clears only seeker's unread count and renders custom role cleanly.
+        const seekerPage = yield* call(`/chats/${groupChatId}`, {
+          headers: { cookie: seeker.cookie },
+        });
+        assert.strictEqual(seekerPage.status, 200);
+        assert.include(seekerPage.body, "Property manager");
+        assert.include(seekerPage.body, "Hi! I manage the keys and viewing schedule.");
+
+        const seekerInboxAfter = yield* send("GET", "/api/chats", { cookie: seeker.cookie });
+        assert.strictEqual(asObject(seekerInboxAfter.json).totalUnread, 0);
+
+        const listerInboxStillUnread = yield* send("GET", "/api/chats", { cookie: lister.cookie });
+        assert.strictEqual(asObject(listerInboxStillUnread.json).totalUnread, 2);
       }),
   );
 });

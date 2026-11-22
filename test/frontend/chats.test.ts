@@ -1,6 +1,11 @@
 import { ChatId, ChatMessageId, ListingId, UserId } from "@/db/schema/brands";
-import type { ChatDetail, ChatMessage, ChatSummary } from "@/db/schema/Chat";
-import { chatDetailPage, chatErrorPage, chatsInboxPage } from "@/frontend/pages/chats";
+import type { ChatDetail, ChatMessage, ChatParticipant, ChatSummary } from "@/db/schema/Chat";
+import {
+  chatDetailPage,
+  chatErrorPage,
+  chatsInboxPage,
+  formatChatRoleLabel,
+} from "@/frontend/pages/chats";
 import { listingDetailPage } from "@/frontend/pages/listing-detail";
 import { assert, describe, it } from "@effect/vitest";
 import { Schema } from "effect";
@@ -9,17 +14,22 @@ const chatId = Schema.decodeSync(ChatId)("abcdef0123456789");
 const listingId = Schema.decodeSync(ListingId)(42);
 const seekerId = Schema.decodeSync(UserId)("u-seeker");
 const listerId = Schema.decodeSync(UserId)("u-lister");
+const managerId = Schema.decodeSync(UserId)("u-manager");
+
+const defaultParticipants: ReadonlyArray<ChatParticipant> = [
+  { userId: listerId, role: "lister", displayName: "Maria", lastReadSeq: 1 },
+  { userId: seekerId, role: "seeker", displayName: "Eleni", lastReadSeq: 0 },
+];
 
 const summary = (overrides: Partial<ChatSummary> = {}): ChatSummary => ({
   id: chatId,
   listingId,
+  directKey: `listing:${listingId}:seeker:${seekerId}`,
   listingTitle: "Sunny room in Thessaloniki",
   listingRegionCode: "central_macedonia",
   listingPriceMinor: 55_000,
-  counterpartId: listerId,
-  counterpartRole: "lister",
-  counterpartName: "Maria",
   myRole: "seeker",
+  participants: defaultParticipants,
   lastSeq: 2,
   lastReadSeq: 0,
   unreadCount: 2,
@@ -32,7 +42,6 @@ const summary = (overrides: Partial<ChatSummary> = {}): ChatSummary => ({
 
 const detail = (overrides: Partial<ChatDetail> = {}): ChatDetail => ({
   ...summary(),
-  counterpartLastReadSeq: 1,
   ...overrides,
 });
 
@@ -48,15 +57,31 @@ const message = (overrides: Partial<ChatMessage> = {}): ChatMessage => ({
 });
 
 describe("chat pages", () => {
-  it("renders the inbox list with unread badge and escapes user content", () => {
+  it("formats standard and custom participant roles cleanly", () => {
+    assert.strictEqual(formatChatRoleLabel("lister"), "Lister");
+    assert.strictEqual(formatChatRoleLabel("seeker"), "Seeker");
+    assert.strictEqual(formatChatRoleLabel("property_manager"), "Property manager");
+    assert.strictEqual(formatChatRoleLabel("support-agent"), "Support agent");
+  });
+
+  it("renders the inbox list with unread badge and escapes participant names, roles, and previews", () => {
     const html = chatsInboxPage({
       items: [
         summary({
-          counterpartName: `<script>alert("x")</script>`,
+          participants: [
+            {
+              userId: listerId,
+              role: `<b>agent</b>`,
+              displayName: `<script>alert("x")</script>`,
+              lastReadSeq: 1,
+            },
+            { userId: seekerId, role: "seeker", displayName: "Eleni", lastReadSeq: 0 },
+          ],
           lastMessageBody: `<img src=x onerror=alert(1)>`,
         }),
       ],
       totalUnread: 2,
+      currentUserId: seekerId,
     });
 
     assert.include(html, "2 unread messages");
@@ -64,12 +89,13 @@ describe("chat pages", () => {
     assert.include(html, "data-unread-badge");
     assert.notInclude(html, `<script>alert("x")</script>`);
     assert.notInclude(html, "<img src=x");
+    assert.notInclude(html, "<b>agent</b>");
     assert.include(html, "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
     assert.include(html, "&lt;img src=x onerror=alert(1)&gt;");
   });
 
   it("renders an empty inbox state when the user has no chats", () => {
-    const html = chatsInboxPage({ items: [], totalUnread: 0 });
+    const html = chatsInboxPage({ items: [], totalUnread: 0, currentUserId: seekerId });
     assert.include(html, "No chats yet");
     assert.include(html, 'href="/search"');
   });
@@ -99,22 +125,41 @@ describe("chat pages", () => {
     assert.include(html, "Maria read up to #1");
   });
 
-  it("initializes client lastSeq from the last rendered message instead of chat.lastSeq", () => {
-    const html = chatDetailPage({
-      chat: detail({ lastSeq: 150 }),
-      messages: [message({ seq: 100, body: "Rendered tail" })],
+  it("renders 3+ participant chats with custom roles and distinct sender names", () => {
+    const multiParticipants: ReadonlyArray<ChatParticipant> = [
+      { userId: listerId, role: "lister", displayName: "Maria", lastReadSeq: 2 },
+      { userId: managerId, role: "property_manager", displayName: "Kostas", lastReadSeq: 1 },
+      { userId: seekerId, role: "seeker", displayName: "Eleni", lastReadSeq: 2 },
+    ];
+
+    const inboxHtml = chatsInboxPage({
+      items: [summary({ directKey: null, participants: multiParticipants })],
+      totalUnread: 2,
       currentUserId: seekerId,
     });
+    assert.include(inboxHtml, "Maria, Kostas");
+    assert.include(inboxHtml, "Lister");
+    assert.include(inboxHtml, "Property manager");
 
-    assert.include(html, '"lastSeq":100');
-    assert.notInclude(html, '"lastSeq":150');
-
-    const emptyHtml = chatDetailPage({
-      chat: detail({ lastSeq: 5 }),
-      messages: [],
+    const detailHtml = chatDetailPage({
+      chat: detail({ directKey: null, participants: multiParticipants }),
+      messages: [
+        message({ seq: 1, senderId: listerId, body: "From lister" }),
+        message({
+          id: Schema.decodeSync(ChatMessageId)(2),
+          seq: 2,
+          senderId: managerId,
+          clientMessageId: "c-2",
+          body: "From manager",
+        }),
+      ],
       currentUserId: seekerId,
     });
-    assert.include(emptyHtml, '"lastSeq":0');
+    assert.include(detailHtml, "Maria, Kostas");
+    assert.include(detailHtml, "Property manager");
+    assert.include(detailHtml, "Maria read up to #2");
+    assert.include(detailHtml, "Kostas read up to #1");
+    assert.include(detailHtml, "From manager");
   });
 
   it("renders chat error pages cleanly", () => {

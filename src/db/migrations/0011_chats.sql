@@ -1,33 +1,39 @@
 -- Migration number: 0011 	 2026-11-20T22:00:00.000Z
 
 -- Append-only: earlier migrations are already applied everywhere. This
--- migration adds the one-to-one chat model: the chat row keyed on
--- (listing, seeker), the participant index holding the inbox projection and
--- unread count, and the append-only chat message archive written by the Chat
--- Durable Object.
+-- migration adds the chat model: `chats` (with a nullable `direct_key` for
+-- deduplicating direct listing enquiries without locking the table to two
+-- fixed roles), `chat_participants` as the single source of truth for
+-- membership, per-chat role, inbox projection, and unread counts, and the
+-- append-only `chat_messages` archive written by the Chat Durable Object.
 
 CREATE TABLE chats (
                         id TEXT PRIMARY KEY,
                 listing_id INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
-                 seeker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                 lister_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                direct_key TEXT,
                   last_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seq >= 0),
          last_message_body TEXT,
     last_message_sender_id TEXT REFERENCES users(id) ON DELETE SET NULL,
            last_message_at INTEGER,
-                created_at INTEGER NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)),
-    CHECK (seeker_id <> lister_id),
-    UNIQUE (listing_id, seeker_id)
+                created_at INTEGER NOT NULL DEFAULT (CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER))
 );
 
--- One row per participant per chat. `last_seq`, `last_message_at`, and
--- `unread_count` are maintained alongside each message write so the inbox query
--- reads strictly from D1 using `idx_chat_participants_inbox` without scanning
--- `chat_messages` or waking any Durable Object.
+-- Direct 1-to-1 listing enquiries deduplicate via `direct_key` (e.g.
+-- `listing:<listingId>:seeker:<seekerId>`), while group chats leave
+-- `direct_key` NULL so multiple multi-participant chats can coexist.
+CREATE UNIQUE INDEX idx_chats_direct_key
+    ON chats(direct_key)
+    WHERE direct_key IS NOT NULL;
+
+-- Single source of truth for chat membership and per-chat role. `last_seq`,
+-- `last_message_at`, and `unread_count` are maintained alongside each message
+-- write so the inbox query reads strictly from D1 using
+-- `idx_chat_participants_inbox` without scanning `chat_messages` or waking any
+-- Durable Object.
 CREATE TABLE chat_participants (
            chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-              role TEXT NOT NULL CHECK (role IN ('seeker', 'lister')),
+              role TEXT NOT NULL CHECK (length(trim(role)) BETWEEN 1 AND 64),
      last_read_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_read_seq >= 0),
           last_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seq >= 0),
       unread_count INTEGER NOT NULL DEFAULT 0 CHECK (unread_count >= 0),

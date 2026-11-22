@@ -338,15 +338,21 @@ const main = async () => {
     );
     check("replaying clientMessageId live-4 keeps seq=4", dupAck.message?.seq === 4);
 
-    // 9. Lister inbox shows unreadCount=2 from D1 (for messages 4 and 5 after lister's own seq 3).
+    // 9. Lister inbox shows unreadCount=2 from D1 (for messages 4 and 5 after lister's own seq 3)
+    //    and returns participants[] with both members and their roles.
     const inboxBeforeRes = await fetch(`${BASE_URL}/api/chats`, {
       headers: { cookie: lister.cookieHeader },
     });
     const inboxBefore = await inboxBeforeRes.json();
     const listerChat = inboxBefore.items.find((item) => item.id === chatId);
+    const participants = Array.isArray(listerChat?.participants) ? listerChat.participants : [];
+    const hasBothParticipants =
+      participants.length === 2 &&
+      participants.some((p) => p.userId === seeker.id && p.role === "seeker") &&
+      participants.some((p) => p.userId === lister.id && p.role === "lister");
     check(
-      "lister inbox shows unreadCount=2 before reconnect",
-      inboxBeforeRes.status === 200 && listerChat?.unreadCount === 2,
+      "lister inbox shows unreadCount=2 and participants[] before reconnect",
+      inboxBeforeRes.status === 200 && listerChat?.unreadCount === 2 && hasBothParticipants,
       JSON.stringify(listerChat),
     );
 

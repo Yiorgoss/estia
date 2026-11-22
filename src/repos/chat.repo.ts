@@ -2,10 +2,13 @@ import { ChatId, ListingId, UserId } from "@/db/schema/brands";
 import {
   ChatDetailSchema,
   ChatMessageSchema,
+  ChatParticipantSchema,
   ChatRowSchema,
   ChatSummarySchema,
+  listingDirectChatKey,
   type ChatDetail,
   type ChatMessage,
+  type ChatParticipant,
   type ChatRow,
   type ChatSummary,
 } from "@/db/schema/Chat";
@@ -15,10 +18,15 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 
 /*
- * The chat repository. Reads of the inbox, chat detail, membership, and
- * message archive run strictly against D1 through Effect SQL. Writes to
- * `chat_messages` are deliberately absent here: the Chat Durable Object is the
- * sole writer of chat message rows so per-chat `seq` ordering stays total.
+ * The chat repository. Reads of the inbox, chat detail, membership,
+ * participants, and message archive run strictly against D1 through Effect SQL.
+ * Writes to `chat_messages` are deliberately absent here: the Chat Durable
+ * Object is the sole writer of chat message rows so per-chat `seq` ordering
+ * stays total.
+ *
+ * `chat_participants` is the single source of truth for membership and per-chat
+ * role; inbox and chat-detail queries never self-join for a single counterpart,
+ * so multi-participant chats always produce exactly one inbox row per member.
  *
  * Like the other repositories, every operation avoids interactive transactions
  * because D1 does not support `withTransaction`.
@@ -92,25 +100,36 @@ const decodeChatDetail = (row: Record<string, unknown>): ChatDetail =>
 const decodeChatMessage = (row: Record<string, unknown>): ChatMessage =>
   Schema.decodeUnknownSync(ChatMessageSchema)(row);
 
+const decodeChatParticipant = (row: Record<string, unknown>): ChatParticipant =>
+  Schema.decodeUnknownSync(ChatParticipantSchema)(row);
+
 const generateChatId = (): string => {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return toHex(bytes);
 };
 
+const humanizeRoleFallback = (role: string): string => {
+  const normalized = role.trim();
+  if (normalized === "lister") return "Listing owner";
+  if (normalized === "seeker") return "Seeker";
+  const words = normalized.split(/[_-\s]+/).filter((part) => part.length > 0);
+  if (words.length === 0) return "Participant";
+  return words
+    .map((word, index) =>
+      index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase(),
+    )
+    .join(" ");
+};
+
 export const LIST_INBOX_FOR_USER_SQL = `
   SELECT
     c.id,
     c.listing_id,
+    c.direct_key,
     l.title AS listing_title,
     l.region_code AS listing_region_code,
     l.price_minor AS listing_price_minor,
-    cp_other.user_id AS counterpart_id,
-    cp_other.role AS counterpart_role,
-    CASE
-      WHEN cp_other.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), 'Listing owner')
-      ELSE COALESCE(NULLIF(TRIM(sk.name), ''), 'Seeker')
-    END AS counterpart_name,
     cp.role AS my_role,
     cp.last_seq,
     cp.last_read_seq,
@@ -122,10 +141,6 @@ export const LIST_INBOX_FOR_USER_SQL = `
   FROM chat_participants cp
   JOIN chats c ON c.id = cp.chat_id
   JOIN listings l ON l.id = c.listing_id
-  JOIN chat_participants cp_other
-    ON cp_other.chat_id = cp.chat_id AND cp_other.user_id <> cp.user_id
-  LEFT JOIN listers li ON li.user_id = cp_other.user_id
-  LEFT JOIN seekers sk ON sk.user_id = cp_other.user_id
   WHERE cp.user_id = ?
   ORDER BY cp.last_message_at DESC, cp.last_seq DESC, cp.chat_id DESC
 `;
@@ -135,22 +150,69 @@ export const ChatRepositoryLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
+    const loadParticipantsByChatIds = (
+      chatIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<ChatParticipant>>, SqlError> => {
+      if (chatIds.length === 0) {
+        return Effect.succeed(new Map());
+      }
+      return sql<Record<string, unknown>>`
+        SELECT
+          cp.chat_id,
+          cp.user_id,
+          cp.role,
+          cp.last_read_seq,
+          CASE
+            WHEN cp.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
+            WHEN cp.role = 'seeker' THEN COALESCE(NULLIF(TRIM(sk.name), ''), NULLIF(TRIM(li.name), ''), '')
+            ELSE COALESCE(NULLIF(TRIM(li.name), ''), NULLIF(TRIM(sk.name), ''), '')
+          END AS profile_name
+        FROM chat_participants cp
+        LEFT JOIN listers li ON li.user_id = cp.user_id
+        LEFT JOIN seekers sk ON sk.user_id = cp.user_id
+        WHERE ${sql.in("cp.chat_id", chatIds)}
+        ORDER BY cp.chat_id ASC, cp.user_id ASC;
+      `.pipe(
+        Effect.map((rows) => {
+          const grouped = new Map<string, Array<ChatParticipant>>();
+          for (const row of rows) {
+            const chatId = String(row["chatId"] ?? "");
+            const role = String(row["role"] ?? "");
+            const rawName = typeof row["profileName"] === "string" ? row["profileName"].trim() : "";
+            const participant = decodeChatParticipant({
+              userId: row["userId"],
+              role,
+              displayName: rawName.length > 0 ? rawName : humanizeRoleFallback(role),
+              lastReadSeq: row["lastReadSeq"],
+            });
+            const list = grouped.get(chatId);
+            if (list === undefined) {
+              grouped.set(chatId, [participant]);
+            } else {
+              list.push(participant);
+            }
+          }
+          return grouped;
+        }),
+      );
+    };
+
     return {
       openOrFind: (listingId, seekerId, listerId) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           const candidateId = generateChatId();
+          const directKey = listingDirectChatKey(listingId, seekerId);
 
           yield* sql`
-            INSERT OR IGNORE INTO chats (id, listing_id, seeker_id, lister_id, created_at)
-            VALUES (${candidateId}, ${listingId}, ${seekerId}, ${listerId}, ${now});
+            INSERT OR IGNORE INTO chats (id, listing_id, direct_key, created_at)
+            VALUES (${candidateId}, ${listingId}, ${directKey}, ${now});
           `;
 
           const rows = yield* sql<Record<string, unknown>>`
             SELECT *
               FROM chats
-             WHERE listing_id = ${listingId}
-               AND seeker_id = ${seekerId}
+             WHERE direct_key = ${directKey}
              LIMIT 1;
           `;
           const chat = decodeChatRow(Option.getOrThrow(Option.fromNullishOr(rows[0])));
@@ -180,18 +242,19 @@ export const ChatRepositoryLive = Layer.effect(
           Effect.map(Option.map(decodeChatRow)),
         ),
 
-      findByListingAndSeeker: (listingId, seekerId) =>
-        sql<Record<string, unknown>>`
+      findByListingAndSeeker: (listingId, seekerId) => {
+        const directKey = listingDirectChatKey(listingId, seekerId);
+        return sql<Record<string, unknown>>`
           SELECT *
             FROM chats
-           WHERE listing_id = ${listingId}
-             AND seeker_id = ${seekerId}
+           WHERE direct_key = ${directKey}
            LIMIT 1;
         `.pipe(
           Effect.map((rows) => rows[0]),
           Effect.map(Option.fromNullishOr),
           Effect.map(Option.map(decodeChatRow)),
-        ),
+        );
+      },
 
       isParticipant: (chatId, userId) =>
         sql<{ readonly found: number }>`
@@ -203,48 +266,57 @@ export const ChatRepositoryLive = Layer.effect(
         `.pipe(Effect.map((rows) => rows.length > 0)),
 
       findDetailForUser: (chatId, userId) =>
-        sql<Record<string, unknown>>`
-          SELECT
-            c.id,
-            c.listing_id,
-            l.title AS listing_title,
-            l.region_code AS listing_region_code,
-            l.price_minor AS listing_price_minor,
-            cp_other.user_id AS counterpart_id,
-            cp_other.role AS counterpart_role,
-            CASE
-              WHEN cp_other.role = 'lister' THEN COALESCE(NULLIF(TRIM(li.name), ''), 'Listing owner')
-              ELSE COALESCE(NULLIF(TRIM(sk.name), ''), 'Seeker')
-            END AS counterpart_name,
-            cp.role AS my_role,
-            cp.last_seq,
-            cp.last_read_seq,
-            cp.unread_count,
-            cp_other.last_read_seq AS counterpart_last_read_seq,
-            c.last_message_body,
-            c.last_message_sender_id,
-            c.last_message_at,
-            c.created_at
-          FROM chat_participants cp
-          JOIN chats c ON c.id = cp.chat_id
-          JOIN listings l ON l.id = c.listing_id
-          JOIN chat_participants cp_other
-            ON cp_other.chat_id = cp.chat_id AND cp_other.user_id <> cp.user_id
-          LEFT JOIN listers li ON li.user_id = cp_other.user_id
-          LEFT JOIN seekers sk ON sk.user_id = cp_other.user_id
-          WHERE cp.chat_id = ${chatId}
-            AND cp.user_id = ${userId}
-          LIMIT 1;
-        `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeChatDetail)),
-        ),
+        Effect.gen(function* () {
+          const rows = yield* sql<Record<string, unknown>>`
+            SELECT
+              c.id,
+              c.listing_id,
+              c.direct_key,
+              l.title AS listing_title,
+              l.region_code AS listing_region_code,
+              l.price_minor AS listing_price_minor,
+              cp.role AS my_role,
+              cp.last_seq,
+              cp.last_read_seq,
+              cp.unread_count,
+              c.last_message_body,
+              c.last_message_sender_id,
+              c.last_message_at,
+              c.created_at
+            FROM chat_participants cp
+            JOIN chats c ON c.id = cp.chat_id
+            JOIN listings l ON l.id = c.listing_id
+            WHERE cp.chat_id = ${chatId}
+              AND cp.user_id = ${userId}
+            LIMIT 1;
+          `;
+          const row = rows[0];
+          if (row === undefined) {
+            return Option.none();
+          }
+          const byChat = yield* loadParticipantsByChatIds([String(row["id"] ?? chatId)]);
+          const participants = byChat.get(String(row["id"] ?? chatId)) ?? [];
+          return Option.some(decodeChatDetail({ ...row, participants }));
+        }),
 
       listInboxForUser: (userId) =>
-        sql
-          .unsafe<Record<string, unknown>>(LIST_INBOX_FOR_USER_SQL, [userId])
-          .pipe(Effect.map((rows) => rows.map(decodeChatSummary))),
+        Effect.gen(function* () {
+          const rows = yield* sql.unsafe<Record<string, unknown>>(LIST_INBOX_FOR_USER_SQL, [
+            userId,
+          ]);
+          if (rows.length === 0) {
+            return [];
+          }
+          const chatIds = rows.map((row) => String(row["id"] ?? ""));
+          const byChat = yield* loadParticipantsByChatIds(chatIds);
+          return rows.map((row) => {
+            const id = String(row["id"] ?? "");
+            return decodeChatSummary({
+              ...row,
+              participants: byChat.get(id) ?? [],
+            });
+          });
+        }),
 
       listMessagesAfter: (chatId, afterSeq, limit) =>
         sql<Record<string, unknown>>`

@@ -1,4 +1,4 @@
-import type { ChatDetail, ChatMessage, ChatSummary } from "@/db/schema/Chat";
+import type { ChatDetail, ChatMessage, ChatParticipant, ChatSummary } from "@/db/schema/Chat";
 import {
   errorBanner,
   pageShell,
@@ -11,6 +11,11 @@ import { escapeHtml, formatPriceMinor } from "@/utils";
 /*
  * Server-rendered chat pages: the inbox list (`/chats`) and a single chat
  * (`/chats/:id`).
+ *
+ * Both pages render from `chat.participants[]` rather than assuming a fixed
+ * 2-person lister/seeker pair, so multi-participant chats and arbitrary role
+ * names (such as `property_manager`, `roommate`, `agent`, or `support`) render
+ * cleanly alongside 1-to-1 listing enquiries.
  *
  * The single-chat page renders the initial message history from D1 in `seq`
  * order, keeps a standard HTML form posting to `/chats/:id/messages` as the
@@ -29,19 +34,67 @@ const formatTimestamp = (date: Date | null | undefined): string => {
   });
 };
 
+export const formatChatRoleLabel = (role: string): string => {
+  const trimmed = role.trim();
+  if (trimmed === "lister") return "Lister";
+  if (trimmed === "seeker") return "Seeker";
+  const words = trimmed.split(/[_-\s]+/).filter((part) => part.length > 0);
+  if (words.length === 0) return "Participant";
+  return words
+    .map((word, index) =>
+      index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase(),
+    )
+    .join(" ");
+};
+
+const visibleParticipants = (
+  participants: ReadonlyArray<ChatParticipant>,
+  currentUserId: string | undefined,
+): ReadonlyArray<ChatParticipant> => {
+  if (currentUserId === undefined) return participants;
+  const others = participants.filter((p) => p.userId !== currentUserId);
+  return others.length > 0 ? others : participants;
+};
+
+const participantTitle = (participants: ReadonlyArray<ChatParticipant>): string => {
+  if (participants.length === 0) return "Chat";
+  return participants.map((p) => p.displayName).join(", ");
+};
+
 const unreadBadge = (count: number): string =>
   count <= 0
     ? ""
     : `<span class="inline-flex min-w-6 items-center justify-center rounded-full bg-blue-700 px-2 py-0.5 text-xs font-semibold text-white" data-unread-badge>${count}</span>`;
 
-const inboxRow = (chat: ChatSummary): string => {
+const participantChips = (participants: ReadonlyArray<ChatParticipant>): string =>
+  participants
+    .map(
+      (participant) =>
+        `<span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"><span>${escapeHtml(participant.displayName)}</span><span class="text-gray-500">(${escapeHtml(formatChatRoleLabel(participant.role))})</span></span>`,
+    )
+    .join("");
+
+const inboxRow = (chat: ChatSummary, currentUserId: string | undefined): string => {
   const region = regionLabels[chat.listingRegionCode];
   const preview =
     chat.lastMessageBody != null && chat.lastMessageBody.trim() !== ""
       ? escapeHtml(chat.lastMessageBody)
       : "No messages yet — say hello.";
   const timestamp = formatTimestamp(chat.lastMessageAt ?? chat.createdAt);
-  const roleLabel = chat.counterpartRole === "lister" ? "Lister" : "Seeker";
+  const peers = visibleParticipants(chat.participants, currentUserId);
+  const heading = participantTitle(peers);
+
+  const badges =
+    peers.length === 1 && peers[0] !== undefined
+      ? `<span class="text-sm font-semibold text-gray-900">${escapeHtml(peers[0].displayName)}</span>
+         <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">${escapeHtml(formatChatRoleLabel(peers[0].role))}</span>`
+      : `<span class="text-sm font-semibold text-gray-900">${escapeHtml(heading)}</span>
+         ${peers
+           .map(
+             (peer) =>
+               `<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">${escapeHtml(formatChatRoleLabel(peer.role))}</span>`,
+           )
+           .join("")}`;
 
   return `
     <li>
@@ -52,8 +105,7 @@ const inboxRow = (chat: ChatSummary): string => {
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-semibold text-gray-900">${escapeHtml(chat.counterpartName)}</span>
-              <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">${roleLabel}</span>
+              ${badges}
             </div>
             <p class="mt-0.5 truncate text-xs text-gray-500">
               ${escapeHtml(chat.listingTitle)} &middot; ${escapeHtml(region)} &middot; ${formatPriceMinor(chat.listingPriceMinor)}/mo
@@ -74,6 +126,7 @@ const inboxRow = (chat: ChatSummary): string => {
 export const chatsInboxPage = (state: {
   readonly items: ReadonlyArray<ChatSummary>;
   readonly totalUnread: number;
+  readonly currentUserId?: string | undefined;
 }): string => {
   const body =
     state.items.length === 0
@@ -87,7 +140,9 @@ export const chatsInboxPage = (state: {
             <a href="/search" class="${primaryButtonClass} inline-block">Browse listings</a>
           </p>
         </div>`
-      : `<ul class="mt-6 space-y-3" data-chat-list>${state.items.map(inboxRow).join("")}</ul>`;
+      : `<ul class="mt-6 space-y-3" data-chat-list>${state.items
+          .map((item) => inboxRow(item, state.currentUserId))
+          .join("")}</ul>`;
 
   return pageShell(
     "Chats",
@@ -108,10 +163,10 @@ export const chatsInboxPage = (state: {
 const messageItem = (
   message: ChatMessage,
   currentUserId: string,
-  counterpartName: string,
+  participantNames: ReadonlyMap<string, string>,
 ): string => {
   const mine = message.senderId === currentUserId;
-  const senderLabel = mine ? "You" : counterpartName;
+  const senderLabel = mine ? "You" : (participantNames.get(message.senderId) ?? "Participant");
   const alignClass = mine
     ? "ml-auto bg-blue-700 text-white"
     : "mr-auto bg-white text-gray-900 border border-gray-200";
@@ -134,15 +189,27 @@ const messageItem = (
     </li>`;
 };
 
+const formatReadSummary = (
+  participants: ReadonlyArray<ChatParticipant>,
+  currentUserId: string,
+): string =>
+  participants
+    .filter((p) => p.userId !== currentUserId && p.lastReadSeq > 0)
+    .map((p) => `${p.displayName} read up to #${p.lastReadSeq}`)
+    .join(" · ");
+
 const safeInlineJson = (value: unknown): string =>
   JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 
 const chatClientScript = (config: {
   readonly chatId: string;
   readonly currentUserId: string;
-  readonly counterpartName: string;
+  readonly participants: ReadonlyArray<{
+    readonly userId: string;
+    readonly displayName: string;
+    readonly lastReadSeq: number;
+  }>;
   readonly lastSeq: number;
-  readonly counterpartLastReadSeq: number;
 }): string => `
 <script>
 (() => {
@@ -157,7 +224,10 @@ const chatClientScript = (config: {
   if (!listEl || !formEl || !bodyEl) return;
 
   let lastSeq = cfg.lastSeq;
-  let counterpartReadSeq = cfg.counterpartLastReadSeq;
+  const participantsById = new Map();
+  for (const p of cfg.participants) {
+    participantsById.set(p.userId, { displayName: p.displayName, lastReadSeq: p.lastReadSeq });
+  }
   let socket = null;
   let backoffMs = 1000;
   let reconnectTimer = null;
@@ -189,8 +259,14 @@ const chatClientScript = (config: {
 
   const updateReadLabel = () => {
     if (!readEl) return;
-    if (counterpartReadSeq > 0) {
-      readEl.textContent = cfg.counterpartName + " read up to #" + counterpartReadSeq;
+    const parts = [];
+    for (const [uid, info] of participantsById.entries()) {
+      if (uid !== cfg.currentUserId && info.lastReadSeq > 0) {
+        parts.push(info.displayName + " read up to #" + info.lastReadSeq);
+      }
+    }
+    if (parts.length > 0) {
+      readEl.textContent = parts.join(" · ");
       readEl.classList.remove("hidden");
     }
   };
@@ -207,6 +283,12 @@ const chatClientScript = (config: {
     } catch {
       return "";
     }
+  };
+
+  const senderLabelFor = (senderId) => {
+    if (senderId === cfg.currentUserId) return "You";
+    const info = participantsById.get(senderId);
+    return info ? info.displayName : "Participant";
   };
 
   const appendMessage = (msg) => {
@@ -234,7 +316,7 @@ const chatClientScript = (config: {
     meta.className = "flex items-baseline justify-between gap-4 text-xs " + (mine ? "text-blue-100" : "text-gray-500");
     const who = document.createElement("span");
     who.className = "font-medium";
-    who.textContent = mine ? "You" : cfg.counterpartName;
+    who.textContent = senderLabelFor(msg.senderId);
     const when = document.createElement("span");
     when.textContent = formatTime(msg.createdAt);
     meta.appendChild(who);
@@ -301,8 +383,10 @@ const chatClientScript = (config: {
         appendMessage(frame.message);
       } else if (frame.type === "read") {
         if (frame.userId !== cfg.currentUserId && typeof frame.lastReadSeq === "number") {
-          if (frame.lastReadSeq > counterpartReadSeq) {
-            counterpartReadSeq = frame.lastReadSeq;
+          const existing = participantsById.get(frame.userId) || { displayName: "Participant", lastReadSeq: 0 };
+          if (frame.lastReadSeq > existing.lastReadSeq) {
+            existing.lastReadSeq = frame.lastReadSeq;
+            participantsById.set(frame.userId, existing);
             updateReadLabel();
           }
         }
@@ -361,9 +445,15 @@ export const chatDetailPage = (state: {
 }): string => {
   const region = regionLabels[state.chat.listingRegionCode];
   const lastSeq = state.messages[state.messages.length - 1]?.seq ?? 0;
+  const peers = visibleParticipants(state.chat.participants, state.currentUserId);
+  const title = participantTitle(peers);
+  const participantNames = new Map<string, string>(
+    state.chat.participants.map((p) => [p.userId, p.displayName]),
+  );
+  const readSummary = formatReadSummary(state.chat.participants, state.currentUserId);
 
   return pageShell(
-    `Chat with ${state.chat.counterpartName}`,
+    `Chat with ${title}`,
     `
     <div class="flex flex-wrap items-center justify-between gap-3">
       <a href="/chats" class="inline-flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800">&larr; Back to chats</a>
@@ -373,14 +463,17 @@ export const chatDetailPage = (state: {
     <header class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h1 class="text-lg font-semibold text-gray-900">${escapeHtml(state.chat.counterpartName)}</h1>
+          <h1 class="text-lg font-semibold text-gray-900">${escapeHtml(title)}</h1>
           <p class="mt-0.5 text-sm text-gray-600">
             <a href="/listings/${state.chat.listingId}" class="font-medium text-blue-700 hover:underline">${escapeHtml(state.chat.listingTitle)}</a>
             &middot; ${escapeHtml(region)} &middot; ${formatPriceMinor(state.chat.listingPriceMinor)}/mo
           </p>
+          <div class="mt-2 flex flex-wrap gap-1.5" data-chat-participants>
+            ${participantChips(peers)}
+          </div>
         </div>
-        <p id="chat-read-status" class="${state.chat.counterpartLastReadSeq > 0 ? "" : "hidden "}text-xs text-gray-500">
-          ${state.chat.counterpartLastReadSeq > 0 ? `${escapeHtml(state.chat.counterpartName)} read up to #${state.chat.counterpartLastReadSeq}` : ""}
+        <p id="chat-read-status" class="${readSummary.length > 0 ? "" : "hidden "}text-xs text-gray-500">
+          ${escapeHtml(readSummary)}
         </p>
       </div>
     </header>
@@ -395,7 +488,7 @@ export const chatDetailPage = (state: {
         No messages yet. Send the first message below.
       </p>
       <ul id="chat-messages" class="max-h-[30rem] space-y-3 overflow-y-auto">
-        ${state.messages.map((m) => messageItem(m, state.currentUserId, state.chat.counterpartName)).join("")}
+        ${state.messages.map((m) => messageItem(m, state.currentUserId, participantNames)).join("")}
       </ul>
     </section>
 
@@ -426,9 +519,12 @@ export const chatDetailPage = (state: {
     ${chatClientScript({
       chatId: state.chat.id,
       currentUserId: state.currentUserId,
-      counterpartName: state.chat.counterpartName,
+      participants: state.chat.participants.map((p) => ({
+        userId: p.userId,
+        displayName: p.displayName,
+        lastReadSeq: p.lastReadSeq,
+      })),
       lastSeq,
-      counterpartLastReadSeq: state.chat.counterpartLastReadSeq,
     })}`,
   );
 };

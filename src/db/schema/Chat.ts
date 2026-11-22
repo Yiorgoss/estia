@@ -4,20 +4,39 @@ import { GreekRegion } from "@/db/schema/Listing";
 import { Effect, Schema, SchemaTransformation } from "effect";
 
 /*
- * Schemas for the one-to-one chat domain.
+ * Schemas for the chat domain.
  *
- * Display order inside a chat is strictly `seq`, never `createdAt`. Bodies and
- * clientMessageIds are trimmed before length checks so whitespace-only payloads
- * are refused at the boundary rather than reaching the Durable Object or D1.
+ * Display order inside a chat is strictly `seq`, never `createdAt`. Membership
+ * and per-chat roles live in `chat_participants` as an open-ended participant
+ * list (`participants[]`), while direct 1-to-1 listing enquiries deduplicate
+ * via `chats.direct_key`. Bodies and clientMessageIds are trimmed before length
+ * checks so whitespace-only payloads are refused at the boundary rather than
+ * reaching the Durable Object or D1.
  */
 
 export const CHAT_MESSAGE_MAX_LENGTH = 2000;
 export const CHAT_CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
+export const CHAT_ROLE_MAX_LENGTH = 64;
 export const CHAT_MESSAGES_DEFAULT_LIMIT = 50;
 export const CHAT_MESSAGES_MAX_LIMIT = 100;
 
-export const ChatParticipantRole = Schema.Literals(["seeker", "lister"]);
+export const ChatParticipantRole = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.NonEmptyString.check(Schema.isMaxLength(CHAT_ROLE_MAX_LENGTH)),
+    SchemaTransformation.transform({
+      decode: (value: string) => value.trim(),
+      encode: (value: string) => value,
+    }),
+  ),
+);
 export type ChatParticipantRole = typeof ChatParticipantRole.Type;
+
+// Deterministic key for deduplicating direct 1-to-1 listing enquiries while
+// leaving `direct_key` NULL for multi-participant chats.
+export const listingDirectChatKey = (
+  listingId: typeof ListingId.Type,
+  seekerId: typeof UserId.Type,
+): string => `listing:${listingId}:seeker:${seekerId}`;
 
 // A path segment is not a chat id until it matches the server-generated format
 // (hex/UUID/url-safe token), so arbitrary strings fail cleanly before SQL or DO.
@@ -51,8 +70,7 @@ export const ClientMessageId = Schema.String.pipe(
 export const ChatRowSchema = Schema.Struct({
   id: ChatId,
   listingId: ListingId,
-  seekerId: UserId,
-  listerId: UserId,
+  directKey: Schema.NullishOr(Schema.String),
   lastSeq: Schema.Int,
   lastMessageBody: Schema.NullishOr(Schema.String),
   lastMessageSenderId: Schema.NullishOr(UserId),
@@ -72,16 +90,23 @@ export const ChatMessageSchema = Schema.Struct({
 });
 export type ChatMessage = typeof ChatMessageSchema.Type;
 
+export const ChatParticipantSchema = Schema.Struct({
+  userId: UserId,
+  role: Schema.String,
+  displayName: Schema.String,
+  lastReadSeq: Schema.Int,
+});
+export type ChatParticipant = typeof ChatParticipantSchema.Type;
+
 export const ChatSummarySchema = Schema.Struct({
   id: ChatId,
   listingId: ListingId,
+  directKey: Schema.NullishOr(Schema.String),
   listingTitle: Schema.String,
   listingRegionCode: GreekRegion,
   listingPriceMinor: Schema.Int,
-  counterpartId: UserId,
-  counterpartRole: ChatParticipantRole,
-  counterpartName: Schema.String,
-  myRole: ChatParticipantRole,
+  myRole: Schema.String,
+  participants: Schema.Array(ChatParticipantSchema),
   lastSeq: Schema.Int,
   lastReadSeq: Schema.Int,
   unreadCount: Schema.Int,
@@ -92,10 +117,7 @@ export const ChatSummarySchema = Schema.Struct({
 });
 export type ChatSummary = typeof ChatSummarySchema.Type;
 
-export const ChatDetailSchema = Schema.Struct({
-  ...ChatSummarySchema.fields,
-  counterpartLastReadSeq: Schema.Int,
-});
+export const ChatDetailSchema = ChatSummarySchema;
 export type ChatDetail = typeof ChatDetailSchema.Type;
 
 export const ChatInboxResponse = Schema.Struct({
