@@ -7,6 +7,7 @@ import { InternalError, UserAlreadyExistsError } from "@/services/user.service";
 import { loginPage, registerPage } from "@/frontend/pages/auth";
 import { AuthPageRoutes } from "@/handlers/public/auth-pages";
 import { SessionRoutes } from "@/handlers/public/session";
+import { homePage } from "@/frontend/pages/home";
 import { mapPage, mapUnavailablePage } from "@/frontend/pages/map";
 import { MapBasemapUrl, MapTilesRoute } from "@/api/map-tiles";
 import { searchPage } from "@/frontend/pages/search";
@@ -588,20 +589,9 @@ export const PublicRoutes = HttpRouter.addAll([
   mapRoute,
   MapTilesRoute,
   searchPageRoute,
-  HttpRouter.route(
-    "GET",
-    "/",
-    Effect.succeed(
-      HttpServerResponse.html(`
-        <!doctype html>
-        <html>
-          <body>
-            <h1>Hello!</h1>
-          </body>
-        </html>
-      `),
-    ),
-  ),
+  // The homepage is a directory of the app's own pages, so it reads no service
+  // and needs no session: every visitor sees the same list.
+  HttpRouter.route("GET", "/", Effect.succeed(HttpServerResponse.html(homePage()))),
   HttpRouter.route("GET", "/login", Effect.succeed(HttpServerResponse.html(loginPage()))),
   HttpRouter.route("GET", "/register", Effect.succeed(HttpServerResponse.html(registerPage()))),
   ...AuthPageRoutes,
