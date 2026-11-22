@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --host",
+    "seed": "node scripts/seed.mjs",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "build": "vite build",
