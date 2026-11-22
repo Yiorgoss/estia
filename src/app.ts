@@ -30,9 +30,9 @@ export { Chat } from "./durable-objects/chat";
  * `test/config/wrangler-config.test.ts` holds the configuration to this list.
  *
  * `test` is the deployed test environment (`env.test` in `wrangler.jsonc`). It
- * is not production: the CORS list and the logger below treat it the way they
- * treat a local run, while the app still runs from the deployed worker's
- * bindings.
+ * is not production: the CORS list and the 500 diagnostics below treat it like
+ * a local run, while the logger uses `ProdLoggerLive` and the app runs from the
+ * deployed worker's bindings.
  */
 export const ENVIRONMENTS = ["local", "test", "production"] as const;
 
@@ -281,15 +281,11 @@ const logFailure = (request: Request, detail: string): void => {
       Effect.logError(`[worker] ${request.method} ${request.url} rejected: ${detail}`),
     );
   } catch {
-    // The response below still carries the cause.
+    // Never let a logging failure prevent the 500 response below.
   }
 };
 
-const failureResponse = (
-  request: Request,
-  failure: unknown,
-  environment?: string,
-): Response => {
+const failureResponse = (request: Request, failure: unknown, environment?: string): Response => {
   const detail = describeFailure(failure);
   logFailure(request, detail);
   const includeDetail = environment !== "production";
