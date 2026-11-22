@@ -16,8 +16,10 @@ Then open http://localhost:5173.
 
 To fill the local database with dummy accounts, profiles, listings, and photos,
 run `pnpm seed` against the running dev server. `pnpm seed:test` seeds the
-deployed test environment at https://estia.calisto.studio instead. See
-[docs/seed.md](docs/seed.md) for the commands and the seeded logins.
+deployed test environment at https://estia.calisto.studio instead. The seed
+script is `scripts/seed.ts`, written with Effect and run by Node's native
+TypeScript support. See [docs/seed.md](docs/seed.md) for the commands and the
+seeded logins.
 
 ## Test environment
 

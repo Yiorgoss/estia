@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --host",
-    "seed": "node scripts/seed.mjs",
-    "seed:test": "node scripts/seed.mjs --env test",
+    "seed": "node scripts/seed.ts",
+    "seed:test": "node scripts/seed.ts --env test",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "build": "vite build",

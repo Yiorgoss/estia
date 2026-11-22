@@ -51,7 +51,7 @@
   "env": {
     "test": {
       // The shared test deployment. `estia.calisto.studio` is the one remote
-      // host `pnpm seed:test` may write to (`scripts/seed.mjs` names it), so a
+      // host `pnpm seed:test` may write to (`scripts/seed.ts` names it), so a
       // test deploy and its seed data always agree on where they live.
       "routes": [{ "pattern": "estia.calisto.studio", "custom_domain": true }],
       "vars": {

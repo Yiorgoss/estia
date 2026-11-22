@@ -5,6 +5,11 @@ the map, the listing detail pages, the galleries, and the profile pages have
 something real to show. The script runs against a local dev server by default,
 and the deployed test environment is the one remote target it may write to.
 
+The script is `scripts/seed.ts`, written with [Effect](https://effect.website)
+and run by Node's native TypeScript support (`node scripts/seed.ts`, no build
+step). Its HTTP calls go through Effect's `HttpClient`, and every failure is a
+typed, tagged error.
+
 ## Local development
 
 ```bash
@@ -36,7 +41,7 @@ pnpm seed --env test
 ```
 
 `estia.calisto.studio` is the only remote host the script accepts. It is named
-in `scripts/seed.mjs`, so no other address can become seedable by setting a
+in `scripts/seed.ts`, so no other address can become seedable by setting a
 variable. Seeding the test environment writes the accounts, listings, and photos
 below into the shared test database, so treat it as a shared fixture.
 
