@@ -7,8 +7,8 @@
     "dev": "vite dev --host",
     "seed": "node scripts/seed.ts",
     "seed:test": "node scripts/seed.ts --env test",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
+    "lint": "oxlint --ignore-pattern 'vendor/**'",
+    "lint:fix": "oxlint --fix --ignore-pattern 'vendor/**'",
     "build": "vite build",
     "test": "pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "vitest run",
@@ -22,7 +22,7 @@
     "map:tiles:remote": "REMOTE=1 bash packages/map/get_tiles.sh",
     "cf-typegen": "wrangler types",
     "prepare": "effect-tsgo patch --typescript --oxlint",
-    "update:effect": "git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git main --squash"
+    "update:effect": "git subtree pull --prefix=vendor/effect https://github.com/Effect-TS/effect.git main --squash"
   },
   "dependencies": {
     "@effect/sql-d1": "4.0.4",
