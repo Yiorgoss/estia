@@ -180,29 +180,31 @@ layer(TestLive, { concurrent: false })("RefreshTokenRepository", (it) => {
     }),
   );
 
-  it.effect("findValidByHash, findValidByUserID, and revoke fail with RowDecodeError on drift", () =>
-    Effect.gen(function* () {
-      yield* insertUser("u-rt-drift", "rt-drift@test.local");
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql.unsafe(
-        `INSERT INTO refresh_tokens (id, user_id, token_hash, device_info, expires_at, created_at, revoked_at)
+  it.effect(
+    "findValidByHash, findValidByUserID, and revoke fail with RowDecodeError on drift",
+    () =>
+      Effect.gen(function* () {
+        yield* insertUser("u-rt-drift", "rt-drift@test.local");
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql.unsafe(
+          `INSERT INTO refresh_tokens (id, user_id, token_hash, device_info, expires_at, created_at, revoked_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ["id-rt-drift", "u-rt-drift", "hash-drift", null, VALID_EXPIRES_AT, "corrupt", null],
-      );
+          ["id-rt-drift", "u-rt-drift", "hash-drift", null, VALID_EXPIRES_AT, "corrupt", null],
+        );
 
-      const repo = yield* RefreshTokenRepository;
+        const repo = yield* RefreshTokenRepository;
 
-      const hashErr = yield* Effect.flip(repo.findValidByHash(tokenHash("hash-drift")));
-      assert.strictEqual(hashErr._tag, "RowDecodeError");
-      assert.strictEqual(hashErr.operation, "RefreshTokenRepository.findValidByHash");
+        const hashErr = yield* Effect.flip(repo.findValidByHash(tokenHash("hash-drift")));
+        assert.strictEqual(hashErr._tag, "RowDecodeError");
+        assert.strictEqual(hashErr.operation, "RefreshTokenRepository.findValidByHash");
 
-      const userErr = yield* Effect.flip(repo.findValidByUserID(userId("u-rt-drift")));
-      assert.strictEqual(userErr._tag, "RowDecodeError");
-      assert.strictEqual(userErr.operation, "RefreshTokenRepository.findValidByUserID");
+        const userErr = yield* Effect.flip(repo.findValidByUserID(userId("u-rt-drift")));
+        assert.strictEqual(userErr._tag, "RowDecodeError");
+        assert.strictEqual(userErr.operation, "RefreshTokenRepository.findValidByUserID");
 
-      const revokeErr = yield* Effect.flip(repo.revoke(tokenHash("hash-drift")));
-      assert.strictEqual(revokeErr._tag, "RowDecodeError");
-      assert.strictEqual(revokeErr.operation, "RefreshTokenRepository.revoke");
-    }),
+        const revokeErr = yield* Effect.flip(repo.revoke(tokenHash("hash-drift")));
+        assert.strictEqual(revokeErr._tag, "RowDecodeError");
+        assert.strictEqual(revokeErr.operation, "RefreshTokenRepository.revoke");
+      }),
   );
 });
