@@ -1,33 +1,29 @@
-import { Option, Context, Effect, Layer, Schema } from "effect";
-import { UserSchema, type User } from "@/db/schema/User";
-import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
 import { UserId, UserPasswordHash, UserRoles } from "@/db/schema/brands";
-
-// The driver returns raw rows (`created_at`/`updated_at` as epoch millis), so
-// every row is decoded through `UserSchema` to yield the declared `Date`s.
-const decodeUser = (row: Record<string, unknown>): User =>
-  Schema.decodeUnknownSync(UserSchema)(row);
+import { UserSchema, type User } from "@/db/schema/User";
+import { decodeRow, query, type RepositoryError } from "@/repos/errors";
+import { Context, Effect, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 
 export interface UserRepository {
-  readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, SqlError>;
-  readonly findById: (id: typeof UserId.Type) => Effect.Effect<Option.Option<User>, SqlError>;
+  readonly findByEmail: (email: string) => Effect.Effect<Option.Option<User>, RepositoryError>;
+  readonly findById: (
+    id: typeof UserId.Type,
+  ) => Effect.Effect<Option.Option<User>, RepositoryError>;
   readonly insert: (creds: {
     email: string;
     password: typeof UserPasswordHash.Type;
     role: typeof UserRoles.Type;
-  }) => Effect.Effect<Option.Option<User>, SqlError>;
+  }) => Effect.Effect<Option.Option<User>, RepositoryError>;
   readonly updateRole: (
     id: typeof UserId.Type,
     role: typeof UserRoles.Type,
-  ) => Effect.Effect<Option.Option<User>, SqlError>;
-  readonly updateAvatar: (id: typeof UserId.Type, avatar: string) => Effect.Effect<void, SqlError>;
+  ) => Effect.Effect<Option.Option<User>, RepositoryError>;
   /*
    * Remove an account. Every profile, token, and listing the account owns
    * references `users(id) ON DELETE CASCADE`, so the row is the only thing to
    * delete and the rest goes with it.
    */
-  readonly deleteById: (id: typeof UserId.Type) => Effect.Effect<void, SqlError>;
+  readonly deleteById: (id: typeof UserId.Type) => Effect.Effect<void, RepositoryError>;
 }
 
 export const UserRepository = Context.Service<UserRepository>("UserRepository");
@@ -39,61 +35,79 @@ export const UserRepositoryLive = Layer.effect(
 
     return {
       findByEmail: (email: string) =>
-        sql<Record<string, unknown>>`
+        query(
+          "UserRepository.findByEmail",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM users
              WHERE email=${email}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeUser)),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("UserRepository.findByEmail", UserSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       findById: (id) =>
-        sql<Record<string, unknown>>`
+        query(
+          "UserRepository.findById",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM users
              WHERE id=${id}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeUser)),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("UserRepository.findById", UserSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       insert: ({ email, password, role }) =>
-        sql<Record<string, unknown>>`
+        query(
+          "UserRepository.insert",
+          sql<Record<string, unknown>>`
           INSERT INTO users (email, password_hash, role)
                VALUES (${email}, ${password}, ${role})
-            RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeUser)),
+            RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("UserRepository.insert", UserSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       updateRole: (id, role) =>
-        sql<Record<string, unknown>>`
+        query(
+          "UserRepository.updateRole",
+          sql<Record<string, unknown>>`
               UPDATE users
                  SET role=${role}
                WHERE id=${id}
-           RETURNING *;`.pipe(
-          Effect.map((row) => row[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeUser)),
-        ),
-      updateAvatar: (id, avatar) =>
-        sql<typeof UserId.Type>`
-          UPDATE users
-             SET avatar=${avatar}
-           WHERE id=${id};
-       RETURNING id;`.pipe(
-          Effect.map((row) => row[0]),
-          Effect.map(Option.fromNullishOr),
+           RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("UserRepository.updateRole", UserSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       deleteById: (id) =>
-        sql`
+        query(
+          "UserRepository.deleteById",
+          sql`
           DELETE FROM users
-           WHERE id = ${id};`.pipe(Effect.asVoid),
-    } satisfies UserRepository; // needed otherwise email/password become untyped when using taperror
-  }).pipe(
-    Effect.tapError((error) =>
-      Effect.sync(() => Effect.logError("User repository failed", { error })),
-    ),
-  ),
+           WHERE id = ${id};`,
+        ).pipe(Effect.asVoid),
+    } satisfies UserRepository;
+  }),
 );

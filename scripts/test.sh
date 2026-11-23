@@ -3,7 +3,7 @@
 # Deterministic end-to-end test entrypoint for estia (`pnpm test:e2e`).
 #
 # 1. Applies the local D1 migrations.
-# 2. Runs the listings repository integration test against a real D1 engine.
+# 2. Runs the listings and user repository integration tests against a real D1 engine.
 # 3. Boots the real Vite/Cloudflare dev server, verifies the Tailscale
 #    hostname passes Vite's host validation, and runs the HTTP smoke
 #    checklist end to end.
@@ -37,6 +37,9 @@ pnpm exec wrangler d1 migrations apply DB --local >/dev/null
 
 echo "==> listings repository integration test"
 node scripts/listing-repo-integration.mjs
+
+echo "==> user repository integration test"
+node scripts/user-repo-integration.mjs
 
 echo "==> starting dev server on port ${PORT}"
 set -m

@@ -1,14 +1,14 @@
-import { Option, Context, Effect, Layer, Schema } from "effect";
+import { UserId } from "@/db/schema/brands";
 import { ListerSchema } from "@/db/schema/Lister";
 import type { ListerProfileInput } from "@/db/schema/Profile";
+import { decodeRow, decodeSingle, query, type RepositoryError } from "@/repos/errors";
+import { Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
-import { UserId } from "@/db/schema/brands";
 
 export interface ListerRepository {
   readonly findByUserId: (
     userId: typeof UserId.Type,
-  ) => Effect.Effect<Option.Option<typeof ListerSchema.Type>, SqlError>;
+  ) => Effect.Effect<Option.Option<typeof ListerSchema.Type>, RepositoryError>;
   /*
    * Ensure the user has a listing profile and answer with it. A lister row needs
    * nothing but the user id: `ownership` has a default and `name` is nullish, so
@@ -18,7 +18,7 @@ export interface ListerRepository {
    */
   readonly createForUser: (
     userId: typeof UserId.Type,
-  ) => Effect.Effect<typeof ListerSchema.Type, SqlError>;
+  ) => Effect.Effect<typeof ListerSchema.Type, RepositoryError>;
   /*
    * Write the details a person filled in, whether or not the row exists, so a
    * legacy account is repaired by the same call that saves a normal one. The
@@ -28,7 +28,7 @@ export interface ListerRepository {
   readonly upsertForUser: (
     userId: typeof UserId.Type,
     input: typeof ListerProfileInput.Type,
-  ) => Effect.Effect<typeof ListerSchema.Type, SqlError>;
+  ) => Effect.Effect<typeof ListerSchema.Type, RepositoryError>;
 }
 
 export const ListerRepository = Context.Service<ListerRepository>("ListerRepository");
@@ -39,39 +39,50 @@ export const ListerRepositoryLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     return {
       findByUserId: (userId) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListerRepository.findByUserId",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM listers
              WHERE user_id=${userId}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map((row) => Schema.decodeUnknownSync(ListerSchema)(row))),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("ListerRepository.findByUserId", ListerSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       createForUser: (userId) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListerRepository.createForUser",
+          sql<Record<string, unknown>>`
             INSERT INTO listers (user_id)
                  VALUES (${userId})
             ON CONFLICT (user_id) DO UPDATE SET user_id = excluded.user_id
-             RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map((row) => Schema.decodeUnknownSync(ListerSchema)(row)),
+             RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            decodeSingle("ListerRepository.createForUser", ListerSchema, rows),
+          ),
         ),
       upsertForUser: (userId, input) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListerRepository.upsertForUser",
+          sql<Record<string, unknown>>`
             INSERT INTO listers (user_id, name, ownership)
                  VALUES (${userId}, ${input.name ?? null}, ${input.ownership})
             ON CONFLICT (user_id) DO UPDATE SET
                     name = excluded.name,
                ownership = excluded.ownership
-             RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map((row) => Schema.decodeUnknownSync(ListerSchema)(row)),
+             RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            decodeSingle("ListerRepository.upsertForUser", ListerSchema, rows),
+          ),
         ),
-    } satisfies ListerRepository; // needed otherwise email/password become untyped when using taperror
-  }).pipe(
-    Effect.tapError((error) =>
-      Effect.sync(() => Effect.logError("Lister repository failed", { error })),
-    ),
-  ),
+    } satisfies ListerRepository;
+  }),
 );

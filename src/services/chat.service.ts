@@ -9,6 +9,7 @@ import {
   type MarkChatReadResponse,
 } from "@/db/schema/Chat";
 import { ChatRepository } from "@/repos/chat.repo";
+import { toInternalError } from "@/repos/errors";
 import { ListingRepository } from "@/repos/listing.repo";
 import {
   ChatConflictError,
@@ -20,10 +21,9 @@ import {
 } from "@/services/chat-errors";
 import { ChatGateway } from "@/services/chat-gateway.service";
 import { ListingNotFoundError } from "@/services/listing.service";
-import { InternalError } from "@/services/user.service";
+import { InternalError } from "@/errors";
 import { toHex } from "@/utils";
 import { Context, Effect, Layer, Option } from "effect";
-import type { SqlError } from "effect/sql/SqlError";
 
 export {
   ChatConflictError,
@@ -97,16 +97,6 @@ export interface ChatService {
 
 export const ChatService = Context.Service<ChatService>("ChatService");
 
-const fromSql = <A>(effect: Effect.Effect<A, SqlError>): Effect.Effect<A, InternalError> =>
-  effect.pipe(
-    Effect.catchTags({
-      SqlError: (error) =>
-        Effect.logError("Chat operation failed", { error }).pipe(
-          Effect.andThen(Effect.fail(new InternalError())),
-        ),
-    }),
-  );
-
 const generateClientMessageId = (): string => {
   const bytes = new Uint8Array(12);
   crypto.getRandomValues(bytes);
@@ -125,11 +115,11 @@ export const ChatServiceLive = Layer.effect(
       chatId: typeof ChatId.Type,
     ): Effect.Effect<void, ChatNotFoundError | ChatForbiddenError | InternalError> =>
       Effect.gen(function* () {
-        const found = yield* fromSql(chatRepo.findById(chatId));
+        const found = yield* toInternalError(chatRepo.findById(chatId));
         if (Option.isNone(found)) {
           return yield* Effect.fail(new ChatNotFoundError({ id: chatId }));
         }
-        const member = yield* fromSql(chatRepo.isParticipant(chatId, callerId));
+        const member = yield* toInternalError(chatRepo.isParticipant(chatId, callerId));
         if (!member) {
           return yield* Effect.fail(new ChatForbiddenError({ id: chatId }));
         }
@@ -138,7 +128,7 @@ export const ChatServiceLive = Layer.effect(
     return {
       openForListing: (callerId, listingId) =>
         Effect.gen(function* () {
-          const listing = yield* fromSql(listingRepo.findById(listingId));
+          const listing = yield* toInternalError(listingRepo.findById(listingId));
           if (Option.isNone(listing) || listing.value.status !== "published") {
             return yield* Effect.fail(new ListingNotFoundError({ id: listingId }));
           }
@@ -146,10 +136,10 @@ export const ChatServiceLive = Layer.effect(
             return yield* Effect.fail(new ChatSelfNotAllowedError({ listingId }));
           }
 
-          const chat = yield* fromSql(
+          const chat = yield* toInternalError(
             chatRepo.openOrFind(listing.value.id, callerId, listing.value.ownerId),
           );
-          const detail = yield* fromSql(chatRepo.findDetailForUser(chat.id, callerId));
+          const detail = yield* toInternalError(chatRepo.findDetailForUser(chat.id, callerId));
           if (Option.isNone(detail)) {
             return yield* Effect.fail(new InternalError());
           }
@@ -157,12 +147,12 @@ export const ChatServiceLive = Layer.effect(
         }),
 
       findForListingAndCaller: (callerId, listingId) =>
-        fromSql(chatRepo.findByListingAndSeeker(listingId, callerId)).pipe(
+        toInternalError(chatRepo.findByListingAndSeeker(listingId, callerId)).pipe(
           Effect.map(Option.map((chat) => chat.id)),
         ),
 
       listInbox: (callerId) =>
-        fromSql(chatRepo.listInboxForUser(callerId)).pipe(
+        toInternalError(chatRepo.listInboxForUser(callerId)).pipe(
           Effect.map((items) => ({
             items,
             totalUnread: items.reduce((sum, item) => sum + item.unreadCount, 0),
@@ -172,7 +162,7 @@ export const ChatServiceLive = Layer.effect(
       getChat: (callerId, chatId) =>
         Effect.gen(function* () {
           yield* assertParticipant(callerId, chatId);
-          const detail = yield* fromSql(chatRepo.findDetailForUser(chatId, callerId));
+          const detail = yield* toInternalError(chatRepo.findDetailForUser(chatId, callerId));
           if (Option.isNone(detail)) {
             return yield* Effect.fail(new ChatNotFoundError({ id: chatId }));
           }
@@ -187,7 +177,7 @@ export const ChatServiceLive = Layer.effect(
             CHAT_MESSAGES_MAX_LIMIT,
             Math.max(1, Math.floor(options.limit ?? CHAT_MESSAGES_DEFAULT_LIMIT)),
           );
-          return yield* fromSql(chatRepo.listMessagesAfter(chatId, after, limit));
+          return yield* toInternalError(chatRepo.listMessagesAfter(chatId, after, limit));
         }),
 
       listRecentMessages: (callerId, chatId, limit) =>
@@ -197,7 +187,7 @@ export const ChatServiceLive = Layer.effect(
             CHAT_MESSAGES_MAX_LIMIT,
             Math.max(1, Math.floor(limit ?? CHAT_MESSAGES_DEFAULT_LIMIT)),
           );
-          return yield* fromSql(chatRepo.listRecentMessages(chatId, clampedLimit));
+          return yield* toInternalError(chatRepo.listRecentMessages(chatId, clampedLimit));
         }),
 
       sendMessage: (callerId, chatId, input) =>
@@ -213,7 +203,7 @@ export const ChatServiceLive = Layer.effect(
       markRead: (callerId, chatId, seq) =>
         Effect.gen(function* () {
           yield* assertParticipant(callerId, chatId);
-          const result = yield* fromSql(chatRepo.markRead(chatId, callerId, seq));
+          const result = yield* toInternalError(chatRepo.markRead(chatId, callerId, seq));
           yield* chatGateway.notifyRead(chatId, callerId, result.lastReadSeq);
           return {
             chatId,

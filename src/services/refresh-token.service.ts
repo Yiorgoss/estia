@@ -1,11 +1,12 @@
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import { InternalError } from "@/errors";
 import { HashError, HasherService } from "./hasher.service";
-import { RefreshTokenNotFoundError, RefreshTokenRepository } from "@/repos/refresh-token.repo";
-import type { SqlError } from "effect/sql/SqlError";
+import { RefreshTokenNotFoundError, toInternalError, type RepositoryError } from "@/repos/errors";
+import { RefreshTokenRepository } from "@/repos/refresh-token.repo";
 
 import { JWTService } from "./jwt.service";
 import { UserRepository } from "@/repos/user.repo";
-import { InternalError, UserNotFoundError } from "./user.service";
+import { UserNotFoundError } from "./user.service";
 
 import { Cookies } from "effect/http";
 import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
@@ -51,7 +52,7 @@ export interface RefreshTokenService {
   issueToken: (
     id: typeof UserId.Type,
     userAgent: string,
-  ) => Effect.Effect<typeof RefreshTokenValue.Type, HashError | SqlError>;
+  ) => Effect.Effect<typeof RefreshTokenValue.Type, HashError | RepositoryError>;
   /*
    * Ends one session: the row the presented token hashes to is marked revoked,
    * so the token cannot be replayed. A token that is already revoked, expired,
@@ -109,10 +110,8 @@ export const RefreshTokenServiceLive = Layer.effect(
             yield* Effect.logInfo("Signing out found no live refresh token to revoke");
           }
         }).pipe(
-          Effect.catchTags({
-            HashError: () => Effect.fail(new InternalError()),
-            SqlError: () => Effect.fail(new InternalError()),
-          }),
+          toInternalError,
+          Effect.catchTag("HashError", () => Effect.fail(new InternalError())),
         ),
       userIdForToken: (token) =>
         Effect.gen(function* () {
@@ -120,17 +119,10 @@ export const RefreshTokenServiceLive = Layer.effect(
           const valid = yield* refreshTokenRepo.findValidByHash(hash);
           return Option.map(valid, (record) => record.userId);
         }).pipe(
-          Effect.catchTags({
-            HashError: () => Effect.fail(new InternalError()),
-            SqlError: () => Effect.fail(new InternalError()),
-          }),
+          toInternalError,
+          Effect.catchTag("HashError", () => Effect.fail(new InternalError())),
         ),
-      revokeAllSessions: (id) =>
-        refreshTokenRepo.revokeAllForUser(id).pipe(
-          Effect.catchTags({
-            SqlError: () => Effect.fail(new InternalError()),
-          }),
-        ),
+      revokeAllSessions: (id) => toInternalError(refreshTokenRepo.revokeAllForUser(id)),
       issueToken: (id, userAgent) =>
         Effect.gen(function* () {
           const token = Schema.decodeSync(RefreshTokenValue)(
@@ -179,10 +171,8 @@ export const RefreshTokenServiceLive = Layer.effect(
           });
           return newTokenValue;
         }).pipe(
-          Effect.catchTags({
-            HashError: () => Effect.fail(new InternalError()),
-            SqlError: () => Effect.fail(new InternalError()),
-          }),
+          toInternalError,
+          Effect.catchTag("HashError", () => Effect.fail(new InternalError())),
         ),
       consumeToken: (token) =>
         Effect.gen(function* () {
@@ -212,9 +202,9 @@ export const RefreshTokenServiceLive = Layer.effect(
           // const newRefreshToken = yield* refreshTokenService.issueToken(user.id, userAgent)
           // return { accessToken: newJWT, refreshToken: newRefreshToken }
         }).pipe(
+          toInternalError,
           Effect.catchTags({
             HashError: () => Effect.fail(new InternalError()),
-            SqlError: () => Effect.fail(new InternalError()),
             JWTSigningError: () => Effect.fail(new InternalError()),
           }),
         ),

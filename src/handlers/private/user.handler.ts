@@ -1,8 +1,9 @@
 import { PrivateApi } from "@/api/private";
 import { callerUser } from "@/handlers/private/caller";
+import { toInternalError } from "@/repos/errors";
 import { ListerRepository } from "@/repos/lister.repo";
 import { SeekerRepository } from "@/repos/seeker.repo";
-import { InternalError, UserProfile, UserService } from "@/services/user.service";
+import { UserProfile, UserService } from "@/services/user.service";
 import { HttpApiBuilder } from "effect/http-api";
 import { Effect, Option } from "effect";
 
@@ -32,7 +33,7 @@ export const UserHandler = HttpApiBuilder.group(PrivateApi, "user-group", (handl
           user: { id: user.id, role: user.role },
           userProfile: Option.getOrNull(userProfile),
         };
-      }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
+      }).pipe(toInternalError),
     )
     .handle("profile", () =>
       Effect.gen(function* () {

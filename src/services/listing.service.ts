@@ -12,10 +12,10 @@ import {
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { ListingPinRows } from "@/db/schema/ListingPin";
+import { InternalError } from "@/errors";
+import { toInternalError } from "@/repos/errors";
 import { ListingRepository } from "@/repos/listing.repo";
-import { InternalError } from "@/services/user.service";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The listings service owns every rule that needs the current row or a
@@ -189,18 +189,6 @@ const decodeTitle = (title: string): Effect.Effect<string, ListingValidationErro
     ),
   );
 
-// Services collapse driver failures into `InternalError` (the 500 contract every
-// other service already follows) and log the real cause.
-const fromSql = <A>(effect: Effect.Effect<A, SqlError>): Effect.Effect<A, InternalError> =>
-  effect.pipe(
-    Effect.catchTags({
-      SqlError: (error) =>
-        Effect.logError("Listing operation failed", { error }).pipe(
-          Effect.andThen(Effect.fail(new InternalError())),
-        ),
-    }),
-  );
-
 export const ListingServiceLive = Layer.effect(
   ListingService,
   Effect.gen(function* () {
@@ -209,7 +197,7 @@ export const ListingServiceLive = Layer.effect(
     // Loads a listing for its owner: missing is 404, someone else's is 403.
     const loadOwned = (ownerId: typeof UserId.Type, id: typeof ListingId.Type) =>
       Effect.gen(function* () {
-        const found = yield* fromSql(repo.findById(id));
+        const found = yield* toInternalError(repo.findById(id));
         const listing = yield* Option.match(found, {
           onNone: () => Effect.fail(new ListingNotFoundError({ id })),
           onSome: Effect.succeed,
@@ -234,7 +222,7 @@ export const ListingServiceLive = Layer.effect(
         }
         // Compare-and-set: `from` is the status the service just read, so a
         // concurrent transition cannot be overwritten and the loser gets a 409.
-        const updated = yield* fromSql(repo.setStatus(id, ownerId, [current.status], to));
+        const updated = yield* toInternalError(repo.setStatus(id, ownerId, [current.status], to));
         if (Option.isNone(updated)) {
           return yield* Effect.fail(
             new InvalidListingTransitionError({ id, from: current.status, to }),
@@ -248,7 +236,7 @@ export const ListingServiceLive = Layer.effect(
         Effect.gen(function* () {
           const values = { ...input, title: yield* decodeTitle(input.title) };
           yield* assertLocation(values.lat, values.lng);
-          return yield* fromSql(repo.create(ownerId, values));
+          return yield* toInternalError(repo.create(ownerId, values));
         }),
       updateListing: (ownerId, id, input) =>
         Effect.gen(function* () {
@@ -261,7 +249,7 @@ export const ListingServiceLive = Layer.effect(
             values.lat === undefined ? current.lat : values.lat,
             values.lng === undefined ? current.lng : values.lng,
           );
-          const updated = yield* fromSql(repo.update(id, ownerId, values));
+          const updated = yield* toInternalError(repo.update(id, ownerId, values));
           if (Option.isNone(updated)) {
             return yield* Effect.fail(new ListingNotFoundError({ id }));
           }
@@ -272,7 +260,7 @@ export const ListingServiceLive = Layer.effect(
       getOwn: (ownerId, id) => loadOwned(ownerId, id),
       getPublic: (id) =>
         Effect.gen(function* () {
-          const found = yield* fromSql(repo.findById(id));
+          const found = yield* toInternalError(repo.findById(id));
           const listing = yield* Option.match(found, {
             onNone: () => Effect.fail(new ListingNotFoundError({ id })),
             onSome: Effect.succeed,
@@ -284,9 +272,9 @@ export const ListingServiceLive = Layer.effect(
           }
           return listing;
         }),
-      listMine: (ownerId, page) => fromSql(repo.listByOwner(ownerId, page)),
-      search: (filters, page) => fromSql(repo.search(filters, page)),
-      mapPins: (filters, limit) => fromSql(repo.listPinned(filters, limit)),
+      listMine: (ownerId, page) => toInternalError(repo.listByOwner(ownerId, page)),
+      search: (filters, page) => toInternalError(repo.search(filters, page)),
+      mapPins: (filters, limit) => toInternalError(repo.listPinned(filters, limit)),
     } satisfies ListingService;
   }),
 );

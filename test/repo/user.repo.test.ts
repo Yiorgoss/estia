@@ -106,7 +106,7 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
     }),
   );
 
-  it.effect("insert fails with a SqlError when the email is already taken", () =>
+  it.effect("insert fails with a SqlQueryError when the email is already taken", () =>
     Effect.gen(function* () {
       const repo = yield* UserRepository;
       yield* repo.insert({
@@ -122,7 +122,8 @@ layer(TestLive, { concurrent: false })("UserRepository", (it) => {
           role: "user",
         }),
       );
-      assert.strictEqual(error._tag, "SqlError");
+      assert.strictEqual(error._tag, "SqlQueryError");
+      assert.strictEqual(error.operation, "UserRepository.insert");
     }),
   );
 });

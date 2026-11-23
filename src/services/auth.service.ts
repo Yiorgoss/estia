@@ -1,11 +1,12 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
+import { InternalError } from "@/errors";
+import { RefreshTokenNotFoundError, toInternalError } from "@/repos/errors";
 import { UserRepository } from "@/repos/user.repo";
 import { ExpiredJWTError, InvalidJWTError, JWTService } from "./jwt.service";
 import { HasherService } from "./hasher.service";
 import { RefreshTokenRotatedError, RefreshTokenService } from "./refresh-token.service";
-import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
 import { CurrentUser, UserCredentialsType } from "@/db/schema/User";
-import { InternalError, UserNotFoundError } from "./user.service";
+import { UserNotFoundError } from "./user.service";
 import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 
 export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(
@@ -145,8 +146,8 @@ export const AuthServiceLive = Layer.effect(
           return { accessToken: jwtToken, refreshToken };
         }).pipe(
           Effect.tapError((e) => Effect.logError(`Authentication Failed - ${e.cause}, ${e}`)),
+          toInternalError,
           Effect.catchTags({
-            SqlError: () => Effect.fail(new InternalError()),
             HashError: () => Effect.fail(new InternalError()),
             JWTSigningError: () => Effect.fail(new InternalError()),
           }),

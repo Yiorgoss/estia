@@ -1,4 +1,6 @@
 import { UserCredentials, UserSchema } from "@/db/schema/User";
+import { InternalError } from "@/errors";
+import { toInternalError } from "@/repos/errors";
 import { UserRepository } from "@/repos/user.repo";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { HasherService } from "./hasher.service";
@@ -23,8 +25,6 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
   "UserNotFoundError",
   { cause: Schema.String },
 ) {}
-
-export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {}
 
 /*
  * Both profiles are provisioned at registration, so a role switch is a flip
@@ -180,7 +180,7 @@ export const UserServiceLive = Layer.effect(
           return role === "seeker"
             ? yield* seekerRepo.findByUserId(user.id)
             : yield* listerRepo.findByUserId(user.id);
-        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
+        }).pipe(toInternalError),
       saveProfile: (user, input) =>
         Effect.gen(function* () {
           const stored = editableProfileRole(user.role);
@@ -223,12 +223,10 @@ export const UserServiceLive = Layer.effect(
           }
 
           return { role, profile };
-        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
+        }).pipe(toInternalError),
       switchRoles: (id, target) =>
         Effect.gen(function* () {
-          const user = yield* userRepo
-            .findById(id)
-            .pipe(Effect.mapError(() => new InternalError()));
+          const user = yield* userRepo.findById(id);
           if (Option.isNone(user)) {
             return yield* Effect.fail(new InternalError());
           }
@@ -285,7 +283,7 @@ export const UserServiceLive = Layer.effect(
               .pipe(Effect.filterOrFail(Option.isSome, () => new InternalError()));
           }
           return { role: next, profile };
-        }).pipe(Effect.catchTags({ SqlError: () => Effect.fail(new InternalError()) })),
+        }).pipe(toInternalError),
       registerUser: ({ email, password }) =>
         Effect.gen(function* () {
           yield* userRepo
@@ -341,12 +339,8 @@ export const UserServiceLive = Layer.effect(
           // return { accessToken, refreshToken }
         }).pipe(
           Effect.tapError((e) => Effect.logError("Signup failed", { error: e })),
-          Effect.catchTags({
-            UserAlreadyExistsError: (e) => Effect.fail(e),
-            HashError: () => Effect.fail(new InternalError()),
-            SqlError: () => Effect.fail(new InternalError()),
-            // JWTSigningError: () => Effect.fail(new InternalError()),
-          }),
+          toInternalError,
+          Effect.catchTag("HashError", () => Effect.fail(new InternalError())),
         ),
     };
   }),

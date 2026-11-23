@@ -1,11 +1,11 @@
 import { SavedSearchId, UserId } from "@/db/schema/brands";
 import type { SavedSearch, SavedSearchCriteria, SavedSearchInput } from "@/db/schema/SavedSearch";
+import { InternalError } from "@/errors";
+import { toInternalError } from "@/repos/errors";
 import { SavedSearchRepository } from "@/repos/saved-search.repo";
-import { InternalError } from "@/services/user.service";
 import { kindLabels, regionLabels } from "@/frontend/listing-labels";
 import { formatDate, formatPriceMinor } from "@/utils";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The saved-search service. It owns the one rule that needs more than a row: a
@@ -124,17 +124,6 @@ export interface SavedSearchService {
 
 export const SavedSearchService = Context.Service<SavedSearchService>("SavedSearchService");
 
-// Services collapse driver failures into `InternalError` and log the real cause.
-const fromSql = <A>(effect: Effect.Effect<A, SqlError>): Effect.Effect<A, InternalError> =>
-  effect.pipe(
-    Effect.catchTags({
-      SqlError: (error) =>
-        Effect.logError("Saved search operation failed", { error }).pipe(
-          Effect.andThen(Effect.fail(new InternalError())),
-        ),
-    }),
-  );
-
 export const SavedSearchServiceLive = Layer.effect(
   SavedSearchService,
   Effect.gen(function* () {
@@ -145,12 +134,12 @@ export const SavedSearchServiceLive = Layer.effect(
         Effect.gen(function* () {
           const { name, ...criteria } = input;
           const values = { ...criteria, name: name ?? summarizeSavedSearch(criteria) };
-          return yield* fromSql(repo.create(ownerId, values));
+          return yield* toInternalError(repo.create(ownerId, values));
         }),
-      list: (ownerId) => fromSql(repo.listByUser(ownerId)),
-      findOwned: (ownerId, id) => fromSql(repo.findByIdForUser(ownerId, id)),
+      list: (ownerId) => toInternalError(repo.listByUser(ownerId)),
+      findOwned: (ownerId, id) => toInternalError(repo.findByIdForUser(ownerId, id)),
       delete: (ownerId, id) =>
-        fromSql(repo.deleteForUser(ownerId, id)).pipe(
+        toInternalError(repo.deleteForUser(ownerId, id)).pipe(
           Effect.flatMap(
             Option.match({
               onNone: () => Effect.fail(new SavedSearchNotFoundError({ id })),

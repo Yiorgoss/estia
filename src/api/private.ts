@@ -30,9 +30,9 @@ import {
   ChatSelfNotAllowedError,
   ChatValidationError,
 } from "@/services/chat.service";
+import { InternalError } from "@/errors";
 import {
   AdminRoleSwitchError,
-  InternalError,
   ProfileUnavailableError,
   ProfileValidationError,
   UnassignedRoleSwitchError,

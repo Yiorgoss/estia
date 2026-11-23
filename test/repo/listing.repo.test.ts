@@ -437,4 +437,20 @@ layer(TestLive, { concurrent: false })("ListingRepository", (it) => {
       assert.strictEqual((rejected as { readonly _tag?: string })._tag, "SqlError");
     }),
   );
+
+  it.effect("create fails with SqlQueryError when a database constraint rejects the row", () =>
+    Effect.gen(function* () {
+      const repo = yield* ListingRepository;
+      const error = yield* Effect.flip(
+        repo.create(ownerId("u-missing-owner"), {
+          kind: "room",
+          title: "Orphan listing",
+          priceMinor: 40_000,
+          regionCode: "attica",
+        }),
+      );
+      assert.strictEqual(error._tag, "SqlQueryError");
+      assert.strictEqual(error.operation, "ListingRepository.create");
+    }),
+  );
 });

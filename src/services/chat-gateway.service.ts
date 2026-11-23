@@ -2,7 +2,7 @@ import { ChatId, UserId } from "@/db/schema/brands";
 import { ChatMessageSchema, type ChatMessage } from "@/db/schema/Chat";
 import { ChatConflictError, ChatRateLimitError, ChatValidationError } from "@/services/chat-errors";
 import { CHAT_TICKET_HEADER, signShortChatTicket } from "@/services/chat-ticket";
-import { InternalError } from "@/services/user.service";
+import { InternalError } from "@/errors";
 import { Config, Context, Effect, Layer, Schema } from "effect";
 
 /*

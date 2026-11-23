@@ -32,7 +32,7 @@ class PhotoThumbnailError extends Schema.TaggedError<PhotoThumbnailError>()("Pho
 
 const makeCard = async (images: ImagesBinding, bytes: Uint8Array): Promise<Uint8Array> => {
   const output = await images
-    .input(new Blob([bytes]).stream())
+    .input(new Blob([bytes.slice()]).stream())
     .transform({
       width: LISTING_PHOTO_THUMBNAIL_LONG_EDGE,
       height: LISTING_PHOTO_THUMBNAIL_LONG_EDGE,
