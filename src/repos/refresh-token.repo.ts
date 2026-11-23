@@ -1,6 +1,6 @@
 import { RefreshTokenHash, UserId } from "@/db/schema/brands";
 import { NewRefreshToken, RefreshToken, RefreshTokenSchema } from "@/db/schema/RefreshToken";
-import { decodeSingle, query, type RepositoryError } from "@/repos/errors";
+import { decodeRow, decodeSingle, query, type RepositoryError } from "@/repos/errors";
 import { Clock, Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
 
@@ -40,7 +40,7 @@ export const RefreshTokenRepositoryLive = Layer.effect(
           const now = yield* Clock.currentTimeMillis;
           return yield* query(
             "RefreshTokenRepository.revoke",
-            sql<RefreshToken>`
+            sql<Record<string, unknown>>`
               UPDATE refresh_tokens
                  SET revoked_at = ${now}
                WHERE token_hash = ${hash}
@@ -48,8 +48,13 @@ export const RefreshTokenRepositoryLive = Layer.effect(
                  AND expires_at >= ${now}
            RETURNING *;`,
           ).pipe(
-            Effect.map((rows) => rows[0]),
-            Effect.map(Option.fromNullishOr),
+            Effect.flatMap((rows) =>
+              rows[0] === undefined
+                ? Effect.succeedNone
+                : decodeRow("RefreshTokenRepository.revoke", RefreshTokenSchema, rows[0]).pipe(
+                    Effect.map(Option.some),
+                  ),
+            ),
           );
         }),
       revokeAllForUser: (id) =>
@@ -72,7 +77,7 @@ export const RefreshTokenRepositoryLive = Layer.effect(
           const now = yield* Clock.currentTimeMillis;
           return yield* query(
             "RefreshTokenRepository.findValidByHash",
-            sql<RefreshToken>`
+            sql<Record<string, unknown>>`
             SELECT *
               FROM refresh_tokens
              WHERE token_hash=${hash}
@@ -80,8 +85,15 @@ export const RefreshTokenRepositoryLive = Layer.effect(
                AND expires_at >= ${now}
                ;`,
           ).pipe(
-            Effect.map((rows) => rows[0]),
-            Effect.map(Option.fromNullishOr),
+            Effect.flatMap((rows) =>
+              rows[0] === undefined
+                ? Effect.succeedNone
+                : decodeRow(
+                    "RefreshTokenRepository.findValidByHash",
+                    RefreshTokenSchema,
+                    rows[0],
+                  ).pipe(Effect.map(Option.some)),
+            ),
           );
         }),
       findValidByUserID: (id) =>
@@ -90,7 +102,7 @@ export const RefreshTokenRepositoryLive = Layer.effect(
           // const inOneHour = now + 60 * 60 * 1000
           return yield* query(
             "RefreshTokenRepository.findValidByUserID",
-            sql<RefreshToken>`
+            sql<Record<string, unknown>>`
             SELECT *
               FROM refresh_tokens
              WHERE user_id=${id}
@@ -98,8 +110,15 @@ export const RefreshTokenRepositoryLive = Layer.effect(
                AND expires_at >= ${now}
                ;`,
           ).pipe(
-            Effect.map((rows) => rows[0]),
-            Effect.map(Option.fromNullishOr),
+            Effect.flatMap((rows) =>
+              rows[0] === undefined
+                ? Effect.succeedNone
+                : decodeRow(
+                    "RefreshTokenRepository.findValidByUserID",
+                    RefreshTokenSchema,
+                    rows[0],
+                  ).pipe(Effect.map(Option.some)),
+            ),
           );
         }),
       new: ({ userId, tokenHash, expiresAt, deviceInfo }) =>
