@@ -30,7 +30,7 @@ const imagesReturning = (output: () => Promise<Uint8Array>): FakeImages => {
     },
     draw: () => transformer,
     output: async () => {
-      const produced = await output();
+      const produced = (await output()).slice();
       return {
         response: () => new Response(produced),
         contentType: () => "image/webp",

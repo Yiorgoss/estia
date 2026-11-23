@@ -1,7 +1,7 @@
 import { UserId } from "@/db/schema/brands";
+import { toInternalError } from "@/repos/errors";
 import { UserRepository } from "@/repos/user.repo";
 import { UnauthorizedError } from "@/services/auth.service";
-import { InternalError } from "@/services/user.service";
 import { Context, Effect, Option } from "effect";
 
 /*
@@ -29,7 +29,7 @@ export const callerId = CurrentUserId;
 export const callerUser = Effect.gen(function* () {
   const id = yield* callerId;
   const userRepo = yield* UserRepository;
-  const user = yield* userRepo.findById(id).pipe(Effect.mapError(() => new InternalError()));
+  const user = yield* toInternalError(userRepo.findById(id));
   if (Option.isNone(user)) {
     return yield* Effect.fail(new UnauthorizedError());
   }

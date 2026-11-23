@@ -73,17 +73,19 @@ const fakeObject = (key: string, bytes: Uint8Array): R2Object =>
     range: undefined,
   }) as unknown as R2Object;
 
-const fakeBody = (key: string, bytes: Uint8Array): R2ObjectBody =>
-  ({
+const fakeBody = (key: string, bytes: Uint8Array): R2ObjectBody => {
+  const copy = bytes.slice();
+  return {
     ...fakeObject(key, bytes),
-    body: new Response(bytes).body ?? new ReadableStream(),
+    body: new Response(copy).body ?? new ReadableStream(),
     bodyUsed: false,
     arrayBuffer: async () => bytes.slice().buffer,
     text: async () => new TextDecoder().decode(bytes),
     json: async () => JSON.parse(new TextDecoder().decode(bytes)),
-    blob: async () => new Blob([bytes]),
+    blob: async () => new Blob([copy]),
     range: undefined,
-  }) as unknown as R2ObjectBody;
+  } as unknown as R2ObjectBody;
+};
 
 const StorageRepositoryStub = Layer.succeed(StorageRepository, {
   put: (key, value) =>
@@ -385,7 +387,11 @@ export interface UploadFile {
 export const multipart = (init: RequestInit, files: ReadonlyArray<UploadFile>): RequestInit => {
   const formData = new FormData();
   for (const file of files) {
-    formData.append("photos", new Blob([file.bytes], { type: file.contentType }), file.name);
+    formData.append(
+      "photos",
+      new Blob([file.bytes.slice()], { type: file.contentType }),
+      file.name,
+    );
   }
   return {
     ...init,

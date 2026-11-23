@@ -4,49 +4,41 @@ import {
   SavedSearchRowSchema,
   type SavedSearch,
 } from "@/db/schema/SavedSearch";
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import { decodeRow, decodeRows, decodeSingle, query, type RepositoryError } from "@/repos/errors";
+import { Clock, Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The saved-search repository. Every read and write is scoped by `user_id` in
  * the statement itself, so another account's row is never selected, updated, or
  * deleted - there is no path here that takes an id without its owner.
  *
- * Repositories fail only with `SqlError`; the service turns that into the
- * domain answer.
+ * Repositories fail only with `RepositoryError`; the service turns that into
+ * the domain answer.
  */
 export interface SavedSearchRepository {
   readonly create: (
     userId: typeof UserId.Type,
     values: NewSavedSearch,
-  ) => Effect.Effect<SavedSearch, SqlError>;
+  ) => Effect.Effect<SavedSearch, RepositoryError>;
 
   readonly listByUser: (
     userId: typeof UserId.Type,
-  ) => Effect.Effect<ReadonlyArray<SavedSearch>, SqlError>;
+  ) => Effect.Effect<ReadonlyArray<SavedSearch>, RepositoryError>;
 
   readonly findByIdForUser: (
     userId: typeof UserId.Type,
     id: typeof SavedSearchId.Type,
-  ) => Effect.Effect<Option.Option<SavedSearch>, SqlError>;
+  ) => Effect.Effect<Option.Option<SavedSearch>, RepositoryError>;
 
   readonly deleteForUser: (
     userId: typeof UserId.Type,
     id: typeof SavedSearchId.Type,
-  ) => Effect.Effect<Option.Option<SavedSearch>, SqlError>;
+  ) => Effect.Effect<Option.Option<SavedSearch>, RepositoryError>;
 }
 
 export const SavedSearchRepository =
   Context.Service<SavedSearchRepository>("SavedSearchRepository");
-
-const decodeSavedSearch = (row: Record<string, unknown>): SavedSearch =>
-  Schema.decodeUnknownSync(SavedSearchRowSchema)(row);
-
-// An `INSERT`/`DELETE ... RETURNING` statement that matched yields exactly one
-// row; an empty result is a driver defect, so it dies and surfaces as a 500.
-const decodeSingle = (rows: ReadonlyArray<Record<string, unknown>>): SavedSearch =>
-  decodeSavedSearch(Option.getOrThrow(Option.fromNullishOr(rows[0])));
 
 // SQLite/D1 cannot bind a `Date`, so store the epoch milliseconds the
 // `DateFromMillis` schema encodes to.
@@ -66,7 +58,9 @@ export const SavedSearchRepositoryLive = Layer.effect(
       create: (userId, values) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          const rows = yield* sql<Record<string, unknown>>`
+          const rows = yield* query(
+            "SavedSearchRepository.create",
+            sql<Record<string, unknown>>`
               INSERT INTO saved_searches (
                        user_id, name, kind, region_code, min_price_minor, max_price_minor,
                 min_size_sqm, max_size_sqm, furnished, ensuite, smoking, pets, available_from,
@@ -77,41 +71,63 @@ export const SavedSearchRepositoryLive = Layer.effect(
                 ${values.minSizeSqm ?? null}, ${values.maxSizeSqm ?? null}, ${toBit(values.furnished)}, ${toBit(values.ensuite)}, ${toBit(values.smoking)}, ${toBit(values.pets)}, ${toEpochMillis(values.availableFrom)},
                     ${now}
               )
-              RETURNING *;`;
-          return decodeSingle(rows);
+              RETURNING *;`,
+          );
+          return yield* decodeSingle("SavedSearchRepository.create", SavedSearchRowSchema, rows);
         }),
       listByUser: (userId) =>
-        sql<Record<string, unknown>>`
+        query(
+          "SavedSearchRepository.listByUser",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM saved_searches
              WHERE user_id = ${userId}
           ORDER BY created_at DESC, id DESC
-            `.pipe(Effect.map((rows) => rows.map(decodeSavedSearch))),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            decodeRows("SavedSearchRepository.listByUser", SavedSearchRowSchema, rows),
+          ),
+        ),
       findByIdForUser: (userId, id) =>
-        sql<Record<string, unknown>>`
+        query(
+          "SavedSearchRepository.findByIdForUser",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM saved_searches
              WHERE id = ${id}
                AND user_id = ${userId}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeSavedSearch)),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow(
+                  "SavedSearchRepository.findByIdForUser",
+                  SavedSearchRowSchema,
+                  rows[0],
+                ).pipe(Effect.map(Option.some)),
+          ),
         ),
       deleteForUser: (userId, id) =>
-        sql<Record<string, unknown>>`
+        query(
+          "SavedSearchRepository.deleteForUser",
+          sql<Record<string, unknown>>`
             DELETE FROM saved_searches
              WHERE id = ${id}
                AND user_id = ${userId}
-          RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeSavedSearch)),
+          RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow(
+                  "SavedSearchRepository.deleteForUser",
+                  SavedSearchRowSchema,
+                  rows[0],
+                ).pipe(Effect.map(Option.some)),
+          ),
         ),
     } satisfies SavedSearchRepository;
-  }).pipe(
-    Effect.tapError((error) =>
-      Effect.sync(() => Effect.logError("Saved search repository failed", { error })),
-    ),
-  ),
+  }),
 );

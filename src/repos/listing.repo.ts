@@ -9,65 +9,65 @@ import {
   UpdateListingInput,
 } from "@/db/schema/Listing";
 import { ListingPinRows } from "@/db/schema/ListingPin";
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import {
+  decodeRow,
+  decodeRows,
+  decodeSingle,
+  query,
+  type RepositoryError,
+  type RowDecodeError,
+} from "@/repos/errors";
+import { Clock, Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The listings repository. Every method is a single statement because D1 has no
  * interactive transactions through this driver (`SqlClient.withTransaction`
  * dies at runtime), so there is nothing to wrap and no partial-write window.
  *
- * Repositories fail only with `SqlError`; domain errors belong to the service.
+ * Repositories fail only with `RepositoryError`; domain errors belong to the
+ * service.
  */
 export interface ListingRepository {
   readonly create: (
     ownerId: typeof UserId.Type,
     values: typeof CreateListingInput.Type,
-  ) => Effect.Effect<typeof ListingSchema.Type, SqlError>;
+  ) => Effect.Effect<typeof ListingSchema.Type, RepositoryError>;
 
   readonly findById: (
     id: typeof ListingId.Type,
-  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, SqlError>;
+  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, RepositoryError>;
 
   readonly listByOwner: (
     ownerId: typeof UserId.Type,
     page: typeof ListingPageRequest.Type,
-  ) => Effect.Effect<typeof ListingPage.Type, SqlError>;
+  ) => Effect.Effect<typeof ListingPage.Type, RepositoryError>;
 
   readonly search: (
     filters: typeof ListingSearchFilters.Type,
     page: typeof ListingPageRequest.Type,
-  ) => Effect.Effect<typeof ListingPage.Type, SqlError>;
+  ) => Effect.Effect<typeof ListingPage.Type, RepositoryError>;
 
   readonly listPinned: (
     filters: typeof ListingSearchFilters.Type,
     limit: number,
-  ) => Effect.Effect<typeof ListingPinRows.Type, SqlError>;
+  ) => Effect.Effect<typeof ListingPinRows.Type, RepositoryError>;
 
   readonly update: (
     id: typeof ListingId.Type,
     ownerId: typeof UserId.Type,
     values: typeof UpdateListingInput.Type,
-  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, SqlError>;
+  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, RepositoryError>;
 
   readonly setStatus: (
     id: typeof ListingId.Type,
     ownerId: typeof UserId.Type,
     from: ReadonlyArray<typeof ListingStatus.Type>,
     to: typeof ListingStatus.Type,
-  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, SqlError>;
+  ) => Effect.Effect<Option.Option<typeof ListingSchema.Type>, RepositoryError>;
 }
 
 export const ListingRepository = Context.Service<ListingRepository>("ListingRepository");
-
-const decodeListing = (row: Record<string, unknown>): typeof ListingSchema.Type =>
-  Schema.decodeUnknownSync(ListingSchema)(row);
-
-// An `INSERT`/`UPDATE ... RETURNING` statement that matched yields exactly one
-// row; an empty result is a driver defect, so it dies and surfaces as a 500.
-const decodeSingle = (rows: ReadonlyArray<Record<string, unknown>>): typeof ListingSchema.Type =>
-  decodeListing(Option.getOrThrow(Option.fromNullishOr(rows[0])));
 
 // SQLite/D1 cannot bind a `Date`, so store the epoch milliseconds the
 // `DateFromMillis` schema encodes to.
@@ -88,30 +88,36 @@ const provided = (value: unknown): number => (value === undefined ? 0 : 1);
 
 // Fetch one extra row to learn whether another page exists without a `COUNT`.
 const toPage = (
+  operation: string,
   rows: ReadonlyArray<Record<string, unknown>>,
   limit: number,
-): typeof ListingPage.Type => {
+): Effect.Effect<typeof ListingPage.Type, RowDecodeError> => {
   const hasMore = rows.length > limit;
-  const items = (hasMore ? rows.slice(0, limit) : rows).map(decodeListing);
-  const last = items[items.length - 1];
-  return {
-    items,
-    nextCursor:
-      hasMore && last !== undefined ? { createdAt: last.createdAt.getTime(), id: last.id } : null,
-  };
+  return decodeRows(operation, ListingSchema, hasMore ? rows.slice(0, limit) : rows).pipe(
+    Effect.map((items) => {
+      const last = items[items.length - 1];
+      return {
+        items,
+        nextCursor:
+          hasMore && last !== undefined
+            ? { createdAt: last.createdAt.getTime(), id: last.id }
+            : null,
+      };
+    }),
+  );
 };
 
 // The map is bounded, not paged: the extra row proves there is one older pin
 // that did not fit, and the caller reports that as `truncated`.
 const toPinRows = (
+  operation: string,
   rows: ReadonlyArray<Record<string, unknown>>,
   limit: number,
-): typeof ListingPinRows.Type => {
+): Effect.Effect<typeof ListingPinRows.Type, RowDecodeError> => {
   const truncated = rows.length > limit;
-  return {
-    items: (truncated ? rows.slice(0, limit) : rows).map(decodeListing),
-    truncated,
-  };
+  return decodeRows(operation, ListingSchema, truncated ? rows.slice(0, limit) : rows).pipe(
+    Effect.map((items) => ({ items, truncated })),
+  );
 };
 
 export const ListingRepositoryLive = Layer.effect(
@@ -152,7 +158,9 @@ export const ListingRepositoryLive = Layer.effect(
       create: (ownerId, values) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          const rows = yield* sql<Record<string, unknown>>`
+          const rows = yield* query(
+            "ListingRepository.create",
+            sql<Record<string, unknown>>`
               INSERT INTO listings (
                        kind, owner_id, status, title, description, price_minor, currency,
                 region_code, lat, lng, size_sqm, available_from, furnished, ensuite,
@@ -163,30 +171,43 @@ export const ListingRepositoryLive = Layer.effect(
                 ${values.regionCode}, ${values.lat ?? null}, ${values.lng ?? null}, ${values.sizeSqm ?? null}, ${toEpochMillis(values.availableFrom)}, ${toInsertBit(values.furnished)}, ${toInsertBit(values.ensuite)},
                     ${toInsertBit(values.smoking)}, ${toInsertBit(values.pets)}, ${now}, ${now}
               )
-              RETURNING *;`;
-          return decodeSingle(rows);
+              RETURNING *;`,
+          );
+          return yield* decodeSingle("ListingRepository.create", ListingSchema, rows);
         }),
       findById: (id) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListingRepository.findById",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM listings
              WHERE id = ${id}
-            `.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map(Option.fromNullishOr),
-          Effect.map(Option.map(decodeListing)),
+            `,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows[0] === undefined
+              ? Effect.succeedNone
+              : decodeRow("ListingRepository.findById", ListingSchema, rows[0]).pipe(
+                  Effect.map(Option.some),
+                ),
+          ),
         ),
       listByOwner: (ownerId, page) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListingRepository.listByOwner",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM listings
              WHERE owner_id = ${ownerId}
                  ${cursorClause(page.cursor)}
           ORDER BY created_at DESC, id DESC
              LIMIT ${page.limit + 1}
-            `.pipe(Effect.map((rows) => toPage(rows, page.limit))),
+            `,
+        ).pipe(Effect.flatMap((rows) => toPage("ListingRepository.listByOwner", rows, page.limit))),
       search: (filters, page) =>
-        sql<Record<string, unknown>>`
+        query(
+          "ListingRepository.search",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM listings
              WHERE status = 'published'
@@ -194,14 +215,17 @@ export const ListingRepositoryLive = Layer.effect(
                  ${cursorClause(page.cursor)}
           ORDER BY created_at DESC, id DESC
              LIMIT ${page.limit + 1}
-            `.pipe(Effect.map((rows) => toPage(rows, page.limit))),
+            `,
+        ).pipe(Effect.flatMap((rows) => toPage("ListingRepository.search", rows, page.limit))),
       listPinned: (filters, limit) =>
         // Published with a coordinate, newest first. Drafts, unlisted rows,
         // half-populated coordinate pairs, and room-wanted ads never reach the
         // map at all - they are excluded in SQL, not filtered in JS. A
         // room-wanted ad's coordinate is where a person wants to live, not
         // where a property is, so it is not a pin.
-        sql<Record<string, unknown>>`
+        query(
+          "ListingRepository.listPinned",
+          sql<Record<string, unknown>>`
             SELECT *
               FROM listings
              WHERE status = 'published'
@@ -211,11 +235,14 @@ export const ListingRepositoryLive = Layer.effect(
                  ${filterClause(filters)}
           ORDER BY created_at DESC, id DESC
              LIMIT ${limit + 1}
-            `.pipe(Effect.map((rows) => toPinRows(rows, limit))),
+            `,
+        ).pipe(Effect.flatMap((rows) => toPinRows("ListingRepository.listPinned", rows, limit))),
       update: (id, ownerId, values) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          const rows = yield* sql<Record<string, unknown>>`
+          const rows = yield* query(
+            "ListingRepository.update",
+            sql<Record<string, unknown>>`
                 UPDATE listings
                    SET title = COALESCE(${values.title ?? null}, title),
                        description = CASE WHEN ${provided(values.description)} = 1 THEN ${values.description ?? null} ELSE description END,
@@ -232,17 +259,21 @@ export const ListingRepositoryLive = Layer.effect(
                        updated_at = ${now}
                  WHERE id = ${id}
                    AND owner_id = ${ownerId}
-              RETURNING *;`;
-          return Option.map(Option.fromNullishOr(rows[0]), decodeListing);
+              RETURNING *;`,
+          );
+          if (rows[0] === undefined) return Option.none();
+          return Option.some(yield* decodeRow("ListingRepository.update", ListingSchema, rows[0]));
         }),
       setStatus: (id, ownerId, from, to) =>
         // An empty source set can never match, and `sql.in` on an empty list
         // produces an invalid predicate, so no statement is sent.
         from.length === 0
-          ? Effect.succeed(Option.none())
+          ? Effect.succeedNone
           : Effect.gen(function* () {
               const now = yield* Clock.currentTimeMillis;
-              const rows = yield* sql<Record<string, unknown>>`
+              const rows = yield* query(
+                "ListingRepository.setStatus",
+                sql<Record<string, unknown>>`
                     UPDATE listings
                        SET status = ${to},
                            published_at = CASE WHEN ${to} = 'published' THEN ${now} ELSE published_at END,
@@ -250,9 +281,13 @@ export const ListingRepositoryLive = Layer.effect(
                      WHERE id = ${id}
                        AND owner_id = ${ownerId}
                        AND ${sql.in("status", from)}
-                  RETURNING *;`;
-              return Option.map(Option.fromNullishOr(rows[0]), decodeListing);
+                  RETURNING *;`,
+              );
+              if (rows[0] === undefined) return Option.none();
+              return Option.some(
+                yield* decodeRow("ListingRepository.setStatus", ListingSchema, rows[0]),
+              );
             }),
     } satisfies ListingRepository;
-  }).pipe(Effect.tapError((error) => Effect.logError("Listing repository failed", { error }))),
+  }),
 );

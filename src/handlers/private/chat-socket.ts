@@ -1,6 +1,7 @@
 import { JWTSchema, RefreshTokenValue } from "@/db/schema/brands";
 import { decodeChatId } from "@/db/schema/Chat";
 import { ChatRepository } from "@/repos/chat.repo";
+import { toInternalError } from "@/repos/errors";
 import { UserRepository } from "@/repos/user.repo";
 import { AuthService } from "@/services/auth.service";
 import { CHAT_TICKET_HEADER, signShortChatTicket } from "@/services/chat-ticket";
@@ -169,10 +170,13 @@ export const handleChatSocketUpgrade = (
           UnauthorizedError: () => Effect.succeed({ _tag: "unauthorized" as const }),
           UserNotFoundError: () => Effect.succeed({ _tag: "unauthorized" as const }),
           RefreshTokenNotFoundError: () => Effect.succeed({ _tag: "unauthorized" as const }),
-          InternalError: () => Effect.succeed({ _tag: "unauthorized" as const }),
+          InternalError: () => Effect.succeed({ _tag: "internal" as const }),
         }),
       );
 
+    if (authResult._tag === "internal") {
+      return new Response("Internal Server Error", { status: 500 });
+    }
     if (authResult._tag !== "ok") {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -212,12 +216,32 @@ export const handleChatSocketUpgrade = (
       });
     };
 
-    // Verify the account still exists in D1 rather than trusting only the token.
-    const storedUser = yield* userRepo
-      .findById(user.id)
-      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }));
-    if (Option.isNone(storedUser)) {
-      return withRotatedCookies(new Response("Unauthorized", { status: 401 }));
+    const accessCheck = yield* Effect.gen(function* () {
+      // Verify the account still exists in D1 rather than trusting only the token.
+      const storedUser = yield* userRepo.findById(user.id);
+      if (Option.isNone(storedUser)) {
+        return withRotatedCookies(new Response("Unauthorized", { status: 401 }));
+      }
+
+      const chatExists = yield* chatRepo.findById(chatId);
+      if (Option.isNone(chatExists)) {
+        return withRotatedCookies(new Response("Not Found", { status: 404 }));
+      }
+
+      const isMember = yield* chatRepo.isParticipant(chatId, user.id);
+      if (!isMember) {
+        return withRotatedCookies(new Response("Forbidden", { status: 403 }));
+      }
+
+      return null;
+    }).pipe(
+      toInternalError,
+      Effect.catchTag("InternalError", () =>
+        Effect.succeed(withRotatedCookies(new Response("Internal Server Error", { status: 500 }))),
+      ),
+    );
+    if (accessCheck !== null) {
+      return accessCheck;
     }
 
     // Read the access token's expiry so the DO alarm closes the socket when the
@@ -228,20 +252,6 @@ export const handleChatSocketUpgrade = (
         Effect.map((obj) => obj.payload.exp as number | undefined),
         Effect.catch(() => Effect.succeed(undefined)),
       );
-    }
-
-    const chatExists = yield* chatRepo
-      .findById(chatId)
-      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(Option.none()) }));
-    if (Option.isNone(chatExists)) {
-      return withRotatedCookies(new Response("Not Found", { status: 404 }));
-    }
-
-    const isMember = yield* chatRepo
-      .isParticipant(chatId, user.id)
-      .pipe(Effect.catchTags({ SqlError: () => Effect.succeed(false) }));
-    if (!isMember) {
-      return withRotatedCookies(new Response("Forbidden", { status: 403 }));
     }
 
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {

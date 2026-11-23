@@ -27,7 +27,7 @@ import {
   ListingService,
   ListingValidationError,
 } from "@/services/listing.service";
-import type { InternalError } from "@/services/user.service";
+import type { InternalError } from "@/errors";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
 import { Effect, Option, Schema } from "effect";
 

@@ -17,7 +17,7 @@ import {
   ListingNotOwnedError,
   ListingService,
 } from "@/services/listing.service";
-import type { InternalError } from "@/services/user.service";
+import type { InternalError } from "@/errors";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, UrlParams } from "effect/http";
 import type { Multipart } from "effect/http";
 import type { MultipartError } from "effect/http/Multipart";

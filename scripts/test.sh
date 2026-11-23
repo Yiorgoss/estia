@@ -38,6 +38,9 @@ pnpm exec wrangler d1 migrations apply DB --local >/dev/null
 echo "==> listings repository integration test"
 node scripts/listing-repo-integration.mjs
 
+echo "==> user repository integration test"
+node scripts/user-repo-integration.mjs
+
 echo "==> starting dev server on port ${PORT}"
 set -m
 pnpm exec vite dev --host --port "$PORT" >"$LOG" 2>&1 &

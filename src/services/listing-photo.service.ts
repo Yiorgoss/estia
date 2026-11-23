@@ -7,15 +7,15 @@ import {
   PhotoContentType,
   photoExtension,
 } from "@/db/schema/ListingPhoto";
+import { InternalError } from "@/errors";
+import { toInternalError } from "@/repos/errors";
 import { ListingPhotoRepository } from "@/repos/listing-photo.repo";
 import { ListingRepository } from "@/repos/listing.repo";
-import { R2DeleteError, R2UploadError, StorageRepository } from "@/repos/storage.repo";
+import { StorageRepository } from "@/repos/storage.repo";
 import { ListingService } from "@/services/listing.service";
 import type { ListingNotFoundError, ListingNotOwnedError } from "@/services/listing.service";
 import { PhotoThumbnailer } from "@/services/photo-thumbnail.service";
-import { InternalError } from "@/services/user.service";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import type { SqlError } from "effect/sql/SqlError";
 
 /*
  * The gallery service owns every photo rule: who may write to a gallery, what
@@ -169,32 +169,6 @@ const sniffContentType = (bytes: Uint8Array): PhotoContentType | undefined => {
   return undefined;
 };
 
-// Services collapse driver failures into `InternalError` and log the real cause.
-const fromSql = <A>(effect: Effect.Effect<A, SqlError>): Effect.Effect<A, InternalError> =>
-  effect.pipe(
-    Effect.catchTag("SqlError", (error) =>
-      Effect.logError("Listing photo operation failed", { error }).pipe(
-        Effect.andThen(Effect.fail(new InternalError())),
-      ),
-    ),
-  );
-
-const fromStorage = <A>(
-  effect: Effect.Effect<A, R2UploadError | R2DeleteError>,
-): Effect.Effect<A, InternalError> =>
-  effect.pipe(
-    Effect.catchTags({
-      R2UploadError: (error) =>
-        Effect.logError("Photo upload failed", { error }).pipe(
-          Effect.andThen(Effect.fail(new InternalError())),
-        ),
-      R2DeleteError: (error) =>
-        Effect.logError("Photo delete failed", { error }).pipe(
-          Effect.andThen(Effect.fail(new InternalError())),
-        ),
-    }),
-  );
-
 export const ListingPhotoServiceLive = Layer.effect(
   ListingPhotoService,
   Effect.gen(function* () {
@@ -208,7 +182,7 @@ export const ListingPhotoServiceLive = Layer.effect(
       listingService.getOwn(ownerId, listingId);
 
     const ordered = (listingId: typeof ListingId.Type) =>
-      fromSql(photoRepo.listByListing(listingId));
+      toInternalError(photoRepo.listByListing(listingId));
 
     // Best-effort removal of objects an upload wrote but a row never named.
     const discardObjects = (keys: ReadonlyArray<string | null>) =>
@@ -218,7 +192,7 @@ export const ListingPhotoServiceLive = Layer.effect(
 
     const requirePhoto = (listingId: typeof ListingId.Type, photoId: typeof ListingPhotoId.Type) =>
       Effect.gen(function* () {
-        const found = yield* fromSql(photoRepo.findById(listingId, photoId));
+        const found = yield* toInternalError(photoRepo.findById(listingId, photoId));
         return yield* Option.match(found, {
           onNone: () => Effect.fail(new ListingPhotoNotFoundError({ listingId, photoId })),
           onSome: Effect.succeed,
@@ -229,7 +203,7 @@ export const ListingPhotoServiceLive = Layer.effect(
       listingId: typeof ListingId.Type,
       photos: ReadonlyArray<typeof ListingPhotoSchema.Type>,
     ) =>
-      fromSql(
+      toInternalError(
         photoRepo.reorder(
           listingId,
           photos.map((photo) => photo.id),
@@ -248,7 +222,7 @@ export const ListingPhotoServiceLive = Layer.effect(
           return yield* ordered(listingId);
         }),
       firstPhotos: (listingIds) =>
-        fromSql(photoRepo.firstForListings(listingIds)).pipe(
+        toInternalError(photoRepo.firstForListings(listingIds)).pipe(
           Effect.map(
             (photos) => new Map(photos.map((photo) => [Number(photo.listingId), photo] as const)),
           ),
@@ -287,7 +261,7 @@ export const ListingPhotoServiceLive = Layer.effect(
           }
 
           const key = `listings/${listingId}/photos/${crypto.randomUUID()}.${photoExtension(sniffed)}`;
-          yield* fromStorage(storage.put(key, upload.bytes));
+          yield* toInternalError(storage.put(key, upload.bytes));
 
           // The card image is best-effort: a codec or storage failure keeps the
           // original and records a null thumbnail key, which the card read
@@ -308,7 +282,7 @@ export const ListingPhotoServiceLive = Layer.effect(
           // The cap and the new position are decided by the insert itself, so
           // two uploads racing cannot both pass a count check and claim the
           // same position.
-          const inserted = yield* fromSql(
+          const inserted = yield* toInternalError(
             photoRepo.append(
               listingId,
               {
@@ -361,14 +335,14 @@ export const ListingPhotoServiceLive = Layer.effect(
       remove: (ownerId, listingId, photoId) =>
         Effect.gen(function* () {
           yield* loadOwned(ownerId, listingId);
-          const deleted = yield* fromSql(photoRepo.deleteById(listingId, photoId));
+          const deleted = yield* toInternalError(photoRepo.deleteById(listingId, photoId));
           if (Option.isNone(deleted)) {
             return yield* Effect.fail(new ListingPhotoNotFoundError({ listingId, photoId }));
           }
           // Close the gap the deleted position left, so positions stay 0..n-1.
           // The database renumbers from the order it actually holds, so the
           // result does not depend on a read the service did earlier.
-          yield* fromSql(photoRepo.compactPositions(listingId));
+          yield* toInternalError(photoRepo.compactPositions(listingId));
           // The row is gone, so no route can name these bytes any more. A
           // failed delete leaves an unreachable orphan, which is logged rather
           // than turned into a failed request the owner cannot act on.
@@ -388,14 +362,14 @@ export const ListingPhotoServiceLive = Layer.effect(
         }),
       read: (listingId, photoId, viewerId, variant) =>
         Effect.gen(function* () {
-          const foundListing = yield* fromSql(listingRepo.findById(listingId));
+          const foundListing = yield* toInternalError(listingRepo.findById(listingId));
           if (Option.isNone(foundListing)) return Option.none();
           const listing = foundListing.value;
           if (listing.status !== "published" && listing.ownerId !== viewerId) {
             return Option.none();
           }
 
-          const foundPhoto = yield* fromSql(photoRepo.findById(listingId, photoId));
+          const foundPhoto = yield* toInternalError(photoRepo.findById(listingId, photoId));
           if (Option.isNone(foundPhoto)) return Option.none();
           const photo = foundPhoto.value;
 
@@ -406,15 +380,7 @@ export const ListingPhotoServiceLive = Layer.effect(
           const contentType =
             thumbnailKey === null ? photo.contentType : LISTING_PHOTO_THUMBNAIL_CONTENT_TYPE;
 
-          const object = yield* storage
-            .get(storedKey, undefined)
-            .pipe(
-              Effect.catchTag("R2ReadError", (error) =>
-                Effect.logError("Photo read failed", { error }).pipe(
-                  Effect.andThen(Effect.fail(new InternalError())),
-                ),
-              ),
-            );
+          const object = yield* toInternalError(storage.get(storedKey, undefined));
           return Option.map(object, (body) => ({
             object: body,
             contentType,

@@ -1,5 +1,6 @@
 import { MapTilesRoute } from "@/api/map-tiles";
-import { R2ReadError, StorageRepository } from "@/repos/storage.repo";
+import { R2ReadError } from "@/repos/errors";
+import { StorageRepository } from "@/repos/storage.repo";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";

@@ -201,4 +201,26 @@ layer(TestLive, { concurrent: false })("ListingPhotoRepository", (it) => {
       assert.strictEqual(tooBig._tag, "SqlError");
     }),
   );
+
+  it.effect("append fails with SqlQueryError when a database constraint rejects the row", () =>
+    Effect.gen(function* () {
+      yield* seedListing(711, "u-photo-repo-711");
+      const repo = yield* ListingPhotoRepository;
+
+      const error = yield* Effect.flip(
+        repo.append(
+          listingId(711),
+          {
+            storageKey: "listings/711/photos/oversized.jpg",
+            contentType: "image/jpeg",
+            byteSize: 5_242_881,
+            thumbnailKey: null,
+          },
+          10,
+        ),
+      );
+      assert.strictEqual(error._tag, "SqlQueryError");
+      assert.strictEqual(error.operation, "ListingPhotoRepository.append");
+    }),
+  );
 });

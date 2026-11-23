@@ -13,9 +13,9 @@ import {
 import { profileChoicePage, profilePage, profileUnavailablePage } from "@/frontend/pages/profile";
 import { UnauthorizedError } from "@/services/auth.service";
 import { SavedSearchService } from "@/services/saved-search.service";
+import type { InternalError } from "@/errors";
 import {
   AdminRoleSwitchError,
-  InternalError,
   ProfileUnavailableError,
   ProfileValidationError,
   UnassignedRoleSwitchError,

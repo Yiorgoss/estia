@@ -1,7 +1,7 @@
 import { JWTSchema, RefreshTokenValue, UserId } from "@/db/schema/brands";
 import { optionalCaller } from "@/handlers/optional-caller";
 import { AuthMiddleware } from "@/middleware/auth-mw";
-import { RefreshTokenNotFoundError } from "@/repos/refresh-token.repo";
+import { RefreshTokenNotFoundError } from "@/repos/errors";
 import { AuthService } from "@/services/auth.service";
 import { JWTService } from "@/services/jwt.service";
 import { RefreshTokenRotatedError, RefreshTokenService } from "@/services/refresh-token.service";

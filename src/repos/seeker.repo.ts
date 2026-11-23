@@ -1,14 +1,14 @@
-import { Option, Context, Effect, Layer, Schema } from "effect";
-import { SeekerSchema } from "@/db/schema/Seeker";
-import type { SeekerProfileInput } from "@/db/schema/Profile";
-import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
 import { UserId } from "@/db/schema/brands";
+import type { SeekerProfileInput } from "@/db/schema/Profile";
+import { SeekerSchema } from "@/db/schema/Seeker";
+import { decodeRow, decodeSingle, query, type RepositoryError } from "@/repos/errors";
+import { Context, Effect, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 
 export interface SeekerRepository {
   readonly findByUserId: (
     userId: typeof UserId.Type,
-  ) => Effect.Effect<Option.Option<typeof SeekerSchema.Type>, SqlError>;
+  ) => Effect.Effect<Option.Option<typeof SeekerSchema.Type>, RepositoryError>;
   /*
    * Ensure the user has a seeking profile and answer with it. Every seeking
    * field a person fills in themselves is nullish (see migration 0006), so a
@@ -19,7 +19,7 @@ export interface SeekerRepository {
    */
   readonly createForUser: (
     userId: typeof UserId.Type,
-  ) => Effect.Effect<typeof SeekerSchema.Type, SqlError>;
+  ) => Effect.Effect<typeof SeekerSchema.Type, RepositoryError>;
   /*
    * Write the details a person filled in, whether or not the row exists. A
    * registration-provisioned account updates its row; a legacy or partially
@@ -30,7 +30,7 @@ export interface SeekerRepository {
   readonly upsertForUser: (
     userId: typeof UserId.Type,
     input: typeof SeekerProfileInput.Type,
-  ) => Effect.Effect<typeof SeekerSchema.Type, SqlError>;
+  ) => Effect.Effect<typeof SeekerSchema.Type, RepositoryError>;
 }
 
 export const SeekerRepository = Context.Service<SeekerRepository>("SeekerRepository");
@@ -43,27 +43,40 @@ export const SeekerRepositoryLive = Layer.effect(
     return {
       findByUserId: (userId) =>
         Effect.gen(function* () {
-          return yield* sql<Record<string, unknown>>`
+          return yield* query(
+            "SeekerRepository.findByUserId",
+            sql<Record<string, unknown>>`
             SELECT *
               FROM seekers
              WHERE user_id=${userId}
-            `.pipe(
-            Effect.map((rows) => rows[0]),
-            Effect.map(Option.fromNullishOr),
-            Effect.map(Option.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row))),
+            `,
+          ).pipe(
+            Effect.flatMap((rows) =>
+              rows[0] === undefined
+                ? Effect.succeedNone
+                : decodeRow("SeekerRepository.findByUserId", SeekerSchema, rows[0]).pipe(
+                    Effect.map(Option.some),
+                  ),
+            ),
           );
         }),
       createForUser: (userId) =>
-        sql<Record<string, unknown>>`
+        query(
+          "SeekerRepository.createForUser",
+          sql<Record<string, unknown>>`
             INSERT INTO seekers (user_id)
                  VALUES (${userId})
             ON CONFLICT (user_id) DO UPDATE SET user_id = excluded.user_id
-             RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row)),
+             RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            decodeSingle("SeekerRepository.createForUser", SeekerSchema, rows),
+          ),
         ),
       upsertForUser: (userId, input) =>
-        sql<Record<string, unknown>>`
+        query(
+          "SeekerRepository.upsertForUser",
+          sql<Record<string, unknown>>`
             INSERT INTO seekers (user_id, name, bio, date_of_birth, gender, smoking, pets)
                  VALUES (${userId},
                          ${input.name},
@@ -79,14 +92,12 @@ export const SeekerRepositoryLive = Layer.effect(
                 gender = excluded.gender,
                smoking = excluded.smoking,
                   pets = excluded.pets
-             RETURNING *;`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.map((row) => Schema.decodeUnknownSync(SeekerSchema)(row)),
+             RETURNING *;`,
+        ).pipe(
+          Effect.flatMap((rows) =>
+            decodeSingle("SeekerRepository.upsertForUser", SeekerSchema, rows),
+          ),
         ),
-    } satisfies SeekerRepository; // needed otherwise email/password become untyped when using taperror
-  }).pipe(
-    Effect.tapError((error) =>
-      Effect.sync(() => Effect.logError("Seeker repository failed", { error })),
-    ),
-  ),
+    } satisfies SeekerRepository;
+  }),
 );
